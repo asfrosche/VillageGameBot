@@ -1,0 +1,333 @@
+{
+    "overseer_role_name": "Overseer",
+    "alive_role_name": "Alive",
+    "sponsor_role_name": "Sponsor",
+    "spectator_role_name": "Spectator",
+    "dead_role_name": "Dead",
+    "alt_role_name": "Alt",
+    "log_channel_name": "log-visits",
+    "actions_log_channel_name": "log-actions",
+    "edit_del_logs": "edit-and-del-logs",
+    "join_and_leave_logs": "join-leave-logs",
+    "announcements_channel_name": "\u2757\u2502announcements",
+    "map_channel_name": "\ud83d\uddfa\u2502map",
+    "daydiscussion_channel_name": "\ud83c\udf1e\u2502day-discussion",
+    "megaphone_channel_name": "\ud83d\udce2\u2502megaphone",
+    "lynch_channel_name1": "\ud83d\uddf3\u2502vote-session-1",
+    "lynch_channel_name2": "\ud83d\uddf3\u2502vote-session-2",
+    "leader_channel_name": "\ud83d\udc51\u2502leader-election",
+    "vote_count_name": "\ud83d\udcca\u2502vote-count",
+    "house_prefix": "\ud83c\udfe1\u2502house-",
+    "overseer_category_name": "OVERSEER",
+    "atg_category_name": "ABOUT THE GAME",
+    "chats_category_name": "CHATS",
+    "os_relations_category_name": "OVERSEER RELATIONS",
+    "daychat_category_name": "DAYCHAT",
+    "nominations_category_name": "NOMINATIONS",
+    "publc_category_name": "PUBLIC CHANNELS",
+    "privc_category_name": "PRIVATE CHANNELS",
+    "houses_category_name": "HOUSES",
+    "rc_category_name": "ROLES",
+    "alt_category_name": "ALTS",
+    "dead_rc_category_name": "DEAD RC",
+    "inaccessible_houses_category_name": "INACCESSIBLE HOUSES",
+    "old_pcs_category_name": "OLD PCS",
+    "whisper_logs_channel_name": "whisper-logs",
+    "whisper_response": "whisper",
+    "fireworks_response": "fireworks",
+    "move_in_response": "move in",
+    "timeout_duration": 21600,
+    "showwhispersender": false,
+    "autojoinifempty": true,
+    "autojoinknockexpired": true,
+    "maxmembersinhome": 50,
+    "refuseresponse": 1,
+    "voteinrc": false,
+    "dead_count": false,
+    "alt_count": false,
+    "show_dead_on_refuse": false,
+    "show_alt_on_refuse": false,
+    "can_dead_open": false,
+    "can_alt_open": false,
+    "member_homes": {
+        "748785451397152869": 1445997413637685401,
+        "881512946419769404": 1445997390158102628,
+        "459809697021689857": 1445997396835438593,
+        "816299318348087319": 1445997416120582208,
+        "527476877086949376": 1445997405156671548,
+        "502929753385336859": 1445997416120582208,
+        "534367107836805120": 1445997416120582208,
+        "991857806066065468": 1445997405156671548,
+        "703602578901958717": 1445997416120582208,
+        "1234829080898310197": 1445997416120582208,
+        "606394150295961610": 1445997423078932582,
+        "1082939271914201199": 1445997407610343516,
+        "1454832328533872650": 1445997421757730848,
+        "675440387594256384": 1445997421757730848,
+        "1350177610554019911": 1445997407018946642,
+        "321117543378976771": 1445997407018946642,
+        "1191590868893835275": 1445997404024209428,
+        "435089765923028992": 1445997392167047280,
+        "645395799626350596": 1445997407018946642,
+        "289028781497253888": 1445997399980900466,
+        "931899963410108478": 1445997399980900466,
+        "891919616757075998": 1445997405156671548,
+        "549642477464715285": 1445997413637685401
+    },
+    "infos": {
+        "1445997416120582208": [
+            "no knocks or visits without invite"
+        ],
+        "1445997447758348338": [
+            "N1 imp form",
+            "sacrificed Telekinesis D1 and now in True Form"
+        ],
+        "1445997434521255936": [
+            "visit with jesper",
+            "prot by Jesper N2 (crown)",
+            "shared shield with Rebel from Freed (lasts until used)",
+            "bound to Rebel and Umit for D2",
+            "bound for Rebel and Umit for D2"
+        ],
+        "1445997454896926902": [
+            "visit with muge",
+            "gets gearz actions when asks on N2"
+        ],
+        "1445997437234839633": [
+            "protected",
+            "Kyle is unknown",
+            "Vacs is good",
+            "protected by Jasse on N4"
+        ],
+        "1445997461838499991": [
+            "Blue Yoshi. Has one whisper per phase",
+            "follows Rebel N1/D1"
+        ],
+        "1445997425537060985": [
+            "tracking Fan and Falcon N1",
+            "protected N2 by Silly blue",
+            "perma prot by photo",
+            "H38 is lava house. Attacks on him turn to bleed here",
+            "next ability used on him N4 will fail",
+            "jasse failed to kick him from island"
+        ],
+        "1445997441513164901": [
+            "protected till end of d1",
+            "prot by Emir N2",
+            "used sturdy on Richard N2"
+        ],
+        "1445997458554617926": [
+            "all actions and visits tracked in <#1445997372621590650> by Speak D1",
+            "Doesnt count, dies when nicoel dies, can only use 1 nonlethal per cycle, lb"
+        ],
+        "1445997435242414100": [
+            "gave child's  heart to Hector N1",
+            "prot by Lolo N2",
+            "protected by Hector N2",
+            "perma prot by photo",
+            "perma prot by photo",
+            "gerand will disarm and rb if they meet and Fan has lethal",
+            "Silly has charm on him. Rc cant be revealed and he stays in chat <#1454998579616813229>"
+        ],
+        "1456148672550146179": [
+            "untargetable"
+        ],
+        "1445997419790860420": [
+            "foul play box here, real, opened by Emir"
+        ],
+        "1445997457715630204": [
+            "shield from Vacs on N1",
+            "protected till end of d1",
+            "protected N2 by Silly blue",
+            "prot kochi N2"
+        ],
+        "1445997448538357872": [
+            "narrate attacks on her in <#1456343634709319887>",
+            "protected by kochi for N1"
+        ],
+        "1445997432256336003": [
+            "received Childs Heart from Fan N1",
+            "protected Fan N1",
+            "protected Fan N2",
+            "yellow yoshi",
+            "permanent immune to manip + unprotected",
+            "if attacked close pc between hector and des instead and make him survive"
+        ],
+        "1445997447028412476": [
+            "picked up female dodora egg N1"
+        ],
+        "1454994956597985443": [
+            "unbreachable"
+        ],
+        "1445997431518134364": [
+            "protected by Flamingo N2 (king ability)",
+            "unprotected by jesper N2"
+        ],
+        "1445997396134985888": [],
+        "1445997445074124994": [
+            "prot mousta N1",
+            "zenitsu follows him N3",
+            "blue Yoshi"
+        ],
+        "1445997384890061052": [
+            "protected by silent Rook <#1445997438186950696>"
+        ],
+        "1445997433095065791": [
+            "wearing Alane head set for D1"
+        ],
+        "1445997451449339935": [
+            "protected by blue fire Silly N1",
+            "protected by Rebel cult N2",
+            "protected n2",
+            "disarm and rb Fan if they meet and Fan has lethal",
+            "blood mark activated by Nicoelpr N4"
+        ],
+        "1445997461184315565": [
+            "used blue fire on gerand N1",
+            "D1-if Silly meets Mousta or Aiden then use green fire (silent block of next ability)",
+            "blue fire on Kyle N2",
+            "blue fire on Emir N2",
+            "N2 immune to negative fx",
+            "protected n2",
+            "protected by Jasse on N4",
+            "if blocked/pulled/controlled/bled, activate yellow fox fire (negate it/self cure) N4"
+        ],
+        "1445997427638140929": [
+            "bloodmark on Jasse D3",
+            "betrayal jasse -> hector -> nicoelpr"
+        ],
+        "1445997446038814774": [
+            "Secret follows him N1/D1 by <#1445997454079168635>",
+            "rb D1 by meyyra",
+            "shared shield with Muge from Freed (lasts until used)"
+        ],
+        "1445997443555659940": [
+            "protected by nicoelpr n2",
+            "for epstein files guess look at <#1445997426333716510>",
+            "protected n2",
+            "not counting for wincon",
+            "next abi  silently blocked",
+            "rb on Kyle failed due to 5",
+            "all kills on him are bypass prot from <#1458906744532107265> N4"
+        ],
+        "1445997442482049185": [
+            "track Falcon D1",
+            "protected by bubble by World on N2"
+        ],
+        "1445997459649200239": [
+            "immune to negative abilities for N2"
+        ],
+        "1445997430704439412": [
+            "inform Jesper about his actions on N2"
+        ],
+        "1445997438728011777": [
+            "prot from Vacs N2",
+            "Silly has charm on her. Rc cant be revealed and she stays in <#1456645662769942559>",
+            "N4 next ability fails",
+            "all kills on her are bypass prot from <#1458867917205541025> N4"
+        ],
+        "1445997462388080794": [
+            "used prot on Marr N2"
+        ],
+        "1445997453051433000": [
+            "untargetable N2"
+        ],
+        "1445997436337262722": [
+            "protected Fan N2"
+        ],
+        "1445997438186950696": [
+            "N2 prot freed (king ability)",
+            "Doesnt count, dies when nicoel dies, can only use 1 nonlethal per cycle, lb"
+        ],
+        "1445997426333716510": [
+            "made sturdy by kochi N2, narrate attacks on him in <#1457227131032567931>",
+            "look in his rc for epstein files info",
+            "Protected for night 3 by matou",
+            "rb by Marr N3"
+        ],
+        "1445997423078932582": [
+            "barrier installed N2 by Secret from lolo"
+        ],
+        "1445997407610343516": [
+            "peephole installed"
+        ],
+        "1454998617633980448": [
+            "unbreachable chat"
+        ],
+        "1456754358267150358": [
+            "unbreachable chat"
+        ],
+        "1445997454079168635": [
+            "protected by Hector N2 (until attacked or end of D2)",
+            "Protected for n3 by matou",
+            "deny all blocks, unprotects, negative effects, lethals used on him by Yoshis",
+            "protected n3 until attacked or next day end",
+            "has a blood mark from Nicoelpr D3",
+            "protected by Celes (cigarette) N4",
+            "Kyle attacked N4, cigarette used"
+        ],
+        "1445997433380147404": [
+            "protected d2"
+        ],
+        "1445997456457203713": [
+            "doesnt count to team condition, dies when nicoel dies, can only use 1 nonlethal per cycle, lb"
+        ],
+        "1457817935568699423": [
+            "unbreachable"
+        ],
+        "1445997449515765840": [
+            "bound to Muge and Rebel for D2"
+        ],
+        "1445997429584560294": [
+            "if made unrevivable immediately remove access from graveyard premium"
+        ],
+        "1445997439407620209": [
+            "Doesnt count, dies when nicoel dies, can only use 1 nonlethal per cycle, lb",
+            "perma protected by photo"
+        ],
+        "1445997450463674528": [
+            "ability under 1 phase cd",
+            "follows meyyra N3",
+            "red yoshi"
+        ],
+        "1445997392167047280": [
+            "house and occupants protected from remote abilities N3 by Alane",
+            "protected from remote abilities for 2 phases by Afton"
+        ]
+    },
+    "lynch_votes1": {
+        "321117543378976771": 1454832328533872650
+    },
+    "lynch_votes2": {},
+    "leader_votes": {
+        "527476877086949376": 527476877086949376,
+        "684367948630196261": 534367107836805120,
+        "1259866390098214914": 534367107836805120,
+        "1420015332147331125": 1420015332147331125
+    },
+    "vote_value": [],
+    "houselist": [
+        "\ud83c\udfe1\u2502house-6",
+        "\ud83c\udfe1\u2502house-7",
+        "\ud83c\udfe1\u2502house-10",
+        "\ud83c\udfe1\u2502house-14",
+        "\ud83c\udfe1\u2502house-16",
+        "\ud83c\udfe1\u2502house-19",
+        "\ud83c\udfe1\u2502house-20",
+        "\ud83c\udfe1\u2502house-22",
+        "\ud83c\udfe1\u2502house-24",
+        "\ud83c\udfe1\u2502house-25",
+        "\ud83c\udfe1\u2502house-26",
+        "\ud83c\udfe1\u2502house-27",
+        "\ud83c\udfe1\u2502house-28",
+        "\ud83c\udfe1\u2502house-29",
+        "\ud83c\udfe1\u2502house-30",
+        "\ud83c\udfe1\u2502house-31",
+        "\ud83c\udfdd\ufe0f\u2502yoshi-island",
+        "\ud83c\udfe1\u2502house-34",
+        "\ud83c\udfe1\u2502house-36",
+        "\ud83c\udfe1\u2502house-37",
+        "\ud83c\udfe1\u2502house-38",
+        "\ud83c\udfe1\u2502house-39"
+    ]
+}

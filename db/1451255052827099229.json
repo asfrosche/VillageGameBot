@@ -1,0 +1,337 @@
+{
+    "overseer_role_name": "Overseer",
+    "alive_role_name": "Alive",
+    "sponsor_role_name": "Sponsor",
+    "spectator_role_name": "Spectator",
+    "dead_role_name": "Dead",
+    "alt_role_name": "Alt",
+    "log_channel_name": "log-visits",
+    "actions_log_channel_name": "log-actions",
+    "edit_del_logs": "edit-and-del-logs",
+    "join_and_leave_logs": "join-leave-logs",
+    "announcements_channel_name": "\u2757\u2502announcements",
+    "map_channel_name": "\ud83d\uddfa\u2502map",
+    "daydiscussion_channel_name": "\ud83c\udf1e\u2502day-discussion",
+    "megaphone_channel_name": "\ud83d\udce2\u2502megaphone",
+    "lynch_channel_name1": "\ud83d\uddf3\u2502vote-session-1",
+    "lynch_channel_name2": "\ud83d\uddf3\u2502vote-session-2",
+    "leader_channel_name": "\ud83d\uddf3\u2502vote-session-4",
+    "vote_count_name": "\ud83d\udcca\u2502vote-count",
+    "house_prefix": "\ud83c\udfe1\u2502house-",
+    "overseer_category_name": "OVERSEER",
+    "atg_category_name": "ABOUT THE GAME",
+    "chats_category_name": "CHATS",
+    "os_relations_category_name": "OVERSEER RELATIONS",
+    "daychat_category_name": "DAYCHAT",
+    "nominations_category_name": "NOMINATIONS",
+    "publc_category_name": "PUBLIC CHANNELS",
+    "privc_category_name": "PRIVATE CHANNELS",
+    "houses_category_name": "HOUSES",
+    "rc_category_name": "ROLES",
+    "alt_category_name": "ALTS",
+    "dead_rc_category_name": "DEAD RC",
+    "inaccessible_houses_category_name": "INACCESSIBLE HOUSES",
+    "old_pcs_category_name": "OLD PCS",
+    "whisper_logs_channel_name": "whisper-logs",
+    "whisper_response": "whisper",
+    "fireworks_response": "fireworks",
+    "move_in_response": "move in",
+    "timeout_duration": 10800,
+    "showwhispersender": false,
+    "autojoinifempty": true,
+    "autojoinknockexpired": true,
+    "maxmembersinhome": 50,
+    "refuseresponse": 1,
+    "voteinrc": false,
+    "dead_count": false,
+    "alt_count": false,
+    "show_dead_on_refuse": false,
+    "show_alt_on_refuse": false,
+    "can_dead_open": false,
+    "can_alt_open": false,
+    "member_homes": {
+        "1248020564120043650": 1451255289578786890,
+        "1378760725031419937": 1451255292359606434,
+        "910081079283699732": 1451255301662838836,
+        "1278860884294500511": 1451255293534142464,
+        "499627134973640707": 1451255298059669624,
+        "891919616757075998": 1451255300618190899,
+        "758716356207443999": 1451255298059669624,
+        "879442222481825862": 1451255307660427265,
+        "995847599376572559": 1451255289578786890,
+        "1275902680056860737": 1451255291298713685,
+        "544618507615207427": 1451255291298713685,
+        "637069481138716679": 1451255298059669624,
+        "389702344612249610": 1451255296591663299,
+        "1403436844636700824": 1451255296591663299,
+        "1185351934765436931": 1451255307660427265,
+        "388776401668538368": 1451255291298713685,
+        "549642477464715285": 1451255304728608809,
+        "1322689747151486986": 1451255304728608809,
+        "459809697021689857": 1451255301662838836,
+        "470953330827460628": 1451255301662838836,
+        "837319606393372692": 1451255289578786890,
+        "606394150295961610": 1451255289578786890,
+        "852443550594629683": 1451255289578786890,
+        "1229115104520437810": 1451255286127005847,
+        "1074354065468817438": 1451255286127005847,
+        "629760692660207626": 1451255285351186482,
+        "381172034983559169": 1451255291298713685,
+        "325550410528194562": 1451255298059669624,
+        "748785451397152869": 1451255300618190899,
+        "1298698368108990479": 1451255307660427265,
+        "675440387594256384": 1451255293534142464,
+        "1278376079538782218": 1451255298978484235,
+        "383330685139550208": 1451255292359606434,
+        "677235023270772745": 1451255298059669624,
+        "1452631930582597684": 1451255312110587984,
+        "1264407756111089709": 1451255289578786890,
+        "321117543378976771": 1451255296591663299,
+        "741434190553415742": 1451255298978484235,
+        "907739551735353456": 1451255307002056837,
+        "536785235917013023": 1451255285351186482,
+        "645395799626350596": 1451255303835484220,
+        "476486064731717643": 1451255307002056837,
+        "1420015332147331125": 1451255291298713685,
+        "696063215238381609": 1451255291298713685
+    },
+    "infos": {
+        "1451255334726406300": [],
+        "1451255354242502879": [
+            "Habiba sugar cane silent rb",
+            "sugar cane silent rb",
+            "If habiba dies n1, she goes to spectator by marr"
+        ],
+        "1451255284617187422": [
+            "house is stormed by galamt"
+        ],
+        "1451255324337115310": [
+            "speak is sampled",
+            "picked up letter",
+            "marr is sampled n1",
+            "Sampled players n1: marr, secret, benve, fan, meyyra, timo, nicoT, kochi, walid",
+            "shield from aiden option 3",
+            "Rebel got two lethals from converting prot",
+            "rebel gains another lethal from converting protection",
+            "timo sampled n1",
+            "protectio n2 from flamingo",
+            "one lethal converted d1",
+            "bleed shield from aiden"
+        ],
+        "1451255337599635579": [
+            "Active 2 used on highlighted message in his rc",
+            "prot with Walid n2"
+        ],
+        "1451255342770946119": [
+            "following benve",
+            "slowed n2"
+        ],
+        "1451255326673338529": [
+            "shared shield with Timo by Aiden",
+            "corrupted and roleblocked night 1 by shared shield from aiden",
+            "one tooth"
+        ],
+        "1451255320331681984": [
+            "vacs benve nicoel have letters d2"
+        ],
+        "1451255312110587984": [
+            "all visits are forced",
+            "n1 house is stormed by galamt"
+        ],
+        "1451255350379679774": [],
+        "1451255330158805013": [
+            "shared shield with nicoT by Aiden",
+            "embargo and cashlock night 1 by shared shield froma iden",
+            "NicoT Meyyra Kochi Secret Marr attended the party",
+            "Fan attends party"
+        ],
+        "1451255345572745376": [],
+        "1451255321350770791": [
+            "picked up one nut",
+            "roleblock n1 from berg",
+            "focus n1 from berg",
+            "picked up nut",
+            "embargo d1"
+        ],
+        "1451255351566532813": [
+            "shield from aiden",
+            "shield activated",
+            "protectio n2 from flamingo"
+        ],
+        "1451255333526700277": [
+            "raffa has shield option 1",
+            "raffa shield activated",
+            "spotlight n1",
+            "shield option 3 rebel",
+            "shield option 3 rebel activate",
+            "all protections on rebel redirect to rebel shield option 3",
+            "shueld option 4 for berg",
+            "protected from embargo,stun,bleed and confussion n1",
+            "Jesper has shield option 2",
+            "every action is tracked in the group chat for the time of beeing inside as BOT"
+        ],
+        "1451255357279305738": [
+            "used one gift",
+            "used one gift",
+            "used one gift",
+            "if kills using syringe, give revel a point",
+            "shield option 4 from aiden",
+            "berg bound to walid",
+            "used 50/50 n2"
+        ],
+        "1451255323103854634": [
+            "picked up letter",
+            "he has 1 candy from Kochi"
+        ],
+        "1451255287272050770": [
+            "Noone can leave without timos permission",
+            "n1 house is stormed by galamt"
+        ],
+        "1451255347338805310": [
+            "Every time leaves a house adds players to pc",
+            "alane following",
+            "Every action by astra is tracked by bot in group chat"
+        ],
+        "1451255348517277854": [
+            "Night 1 every kill made by chess in h6 will give walid a point",
+            "cant use lethal cycle 1",
+            "highlight a message"
+        ],
+        "1451255322290159687": [
+            "Got shield from Aiden option 2"
+        ],
+        "1451255358105321523": [
+            "night 2 stun from vacs and gets a device",
+            "bait n2"
+        ],
+        "1451255341688950814": [
+            "Use Active 1 as soon as timo approves him leaving Christmas Houses",
+            "if he dies n3 he goes to spec"
+        ],
+        "1451726636096426065": [
+            "bot is on"
+        ],
+        "1451255329089392761": [
+            "picked up letter in h8"
+        ],
+        "1451255327642095759": [],
+        "1451255358457774255": [
+            "slow n1",
+            "resistant to slow n2"
+        ],
+        "1451255355240874246": [
+            "cant perform actions or speak while wrapped by cassis"
+        ],
+        "1451255356410822676": [
+            "prot d1",
+            "stun n3"
+        ],
+        "1451255300618190899": [
+            "abis delayes until eon n2"
+        ],
+        "1451255307002056837": [
+            "all abis fail inside"
+        ],
+        "1452864963034222612": [
+            "cant move until the curse from flamingo is on"
+        ],
+        "1451255339004727467": [
+            "berg bound to walid"
+        ],
+        "1451255325658185903": [
+            "embargo n2"
+        ],
+        "1453491627841814571": [
+            "prot with fan n2"
+        ],
+        "1451255360127111229": [
+            "lifesteal n2"
+        ]
+    },
+    "lynch_votes1": {
+        "321117543378976771": 1177272911246139443,
+        "741434190553415742": 1177272911246139443,
+        "1378760725031419937": 1177272911246139443,
+        "381172034983559169": 1177272911246139443,
+        "1177272911246139443": 606394150295961610,
+        "459809697021689857": 606394150295961610,
+        "387972845466025984": 606394150295961610,
+        "879442222481825862": 1177272911246139443,
+        "606394150295961610": 1177272911246139443,
+        "325550410528194562": 1177272911246139443,
+        "1403436844636700824": 606394150295961610,
+        "502929753385336859": 595393463982489631,
+        "536785235917013023": 606394150295961610,
+        "891919616757075998": 879442222481825862,
+        "1229115104520437810": 606394150295961610,
+        "388776401668538368": 1177272911246139443,
+        "645395799626350596": 1177272911246139443,
+        "476486064731717643": 1177272911246139443,
+        "1322689747151486986": 1177272911246139443
+    },
+    "lynch_votes2": {
+        "321117543378976771": 816299318348087319,
+        "388776401668538368": 816299318348087319,
+        "1177272911246139443": 1177272911246139443,
+        "459809697021689857": 816299318348087319,
+        "1378760725031419937": 891919616757075998,
+        "387972845466025984": 637069481138716679,
+        "879442222481825862": 816299318348087319,
+        "741434190553415742": 816299318348087319,
+        "499627134973640707": 816299318348087319,
+        "325550410528194562": 816299318348087319,
+        "1407087120568291368": 816299318348087319,
+        "816299318348087319": 816299318348087319,
+        "606394150295961610": 816299318348087319,
+        "502929753385336859": 1018864560851124256,
+        "536785235917013023": 891919616757075998,
+        "381172034983559169": 816299318348087319,
+        "891919616757075998": 816299318348087319,
+        "645395799626350596": 816299318348087319,
+        "476486064731717643": 816299318348087319,
+        "907739551735353456": 816299318348087319
+    },
+    "leader_votes": {
+        "321117543378976771": 1211763220877021274,
+        "1177272911246139443": 1177272911246139443,
+        "388776401668538368": 1407087120568291368,
+        "387972845466025984": 388776401668538368,
+        "879442222481825862": 388776401668538368,
+        "741434190553415742": 1211763220877021274,
+        "1403436844636700824": 1248020564120043650,
+        "891919616757075998": 388776401668538368,
+        "1248020564120043650": 1211763220877021274,
+        "502929753385336859": 684367948630196261,
+        "1378760725031419937": 1211763220877021274,
+        "536785235917013023": 1211763220877021274,
+        "459809697021689857": 1211763220877021274,
+        "381172034983559169": 1211763220877021274,
+        "1229115104520437810": 1211763220877021274,
+        "1407087120568291368": 1211763220877021274,
+        "645395799626350596": 1211763220877021274,
+        "907739551735353456": 387972845466025984
+    },
+    "vote_value": [],
+    "houselist": [
+        "\ud83c\udfe1\u2502house-3",
+        "\ud83c\udf84\u2502christmas-house-6",
+        "\ud83c\udfe1\u2502the-generator-7",
+        "\ud83c\udfe1\u2502house-8",
+        "\ud83c\udfe1\u2502house-9",
+        "\ud83c\udfe1\u2502house-11",
+        "\ud83c\udfe1\u2502house-12",
+        "\ud83c\udfe1\u2502house-13",
+        "\ud83c\udfe1\u2502house-14",
+        "\ud83c\udfd8\ufe0f\u2502lokum-15",
+        "\ud83c\udfe1\u2502house-16",
+        "\ud83d\udce6\u2502parcel-lock-17",
+        "\ud83c\udfe1\u2502house-18",
+        "\ud83c\udfe1\u2502house-19",
+        "house-20",
+        "\ud83c\udff0\u2502castle-21",
+        "\ud83c\udfe1\u2502house-22",
+        "\ud83c\udfe1\u2502house-23",
+        "\ud83c\udfe1\u2502house-24",
+        "\u2708\ufe0f\u2502helicarrier-25"
+    ]
+}

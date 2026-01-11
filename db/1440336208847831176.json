@@ -1,0 +1,121 @@
+{
+    "overseer_role_name": "Overseer",
+    "alive_role_name": "Alive",
+    "sponsor_role_name": "Sponsor",
+    "spectator_role_name": "Spectator",
+    "dead_role_name": "Dead",
+    "alt_role_name": "Alt",
+    "log_channel_name": "log-visits",
+    "actions_log_channel_name": "log-actions",
+    "edit_del_logs": "edit-and-del-logs",
+    "join_and_leave_logs": "join-leave-logs",
+    "announcements_channel_name": "\u2757\u2502announcements",
+    "map_channel_name": "\ud83d\uddfa\u2502map",
+    "daydiscussion_channel_name": "\ud83c\udf1e\u2502day-discussion",
+    "megaphone_channel_name": "\ud83d\udce2\u2502megaphone",
+    "lynch_channel_name1": "\ud83d\uddf3\u2502vote-session-1",
+    "lynch_channel_name2": "\ud83d\uddf3\u2502vote-session-2",
+    "leader_channel_name": "\ud83d\udc51\u2502leader-election",
+    "vote_count_name": "\ud83d\udcca\u2502vote-count",
+    "house_prefix": "\ud83c\udfe1\u2502house-",
+    "overseer_category_name": "OVERSEER",
+    "atg_category_name": "ABOUT THE GAME",
+    "chats_category_name": "CHATS",
+    "os_relations_category_name": "OVERSEER RELATIONS",
+    "daychat_category_name": "DAYCHAT",
+    "nominations_category_name": "NOMINATIONS",
+    "publc_category_name": "PUBLIC CHANNELS",
+    "privc_category_name": "PRIVATE CHANNELS",
+    "houses_category_name": "HOUSES",
+    "rc_category_name": "ROLES",
+    "alt_category_name": "ALTS",
+    "dead_rc_category_name": "DEAD RC",
+    "inaccessible_houses_category_name": "INACCESSIBLE HOUSES",
+    "old_pcs_category_name": "OLD PCS",
+    "whisper_logs_channel_name": "whisper-logs",
+    "whisper_response": "whisper",
+    "fireworks_response": "fireworks",
+    "move_in_response": "move in",
+    "timeout_duration": 10800,
+    "showwhispersender": true,
+    "autojoinifempty": true,
+    "autojoinknockexpired": true,
+    "maxmembersinhome": 50,
+    "refuseresponse": 1,
+    "voteinrc": false,
+    "dead_count": false,
+    "alt_count": false,
+    "show_dead_on_refuse": false,
+    "show_alt_on_refuse": false,
+    "can_dead_open": false,
+    "can_alt_open": false,
+    "member_homes": {
+        "1407087120568291368": 1440370647640576011,
+        "637069481138716679": 1440370647640576011,
+        "881318283763138601": 1440370654556852317,
+        "570023325653270548": 1440370654556852317,
+        "733993219745906709": 1440370647640576011,
+        "794628082215813152": 1440370647640576011,
+        "1248020564120043650": 1440370637565857852,
+        "1264407756111089709": 1440370637565857852,
+        "1259866390098214914": 1440370647640576011
+    },
+    "infos": {
+        "1440370668972806217": [
+            "fake protected",
+            "immune to rb",
+            "has real protection"
+        ],
+        "1440370665529147392": [
+            "evades first attack, including lynches",
+            "protected for cycle 1 by meow"
+        ],
+        "1440370640015200319": [
+            "wired by fadi"
+        ],
+        "1440370636814946324": [
+            "wired by fadi"
+        ],
+        "1440370666669998244": [
+            "vbed, following ninja, double votes"
+        ],
+        "1440370677604548660": [
+            "vbed, following ninja, double votes"
+        ],
+        "1440370679664083058": [
+            "stringed by Meow"
+        ],
+        "1440370680729309397": [
+            "vbed and rbed"
+        ],
+        "1440370676589400268": [
+            "stringed by meow/avel"
+        ]
+    },
+    "lynch_votes1": {
+        "826724322831630377": 1407087120568291368,
+        "733993219745906709": 1407087120568291368,
+        "881318283763138601": 1407087120568291368,
+        "1407087120568291368": 826724322831630377,
+        "1248020564120043650": 826724322831630377
+    },
+    "lynch_votes2": {},
+    "leader_votes": {},
+    "vote_value": [],
+    "houselist": [
+        "\ud83c\udfe1\u2502house-1",
+        "\ud83c\udfe1\u2502house-2",
+        "\ud83c\udfe1\u2502house-5",
+        "\ud83c\udfe1\u2502house-6",
+        "\ud83c\udfe1\u2502house-7",
+        "\ud83c\udfe1\u2502house-8",
+        "\ud83c\udfe1\u2502house-9",
+        "\ud83c\udfe1\u2502house-11",
+        "\ud83c\udfe1\u2502house-12",
+        "\ud83c\udfe1\u2502house-13",
+        "\ud83c\udfe1\u2502house-14",
+        "\ud83c\udfe1\u2502house-15",
+        "\ud83c\udfe1\u2502house-19",
+        "\ud83c\udfe1\u2502house-21"
+    ]
+}
