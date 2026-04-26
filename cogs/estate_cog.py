@@ -98,6 +98,8 @@ class Estate(commands.Cog):
             if num is not None:
                 houses[num] = {"channel": ch, "name": ch.name, "status": "empty", "occupants": []}
                 max_num = max(max_num, num)
+            else:
+                houses[ch.name] = {"channel": ch, "name": ch.name, "status": "empty", "occupants": [], "is_special": True}
                 
         # Include destroyed houses up to max_num
         for i in range(1, max_num + 1):
@@ -155,8 +157,11 @@ class Estate(commands.Cog):
             await msg.edit(content="", attachments=[file])
 
     def draw_estate_map(self, houses):
-        house_nums = sorted(houses.keys())
-        count = len(house_nums)
+        house_nums = sorted([k for k in houses.keys() if isinstance(k, int)])
+        special_names = sorted([k for k in houses.keys() if isinstance(k, str)])
+        all_keys = house_nums + special_names
+        
+        count = len(all_keys)
         if count == 0:
             return Image.new('RGB', (800, 600), color=(44, 47, 51))
             
@@ -170,7 +175,7 @@ class Estate(commands.Cog):
         
         row_heights = [0] * rows
         
-        for i, num in enumerate(house_nums):
+        for i, num in enumerate(all_keys):
             r = i // cols
             occupants_count = len(houses[num].get("occupants", []))
             needed_height = house_size + 40 + (occupants_count * 45) + 60
@@ -187,7 +192,7 @@ class Estate(commands.Cog):
             for c in range(cols):
                 idx = r * cols + c
                 if idx < count:
-                    num = house_nums[idx]
+                    num = all_keys[idx]
                     stagger_y = (c % 2) * 50
                     x = padding_x + c * (house_size + padding_x) + house_size / 2
                     y = current_y + house_size / 2 + stagger_y
@@ -265,12 +270,12 @@ class Estate(commands.Cog):
             for c in range(cols):
                 idx = r * cols + c
                 if idx < count:
-                    row_positions.append(positions[house_nums[idx]])
+                    row_positions.append(positions[all_keys[idx]])
             if len(row_positions) > 1:
                 draw.line(row_positions, fill=(0, 0, 0, 150), width=15)
         
         bboxes = []
-        for num in house_nums:
+        for num in all_keys:
             x, y = positions[num]
             h_data = houses[num]
             self.draw_house(draw, img, x, y, house_size, h_data, num, label_font, names_font, small_font, bboxes)
@@ -295,36 +300,66 @@ class Estate(commands.Cog):
         
         bboxes.append((cx - half, cy - half, cx + half, cy + half))
         
-        if status == "destroyed":
-            draw.polygon([base_bl, (cx - 15, cy), (cx, cy + 10), (cx + 20, cy - 5), base_br], fill=(70, 70, 70))
-            draw.line([(cx - 15, cy), (cx + 5, cy + 5), (cx - 5, cy + 15)], fill=(40, 40, 40), width=3)
-            
-            ruin_text = "RUINS"
-            try:
-                tw = draw.textbbox((0, 0), ruin_text, font=small_font)[2] - draw.textbbox((0, 0), ruin_text, font=small_font)[0]
-            except AttributeError:
-                tw = draw.textsize(ruin_text, font=small_font)[0]
-            draw.text((cx - tw/2, cy), ruin_text, fill=(200, 50, 50), font=small_font)
+        is_special = isinstance(num, str)
+        
+        if is_special:
+            if status == "destroyed":
+                draw.polygon([base_bl, (cx - 15, cy), (cx, cy + 10), (cx + 20, cy - 5), base_br], fill=(70, 70, 70, 255))
+                draw.line([(cx - 15, cy), (cx + 5, cy + 5), (cx - 5, cy + 15)], fill=(40, 40, 40, 255), width=3)
+                ruin_text = "RUINS"
+                try:
+                    tw = draw.textbbox((0, 0), ruin_text, font=small_font)[2] - draw.textbbox((0, 0), ruin_text, font=small_font)[0]
+                except AttributeError:
+                    tw = draw.textsize(ruin_text, font=small_font)[0]
+                draw.text((cx - tw/2, cy), ruin_text, fill=(200, 50, 50), font=small_font)
+            else:
+                color = (72, 61, 139, 255) if status == "occupied" else (55, 50, 80, 255)
+                roof_color = (218, 165, 32, 255) if status == "occupied" else (110, 85, 15, 255)
+                
+                draw.rectangle([cx - half, cy - half + 30, cx + half, cy + half - 15], fill=color)
+                draw.polygon([(cx, cy - half - 5), (cx - half - 10, cy - half + 30), (cx + half + 10, cy - half + 30)], fill=roof_color)
+                
+                door_w = 20
+                door_h = 25
+                draw.rectangle([(cx - door_w/2, cy + half - 15 - door_h), (cx + door_w/2, cy + half - 15)], fill=(40, 20, 5, 255) if status == "occupied" else (20, 20, 20, 255))
+                
+                win_color = (255, 215, 0, 255) if status == "occupied" else (40, 40, 40, 255)
+                draw.rectangle([cx - 25, cy - 5, cx - 15, cy + 15], fill=win_color)
+                draw.rectangle([cx + 15, cy - 5, cx + 25, cy + 15], fill=win_color)
         else:
-            color = (139, 69, 19) if status == "occupied" else (80, 80, 80)
-            roof_color = (178, 34, 34) if status == "occupied" else (60, 60, 60)
-            
-            draw.rectangle([base_tl, base_br], fill=color)
-            draw.polygon([roof_top, roof_left, roof_right], fill=roof_color)
-            
-            door_w = 15
-            door_h = 20
-            draw.rectangle([(cx - door_w/2, base_br[1] - door_h), (cx + door_w/2, base_br[1])], fill=(60, 30, 0) if status == "occupied" else (40, 40, 40))
-            
-            # Lit / Muted Windows
-            win_color = (255, 215, 0) if status == "occupied" else (40, 40, 40)
-            draw.rectangle([cx - 25, cy + 5, cx - 15, cy + 15], fill=win_color)
-            draw.rectangle([cx + 15, cy + 5, cx + 25, cy + 15], fill=win_color)
+            if status == "destroyed":
+                draw.polygon([base_bl, (cx - 15, cy), (cx, cy + 10), (cx + 20, cy - 5), base_br], fill=(70, 70, 70, 255))
+                draw.line([(cx - 15, cy), (cx + 5, cy + 5), (cx - 5, cy + 15)], fill=(40, 40, 40, 255), width=3)
+                
+                ruin_text = "RUINS"
+                try:
+                    tw = draw.textbbox((0, 0), ruin_text, font=small_font)[2] - draw.textbbox((0, 0), ruin_text, font=small_font)[0]
+                except AttributeError:
+                    tw = draw.textsize(ruin_text, font=small_font)[0]
+                draw.text((cx - tw/2, cy), ruin_text, fill=(200, 50, 50), font=small_font)
+            else:
+                color = (139, 69, 19, 255) if status == "occupied" else (80, 80, 80, 255)
+                roof_color = (178, 34, 34, 255) if status == "occupied" else (60, 60, 60, 255)
+                
+                draw.rectangle([base_tl, base_br], fill=color)
+                draw.polygon([roof_top, roof_left, roof_right], fill=roof_color)
+                
+                door_w = 15
+                door_h = 20
+                draw.rectangle([(cx - door_w/2, base_br[1] - door_h), (cx + door_w/2, base_br[1])], fill=(60, 30, 0, 255) if status == "occupied" else (40, 40, 40, 255))
+                
+                win_color = (255, 215, 0, 255) if status == "occupied" else (40, 40, 40, 255)
+                draw.rectangle([cx - 25, cy + 5, cx - 15, cy + 15], fill=win_color)
+                draw.rectangle([cx + 15, cy + 5, cx + 25, cy + 15], fill=win_color)
             
         occupants = data.get("occupants", [])
         
         # Compact Labeling
-        label = f"🏠{num}"
+        if is_special:
+            clean_name = data["name"].replace("-", " ").title()
+            label = f"🏛️ {clean_name}"
+        else:
+            label = f"🏠{num}"
         try:
             tw = draw.textbbox((0, 0), label, font=label_font)[2] - draw.textbbox((0, 0), label, font=label_font)[0]
         except AttributeError:
