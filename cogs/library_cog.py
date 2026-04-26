@@ -27,6 +27,45 @@ TEAMS = {
     5: "Bonus/Extra"
 }
 
+DISCORD_FIELD_LIMIT = 1024
+
+
+def safe_add_fields(embed: discord.Embed, name: str, text: str, inline: bool = False):
+    """Add one or more embed fields, splitting *text* into chunks of at most
+    DISCORD_FIELD_LIMIT characters.  Splits prefer line boundaries so role
+    lists are never cut mid-line.  If *text* is empty, a single field with
+    a placeholder is added instead.
+    """
+    if not text or not text.strip():
+        embed.add_field(name=name, value="*No data.*", inline=inline)
+        return
+
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = f"{current}{line}\n" if current else f"{line}\n"
+        if len(candidate) > DISCORD_FIELD_LIMIT:
+            if current:
+                chunks.append(current)
+            # If a single line itself exceeds the limit, hard-slice it
+            while len(line) + 1 > DISCORD_FIELD_LIMIT:
+                chunks.append(line[:DISCORD_FIELD_LIMIT])
+                line = line[DISCORD_FIELD_LIMIT:]
+            current = f"{line}\n" if line else ""
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+
+    if not chunks:
+        embed.add_field(name=name, value="*No data.*", inline=inline)
+        return
+
+    for i, chunk in enumerate(chunks):
+        field_name = name if i == 0 else f"{name} (cont.)"
+        embed.add_field(name=field_name, value=chunk, inline=inline)
+
+
 # ============================================================================
 # DATABASE CLASS
 # ============================================================================
@@ -1090,7 +1129,7 @@ class GameSelectView(discord.ui.View):
             winner_str = f" | 🏆 {', '.join(winners)}" if winners else ""
             games_text += f"**{game_num}** | {game_name.replace('-', ' ').title()}{winner_str}\n"
 
-        embed.add_field(name="Available Games", value=games_text, inline=False)
+        safe_add_fields(embed, "Available Games", games_text, inline=False)
 
         if self.max_page > 0:
             embed.set_footer(text=f"{EMBED_FOOTER_TEXT} | Page {self.page + 1}/{self.max_page + 1}", icon_url=EMBED_FOOTER_ICON)
@@ -1228,7 +1267,7 @@ class TeamSelectView(discord.ui.View):
                 if len(roles_basic) > self.roles_per_page
                 else "Roles"
             )
-            embed.add_field(name=field_name, value=roles_text, inline=False)
+            safe_add_fields(embed, field_name, roles_text, inline=False)
         else:
             embed.add_field(name="Roles", value="*No roles found for this team.*", inline=False)
 
@@ -1321,8 +1360,8 @@ class GamePlayersView(discord.ui.View):
             end = start + self.page_size
             winners_text = "\n".join(self._winners[start:end]) or "*No winners*"
             losers_text = "\n".join(self._losers[start:end]) or "*No losers*"
-            embed.add_field(name="🏆 Winners", value=winners_text, inline=False)
-            embed.add_field(name="❌ Losers", value=losers_text, inline=False)
+            safe_add_fields(embed, "🏆 Winners", winners_text, inline=False)
+            safe_add_fields(embed, "❌ Losers", losers_text, inline=False)
         else:
             team_id = int(self.selected_filter)
             team_name = TEAMS.get(team_id, "Unknown")
@@ -1335,7 +1374,7 @@ class GamePlayersView(discord.ui.View):
                         base = f"{base} + {sponsor_name}"
                     team_players.append(f"{win_emoji} {base}")
             players_text = "\n".join(team_players) if team_players else "*No players on this team*"
-            embed.add_field(name=f"{team_name} Team", value=players_text, inline=False)
+            safe_add_fields(embed, f"{team_name} Team", players_text, inline=False)
 
         if self.selected_filter == "all":
             max_items = max(len(self._winners), len(self._losers))
@@ -2011,7 +2050,7 @@ class RoleSelectionView(discord.ui.View):
             player = role.get("player_name") or "Unknown"
             roles_text += f"**{idx}. |** {game_label} **|** {TEAMS[role['team']]} - {role['role_name']} - {player}\n"
 
-        embed.add_field(name="Roles", value=roles_text, inline=False)
+        safe_add_fields(embed, "Roles", roles_text, inline=False)
 
         if self.max_page > 0:
             embed.set_footer(text=f"{EMBED_FOOTER_TEXT} | Page {self.page + 1}/{self.max_page + 1}", icon_url=EMBED_FOOTER_ICON)

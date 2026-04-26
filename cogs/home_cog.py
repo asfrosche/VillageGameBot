@@ -130,6 +130,9 @@ class Home(commands.Cog):
                     await house_channel.set_permissions(member, read_messages=True, send_messages=True)
                     await self.home_set(ctx, member, house_channel)
                 await ctx.send("Initialization completed")
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
             else:
                 await ctx.send("Guild data not loaded.")
         else:
@@ -246,6 +249,9 @@ class Home(commands.Cog):
                             await new_msg.pin()
                         await ctx.channel.send("Done")
                 save_guild_data(ctx.guild.id, guild_data)
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
             else:
                 await ctx.channel.send("Guild data not loaded.")
         else:
@@ -277,6 +283,9 @@ class Home(commands.Cog):
                                 guild_data["member_homes"][str(member.id)] = channel.id
                 save_guild_data(ctx.guild.id, guild_data)
                 await ctx.send('Done')
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
             else:
                 await ctx.send("Guild data not loaded.")
         else:
@@ -310,6 +319,9 @@ class Home(commands.Cog):
                         del guild_data["member_homes"][str(user.id)]
                         await ctx.send(f'{user.mention} is now homeless')
                 save_guild_data(ctx.guild.id, guild_data)
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
             else:
                 await ctx.send("Guild data not loaded.")
         else:

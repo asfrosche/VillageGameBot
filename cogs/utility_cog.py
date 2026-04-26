@@ -666,6 +666,9 @@ class Utility(commands.Cog):
 
         add_player(target_member.name, team, role, ctx.guild.id)
         await ctx.send(f"{target_member.display_name} successfully added to deadlist.")
+        estate_cog = self.bot.get_cog('Estate')
+        if estate_cog:
+            await estate_cog.update_estate_map(ctx.guild)
     
     @commands.command()
     async def addrole(self, ctx, role: discord.Role, *members):

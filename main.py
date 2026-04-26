@@ -30,6 +30,7 @@ from cogs.aux_battle import AuxBattle
 from cogs.soldati_cog import SoldatiGame
 from cogs.bday import Birthday  
 from cogs.meetupmatrix import Meetup
+from cogs.estate_cog import Estate
 
 TOKEN = os.getenv('TOKEN')
 
@@ -445,6 +446,7 @@ async def startcog():
     await bot.add_cog(SoldatiGame(bot))
     await bot.add_cog(Birthday(bot))
     await bot.add_cog(Meetup(bot))
+    await bot.add_cog(Estate(bot))
 asyncio.run(startcog())
 
 bot.run(TOKEN)
