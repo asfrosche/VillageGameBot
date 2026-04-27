@@ -106,45 +106,69 @@ class Estate(commands.Cog):
             if i not in houses:
                 houses[i] = {"name": f"House {i}", "status": "destroyed", "occupants": []}
                 
-        # Check occupants
+        # Check occupants and owners
         alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
         sponsor_role = discord.utils.get(guild.roles, name=guild_data.get("sponsor_role_name"))
         alt_role = discord.utils.get(guild.roles, name=guild_data.get("alt_role_name"))
         
         member_homes = guild_data.get("member_homes", {})
+        
+        # Initialize storage
+        for h_data in houses.values():
+            h_data["owners"] = []
+            h_data["residents"] = []
+
+        # 1. Gather Owners from member_homes
         for member_id, ch_id in member_homes.items():
             member = guild.get_member(int(member_id))
-            if member:
+            if member and sponsor_role in member.roles:
+                for num, h_data in houses.items():
+                    if h_data.get("channel") and h_data["channel"].id == int(ch_id):
+                        avatar_bytes = None
+                        if getattr(self, 'SHOW_AVATARS', True):
+                            try:
+                                avatar_bytes = await member.display_avatar.replace(size=64).read()
+                            except Exception: pass
+                        
+                        h_data["owners"].append({
+                            "id": member.id,
+                            "name": member.display_name,
+                            "avatar": avatar_bytes,
+                            "role_type": "owner"
+                        })
+                        h_data["status"] = "occupied"
+                        break
+
+        # 2. Gather Residents from channel members (authoritative)
+        for num, h_data in houses.items():
+            ch = h_data.get("channel")
+            if not ch or h_data["status"] == "destroyed":
+                continue
+                
+            for member in ch.members:
+                if member.bot: continue
+                
                 is_alive = alive_role in member.roles if alive_role else False
                 is_sponsor = sponsor_role in member.roles if sponsor_role else False
                 is_alt = alt_role in member.roles if alt_role else False
                 
                 if is_alive or is_sponsor or is_alt:
-                    # Find which house this channel is
-                    for num, h_data in houses.items():
-                        if h_data.get("channel") and h_data["channel"].id == int(ch_id):
-                            avatar_bytes = None
-                            if getattr(self, 'SHOW_AVATARS', True):
-                                try:
-                                    avatar_bytes = await member.display_avatar.replace(size=64).read()
-                                except Exception:
-                                    pass
-                            
-                            # Differentiate between owners, players, and alts
-                            if is_sponsor:
-                                role_type = "owner"
-                            elif is_alive:
-                                role_type = "player"
-                            else:
-                                role_type = "alt"
-                            
-                            h_data["occupants"].append({
-                                "name": member.display_name,
-                                "avatar": avatar_bytes,
-                                "role_type": role_type
-                            })
-                            h_data["status"] = "occupied"
-                            break
+                    avatar_bytes = None
+                    if getattr(self, 'SHOW_AVATARS', True):
+                        try:
+                            avatar_bytes = await member.display_avatar.replace(size=64).read()
+                        except Exception: pass
+                    
+                    role_type = "player" if is_alive else ("owner" if is_sponsor else "alt")
+                    
+                    h_data["residents"].append({
+                        "id": member.id,
+                        "name": member.display_name,
+                        "avatar": avatar_bytes,
+                        "role_type": role_type
+                    })
+                    h_data["status"] = "occupied"
+
                         
         # Now draw the image
         image = self.draw_estate_map(houses)
@@ -177,8 +201,12 @@ class Estate(commands.Cog):
         
         for i, num in enumerate(all_keys):
             r = i // cols
-            occupants_count = len(houses[num].get("occupants", []))
-            needed_height = house_size + 40 + (occupants_count * 45) + 60
+            owners_count = len(houses[num].get("owners", []))
+            residents_count = len(houses[num].get("residents", []))
+            # Space for owners + divider + residents
+            divider_height = 20 if (owners_count > 0 and residents_count > 0) else 0
+            total_lines = owners_count + residents_count
+            needed_height = house_size + 40 + (total_lines * 45) + divider_height + 80
             needed_height = max(needed_height, padding_y)
             if needed_height > row_heights[r]:
                 row_heights[r] = needed_height
@@ -352,7 +380,8 @@ class Estate(commands.Cog):
                 draw.rectangle([cx - 25, cy + 5, cx - 15, cy + 15], fill=win_color)
                 draw.rectangle([cx + 15, cy + 5, cx + 25, cy + 15], fill=win_color)
             
-        occupants = data.get("occupants", [])
+        owners = data.get("owners", [])
+        residents = data.get("residents", [])
         
         # Compact Labeling
         if is_special:
@@ -372,9 +401,9 @@ class Estate(commands.Cog):
         draw.text((label_x, label_y), label, font=label_font, fill=(255, 255, 255))
         bboxes.append(l_bbox)
         
-        # Occupancy Badge
-        if occupants:
-            badge = f"● {len(occupants)}"
+        # Occupancy Badge (Residents count)
+        if residents:
+            badge = f"● {len(residents)}"
             try:
                 bw = draw.textbbox((0, 0), badge, font=small_font)[2] - draw.textbbox((0, 0), badge, font=small_font)[0]
             except AttributeError:
@@ -388,75 +417,115 @@ class Estate(commands.Cog):
             bboxes.append(b_bbox)
             
         if status == "occupied":
-            y_off = cy + half + 5
-            owners = [o for o in occupants if o.get("role_type") == "owner"]
-            others = [o for o in occupants if o.get("role_type") != "owner"]
-            is_crowded = len(occupants) >= 5
+            # 1. Prepare all lines for the unified block
+            lines = []
             
-            def render_text_line(text, color, font, y_pos, has_avatar=False, avatar_bytes=None, is_bold_crown=False):
-                try:
-                    _tw = draw.textbbox((0, 0), text, font=font)[2] - draw.textbbox((0, 0), text, font=font)[0]
-                    _th = draw.textbbox((0, 0), text, font=font)[3] - draw.textbbox((0, 0), text, font=font)[1]
-                except AttributeError:
-                    _tw, _th = draw.textsize(text, font=font)
-                    
-                avatar_size = 24
-                total_w = _tw + (avatar_size + 5 if has_avatar else 0)
-                tx = cx - total_w/2 + (avatar_size + 5 if has_avatar else 0)
-                
-                while True:
-                    t_bbox = self.get_text_bbox(draw, text, font, tx, y_pos)
-                    if has_avatar:
-                        t_bbox = (t_bbox[0] - avatar_size - 5, t_bbox[1], t_bbox[2], max(t_bbox[3], y_pos + avatar_size))
-                    if self.check_collision(t_bbox, bboxes):
-                        y_pos += 5
-                    else:
-                        bboxes.append(t_bbox)
-                        break
-                        
-                if has_avatar and avatar_bytes:
-                    try:
-                        av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
-                        av_img = av_img.resize((avatar_size, avatar_size))
-                        mask = Image.new("L", (avatar_size, avatar_size), 0)
-                        m_draw = ImageDraw.Draw(mask)
-                        m_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
-                        av_img.putalpha(mask)
-                        img.paste(av_img, (int(tx - avatar_size - 5), int(y_pos + _th/2 - avatar_size/2)), av_img)
-                    except Exception:
-                        pass
-                        
-                stroke_width = 3 if is_bold_crown else 2
-                for sx in [-stroke_width, stroke_width]:
-                    for sy in [-stroke_width, stroke_width]:
-                        draw.text((tx+sx, y_pos+sy), text, font=font, fill=(0,0,0))
-                draw.text((tx, y_pos), text, font=font, fill=color)
-                return y_pos + _th + 10
-
-            def role_priority(occ):
-                r = occ.get("role_type", "player")
-                if r == "owner": return 0
-                if r == "player": return 1
-                return 2
-                
-            sorted_occupants = sorted(occupants, key=role_priority)
-            
-            for occ in sorted_occupants:
+            # Add Owners
+            for occ in owners:
                 name = occ["name"]
                 if len(name) > 15: name = name[:12] + "..."
-                role_type = occ.get("role_type", "player")
-                is_owner = role_type == "owner"
+                disp = f"♛ {name}" if self.OWNER_INDICATOR_MODE == "crown" else name
+                lines.append({
+                    "text": disp,
+                    "color": (255, 215, 0),
+                    "font": names_font,
+                    "avatar": occ.get("avatar"),
+                    "is_owner": True
+                })
+            
+            # Add Divider if both exist
+            if owners and residents:
+                lines.append({"type": "divider"})
+            
+            # Add Residents
+            owner_ids = {o["id"] for o in owners}
+            def res_priority(res):
+                # Owners first in resident list
+                if res["id"] in owner_ids: return 0
+                if res["role_type"] == "player": return 1
+                return 2
                 
-                if is_owner and self.OWNER_INDICATOR_MODE == "crown":
-                    disp = f"♛ {name}"
-                    c = (255, 215, 0)
+            sorted_residents = sorted(residents, key=res_priority)
+            for occ in sorted_residents:
+                name = occ["name"]
+                if len(name) > 15: name = name[:12] + "..."
+                c = (152, 251, 152) if occ.get("role_type") == "player" else (180, 180, 180)
+                lines.append({
+                    "text": name,
+                    "color": c,
+                    "font": names_font,
+                    "avatar": occ.get("avatar"),
+                    "is_owner": False
+                })
+                
+            # 2. Calculate Total Height and Max Width of the block
+            total_h = 0
+            max_w = 0
+            line_details = []
+            avatar_size = 24
+            
+            for line in lines:
+                if line.get("type") == "divider":
+                    line_h = 20
+                    total_h += line_h
+                    line_details.append({"h": line_h})
                 else:
-                    disp = name
-                    c = (152, 251, 152) if role_type == "player" else (180, 180, 180)
+                    try:
+                        bbox = draw.textbbox((0, 0), line["text"], font=line["font"])
+                        tw = bbox[2] - bbox[0]
+                        th = bbox[3] - bbox[1]
+                    except AttributeError:
+                        tw, th = draw.textsize(line["text"], font=line["font"])
+                        
+                    full_w = tw + (avatar_size + 5 if line.get("avatar") else 0)
+                    max_w = max(max_w, full_w)
+                    line_h = th + 10
+                    total_h += line_h
+                    line_details.append({"h": line_h, "w": full_w, "tw": tw, "th": th})
+            
+            # 3. Find non-colliding y_off for the UNIFIED BLOCK
+            y_off = cy + half + 10
+            while True:
+                # Padding around the block for better readability
+                block_bbox = (cx - max_w/2 - 10, y_off, cx + max_w/2 + 10, y_off + total_h)
+                if self.check_collision(block_bbox, bboxes):
+                    y_off += 5
+                else:
+                    bboxes.append(block_bbox)
+                    break
+            
+            # 4. Render the block
+            current_y = y_off
+            for i, line in enumerate(lines):
+                detail = line_details[i]
+                if line.get("type") == "divider":
+                    # Faint separator line
+                    line_y = current_y + 10
+                    draw.line([(cx - max_w/2, line_y), (cx + max_w/2, line_y)], fill=(255, 255, 255, 60), width=2)
+                    current_y += detail["h"]
+                else:
+                    tx = cx - detail["w"]/2 + (avatar_size + 5 if line.get("avatar") else 0)
                     
-                has_av = getattr(self, 'SHOW_AVATARS', True) and occ.get("avatar") is not None
-                y_off = render_text_line(disp, c, names_font, y_off, has_avatar=has_av, avatar_bytes=occ.get("avatar"), is_bold_crown=is_owner)
-                    
+                    # Avatar
+                    if line.get("avatar") and getattr(self, 'SHOW_AVATARS', True):
+                        try:
+                            av_img = Image.open(io.BytesIO(line["avatar"])).convert("RGBA")
+                            av_img = av_img.resize((avatar_size, avatar_size))
+                            mask = Image.new("L", (avatar_size, avatar_size), 0)
+                            m_draw = ImageDraw.Draw(mask)
+                            m_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+                            av_img.putalpha(mask)
+                            img.paste(av_img, (int(tx - avatar_size - 5), int(current_y + detail["th"]/2 - avatar_size/2)), av_img)
+                        except Exception: pass
+                        
+                    # Text with shadow/stroke
+                    stroke_w = 3 if line.get("is_owner") else 2
+                    for sx in [-stroke_w, stroke_w]:
+                        for sy in [-stroke_w, stroke_w]:
+                            draw.text((tx+sx, current_y+sy), line["text"], font=line["font"], fill=(0,0,0))
+                    draw.text((tx, current_y), line["text"], font=line["font"], fill=line["color"])
+                    current_y += detail["h"]
+
         elif status == "empty":
             text = "(Empty)"
             try:
@@ -472,6 +541,7 @@ class Estate(commands.Cog):
                     bboxes.append(t_bbox)
                     break
             draw.text((cx - tw/2, y_off), text, font=small_font, fill=(169, 169, 169))
+
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel):
