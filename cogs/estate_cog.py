@@ -121,7 +121,8 @@ class Estate(commands.Cog):
         # 1. Gather Owners from member_homes
         for member_id, ch_id in member_homes.items():
             member = guild.get_member(int(member_id))
-            if member and sponsor_role in member.roles:
+            # Owners are members with sponsor_role OR alive_role who are in member_homes.
+            if member and (sponsor_role in member.roles or alive_role in member.roles):
                 for num, h_data in houses.items():
                     if h_data.get("channel") and h_data["channel"].id == int(ch_id):
                         avatar_bytes = None
