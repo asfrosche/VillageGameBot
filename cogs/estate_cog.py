@@ -233,9 +233,19 @@ class Estate(commands.Cog):
         
         # Load Background Wallpaper
         try:
-            bg_path = os.path.join(os.path.dirname(__file__), "..", "assets", "contour_wall.jpg")
-            if os.path.exists(bg_path):
-                bg = Image.open(bg_path).convert("RGBA")
+            # Try multiple locations: assets folder or root folder
+            potential_paths = [
+                os.path.join(os.path.dirname(__file__), "..", "assets", "contour_wall.jpg"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "contour_wall.jpg"),
+                os.path.join(os.path.dirname(__file__), "assets", "contour_wall.jpg")
+            ]
+            bg = None
+            for bg_path in potential_paths:
+                if os.path.exists(bg_path):
+                    bg = Image.open(bg_path).convert("RGBA")
+                    break
+            
+            if bg:
                 bg_w, bg_h = bg.size
                 canvas_ratio = width / height
                 bg_ratio = bg_w / bg_h
