@@ -222,11 +222,18 @@ class Estate(commands.Cog):
                 idx = r * cols + c
                 if idx < count:
                     num = all_keys[idx]
-                    stagger_y = (c % 2) * 50
-                    x = padding_x + c * (house_size + padding_x) + house_size / 2
+                    
+                    # Serpentine horizontal ordering:
+                    # Row 0: 0, 1, 2, 3... (left to right)
+                    # Row 1: 5, 4, 3, 2... (right to left)
+                    display_c = c if r % 2 == 0 else (cols - 1 - c)
+                    
+                    stagger_y = (display_c % 2) * 50
+                    x = padding_x + display_c * (house_size + padding_x) + house_size / 2
                     y = current_y + house_size / 2 + stagger_y
                     positions[num] = (x, y)
-            current_y += row_heights[r]
+            # Add extra vertical gap for the "street" transition
+            current_y += row_heights[r] + 40
             
         height = current_y + padding_y
             
@@ -303,15 +310,18 @@ class Estate(commands.Cog):
         draw.text(((width - sw) / 2 + 1, 101), subtitle, font=subtitle_font, fill=(0, 0, 0))
         draw.text(((width - sw) / 2, 100), subtitle, font=subtitle_font, fill=(220, 220, 220))
         
-        # Draw Subtle Neighborhood Roads (Semi-transparent black)
-        for r in range(rows):
-            row_positions = []
-            for c in range(cols):
-                idx = r * cols + c
-                if idx < count:
-                    row_positions.append(positions[all_keys[idx]])
-            if len(row_positions) > 1:
-                draw.line(row_positions, fill=(0, 0, 0, 150), width=15)
+        # Draw Continuous Serpentine Road (Low-contrast aesthetic)
+        road_points = [positions[k] for k in all_keys]
+        if len(road_points) > 1:
+            # 1. Main Road Asphalt (wider, darker)
+            draw.line(road_points, fill=(0, 0, 0, 100), width=30)
+            
+            # 2. Subtle Path strip (narrower, faint)
+            draw.line(road_points, fill=(255, 255, 255, 20), width=2)
+            
+            # 3. Connection indicators for U-turns (Optional enhancement)
+            # The line naturally connects the end of one row to the start of the next.
+            # Since they are on the same side in serpentine mode, it creates a clean vertical "lane".
         
         bboxes = []
         for num in all_keys:
