@@ -1,106 +1,148 @@
 import asyncio
-import discord
-import os
-import datetime
-import random
+import io
 import json
+import os
+import random
 import sqlite3
+
+import discord
 from discord.ext import commands
 from datetime import datetime
-from cogs.data_utils import load_guild_data, save_guild_data, base_variables, invites_db_path, init_invites_db, load_invites, save_invites, init_deadlist_db, add_player, remove_player, get_team_players, deadlist_db_path
+
 from cogs.actions_logging_cog import ActionsLogging
-from cogs.setup_cog import Setup
-from cogs.send_role import SendRole
-from cogs.moving_cog import Moving
-from cogs.home_cog import Home
+from cogs.aux_battle import AuxBattle
+from cogs.bday import Birthday
+from cogs.data_utils import (
+    base_variables,
+    deadlist_db_path,
+    delete_guild_data,
+    init_deadlist_db,
+    init_invites_db,
+    invites_db_path,
+    load_guild_data,
+    load_invites,
+    save_guild_data,
+    save_invites,
+)
+from utils.bot_db import delete_target_channel
+from cogs.game_manager import GameManager
+from cogs.game_manager_en import GameManagerEn
+from cogs.game_manager_it import GameManagerIt
+from cogs.economy_cog import Economy
+from cogs.dashboard_cog import Dashboard
 from cogs.handling_cog import Handling
+from cogs.home_cog import Home
 from cogs.infos_cog import Infos
 from cogs.lists_cog import Lists
-from cogs.presets_cog import Presets
-from cogs.voting_cog import Voting
-from cogs.nominations_cog import Nominations
-from cogs.utility_cog import Utility
-from cogs.other_cog import Other
-from cogs.tracker_cog import MessageTracker
-from cogs.privatecommands_cog import Privatecommands
 from cogs.location_manager import LocationManager
-from cogs.game_manager import GameManager
-from cogs.help import HelpCommand
-from cogs.aux_battle import AuxBattle
-from cogs.soldati_cog import SoldatiGame
-from cogs.bday import Birthday  
 from cogs.meetupmatrix import Meetup
+from cogs.moving_cog import Moving
+from cogs.nominations_cog import Nominations
+from cogs.other_cog import Other
+from cogs.presets_cog import Presets
+from cogs.privatecommands_cog import Privatecommands
+from cogs.send_role import SendRole
+from cogs.setup_cog import Setup
+from cogs.tracker_cog import MessageTracker
+from cogs.utility_cog import Utility
+from cogs.vg_intro import VgIntro
+from cogs.voting_cog import Voting
+from config import PREFIX, TOKEN
+from utils.embeds import error_embed, info_embed, plain_embed
+from cogs.estate_cog import Estate
+from cogs.item_drop_cog import ItemDrop
 
-TOKEN = os.getenv('TOKEN')
+
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='.', help_command=None, intents=intents)
+bot = commands.Bot(command_prefix=PREFIX, help_command=None, intents=intents)
 
 init_invites_db()
 init_deadlist_db()
 
 @bot.event
 async def on_ready():
-    await asyncio.sleep(8)  # give Discord API time to stabilize
-
     for guild in bot.guilds:
         guild_data = load_guild_data(guild.id)
         if guild_data is None:
             guild_data = base_variables
             save_guild_data(guild.id, guild_data)
     for guild in bot.guilds:
-        try: 
-            current_invites = await guild.invites()
-            invites = {invite.code: invite.uses for invite in current_invites}
-            save_invites(guild.id, invites)
-        except Exception as e:
-            print(f"Error fetching invites for {guild.name}: {e}")
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.playing, name='With Bidet'))
-    print('Server in cui si trova il bot:')
+        current_invites = await guild.invites()
+        invites = {invite.code: invite.uses for invite in current_invites}
+        save_invites(guild.id, invites)
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.playing,
+            name="With Bidet",
+        )
+    )
+    print("Server in cui si trova il bot:")
     for guild in bot.guilds:
         print(f'- {guild.name}')
+    # Load dynamic/optional cogs that are not added via startcog()
     try:
-        await bot.load_extension(f"cogs.senet_cog")
-    except Exception as e:
-        print(f"Errore caricamento Senet cog: {e}")
-    try:
-        await bot.load_extension(f"cogs.library_cog")
+        await bot.load_extension("cogs.library_cog")
     except Exception as e:
         print(f"Errore caricamento Lybrary cog: {e}")
     try:
-        await bot.load_extension('cogs.meeting_cog')
+        await bot.load_extension("cogs.library_it_cog")
+    except Exception as e:
+        print(f"Errore caricamento Ita Lybrary cog: {e}")
+    try:
+        await bot.load_extension("cogs.meeting_cog")
     except Exception as e:
         print(f"Errore caricamento Meetings cog: {e}")
+    try:
+        await bot.load_extension('cogs.os_info_cog')
+    except Exception as e:
+        print(f"Errore caricamento Overseer cog: {e}")
     
 
 
 @bot.event
 async def on_guild_join(guild):
-    guild_data_file = f"db/{guild.id}.json"
     bidet = bot.get_user(450772749829537793)
-    await bidet.send(f'Bot joined a new server: {guild.name}')
+    if bidet:
+        await bidet.send(f"Bot joined a new server: {guild.name}")
     welcome_channel = guild.system_channel
     if welcome_channel:
-        embedw = discord.Embed(title="Hello there👋! And thanks for adding Village Game!", color=0xff3fb9)
-        embedw.add_field(name="My default prefix is:", value="`.`\nIt can be changed by an admin by using the `.prefix` command👾", inline=False)
-        embedw.add_field(name="Commands:", value="Get started with `.help` command, it will send you all commands of the bot!🤖\nThen use the `.help {category}` command to go further into commands🏳️", inline=False)
-        embedw.set_thumbnail(url="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdHRscTV0cG1oejNtaXRhcjRwY3g5OXlmc281NmJhejJlMTBydDNwdCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/yoJC2mx6HwjayMefeg/giphy.gif")
+        embedw = plain_embed(
+            title="Hello there👋! And thanks for adding Village Game!",
+        )
+        embedw.add_field(
+            name="My default prefix is:",
+            value=f"`{bot.command_prefix}`\nIt can be changed by an admin by using the `.prefix` command👾",
+            inline=False,
+        )
+        embedw.add_field(
+            name="Commands:",
+            value=(
+                "Get started with `.help` command, it will send you all commands of the bot!🤖\n"
+                "Then use the `.help {category}` command to go further into commands🏳️"
+            ),
+            inline=False,
+        )
+        embedw.set_thumbnail(
+            url=(
+                "https://media1.giphy.com/media/"
+                "v1.Y2lkPTc5MGI3NjExdHRscTV0cG1oejNtaXRhcjRwY3g5OXlmc281NmJhejJlMTBydDNwdC"
+                "ZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/yoJC2mx6HwjayMefeg/giphy.gif"
+            )
+        )
         await welcome_channel.send(embed=embedw)
-    if not os.path.exists(guild_data_file):
-        with open(guild_data_file, "w") as f:
-            json.dump(base_variables, f, indent=4)
-    try: 
-        current_invites = await guild.invites()
-        invites = {invite.code: invite.uses for invite in current_invites}
-        save_invites(guild.id, invites)
-    except Exception as e:
-        print(f"Error fetching invites for {guild.name} on join: {e}")
-
+    # Ensure default guild settings exist
+    if load_guild_data(guild.id) is None:
+        save_guild_data(guild.id, base_variables)
+    current_invites = await guild.invites()
+    invites = {invite.code: invite.uses for invite in current_invites}
+    save_invites(guild.id, invites)
 
 @bot.event
 async def on_guild_remove(guild):
     bidet = bot.get_user(450772749829537793)
-    await bidet.send(f'Bot left a server: {guild.name}')
+    if bidet:
+        await bidet.send(f"Bot left a server: {guild.name}")
 
     guild_id = guild.id
     guild_id_str = str(guild.id)
@@ -130,49 +172,62 @@ async def on_guild_remove(guild):
         await nominations_cog.conn.execute("DELETE FROM tokens WHERE guild_id = ?", (guild_id,))
         await nominations_cog.conn.commit()
 
-    target_channels_file = 'db/target_channels.json'
-    if os.path.exists(target_channels_file):
-        with open(target_channels_file, 'r+') as f:
-            try:
-                target_channels = json.load(f)
-                if guild_id_str in target_channels:
-                    del target_channels[guild_id_str]
-                    f.seek(0)
-                    json.dump(target_channels, f, indent=4)
-                    f.truncate()
-            except json.JSONDecodeError:
-                pass
-
-    guild_data_file = f"db/{guild.id}.json"
-    if os.path.exists(guild_data_file):
-        os.remove(guild_data_file)
-    await bidet.send(f'{guild.name} data deleted')
+    # Clean up persisted settings
+    try:
+        delete_target_channel(guild_id)
+    except Exception:
+        pass
+    try:
+        delete_guild_data(guild_id)
+    except Exception:
+        pass
+    if bidet:
+        await bidet.send(f"{guild.name} data deleted")
 
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.reply("Missing required argument. Please check the command usage.")
+
+    if isinstance(error, commands.MissingRequiredArgument):
+        embed = error_embed(
+            description="Missing required argument. Please check the command usage.",
+        )
+        await ctx.reply(embed=embed, mention_author=False)
     elif isinstance(error, commands.BadArgument):
-        await ctx.reply("Bad argument. Please check the command usage.")
+        embed = error_embed(
+            description="Bad argument. Please check the command usage.",
+        )
+        await ctx.reply(embed=embed, mention_author=False)
     elif isinstance(error, commands.CheckFailure):
-        await ctx.reply("You don't have permission to use this command.")
-    elif isinstance(error, discord.errors.HTTPException):
-        if error.status == 429:
-            retry_after = error.retry_after
-            await ctx.reply(f"Rate limit exceeded. Retry in {retry_after:.2f} seconds.")
+        embed = error_embed(
+            description="You don't have permission to use this command.",
+        )
+        await ctx.reply(embed=embed, mention_author=False)
+    elif isinstance(error, discord.errors.HTTPException) and getattr(error, "status", None) == 429:
+        retry_after = getattr(error, "retry_after", None)
+        if retry_after is not None:
+            embed = error_embed(
+                title="Rate Limited",
+                description=f"Rate limit exceeded. Retry in {retry_after:.2f} seconds.",
+            )
+            await ctx.reply(embed=embed, mention_author=False)
             await asyncio.sleep(retry_after)
-            return
     else:
-        await ctx.reply("An error occurred. Please try again later.")
-    print(f'Error: {error}')
+        embed = error_embed(
+            description="An unexpected error occurred. Please try again later.",
+        )
+        await ctx.reply(embed=embed, mention_author=False)
+
+    print(f"Error: {error}")
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user or message.author.id == 408785106942164992:
         return
     if not message.guild:
+        if message.content.startswith(bot.command_prefix):
+            await bot.invoke(await bot.get_context(message))
         return
     guild_data = load_guild_data(message.guild.id)
     if not guild_data:
@@ -199,10 +254,13 @@ async def on_message(message):
         except discord.HTTPException:
             print("Network error")   
     if message.author.id == 292953664492929025:
-        category = discord.utils.get(message.guild.categories, name=guild_data["rc_category_name"])
-        if not category:
+        rc_category   = discord.utils.get(message.guild.categories, name=guild_data.get("rc_category_name"))
+        dead_category = discord.utils.get(message.guild.categories, name=guild_data.get("dead_category_name"))
+        alt_category  = discord.utils.get(message.guild.categories, name=guild_data.get("alt_category_name"))
+        allowed_categories = [c for c in [rc_category, dead_category, alt_category] if c]
+        if not allowed_categories:
             return
-        if message.channel not in category.channels:
+        if not any(message.channel in cat.channels for cat in allowed_categories):
             return
         original_content = message.content
         if guild_data["whisper_response"] in original_content:
@@ -226,21 +284,29 @@ async def on_message_delete(message):
         guild_data = load_guild_data(message.guild.id)
         if guild_data:
             edit_del_channel_name = guild_data.get("edit_del_logs")
-            edit_del_channel = discord.utils.get(message.guild.channels, name=edit_del_channel_name)
+            edit_del_channel = discord.utils.get(
+                message.guild.channels,
+                name=edit_del_channel_name,
+            )
             if edit_del_channel:
-                if len(message.content) < 1024:
-                    embed=discord.Embed(title="Message Deleted", description=f"**User:** {message.author.mention} `{message.author.name}`\n**Channel:** {message.channel.mention} `[#{message.channel.name}]`", color=0xFF0000, timestamp=datetime.now())
-                    embed.add_field(name="**Message:**" ,value=message.content, inline=False)
-                    embed.set_footer(text="Village Game")
+                header = (
+                    f"**User:** {message.author.mention} `{message.author.name}`\n"
+                    f"**Channel:** {message.channel.mention} `[#{message.channel.name}]`"
+                )
+                if len(message.content) <= 4000:
+                    embed = error_embed(
+                        title="Message Deleted",
+                        description=f"{header}\n\n**Message:**\n{message.content}",
+                    )
                     await edit_del_channel.send(embed=embed)
                 else:
-                    log_filename = "del_log.txt"
-                    timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                    with open(log_filename, "w") as log_file:
-                        log_file.write(f"{timestamp} - {message.author.name}: {message.content}")
-                    await edit_del_channel.send(f"{message.author.display_name} `{message.author.name}` message was deleted in {message.channel.mention}:")
-                    await edit_del_channel.send(file=discord.File(log_filename))
-                    os.remove(log_filename)
+                    ts = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    log_content = f"{ts} - {message.author.name}:\n{message.content}"
+                    log_file = io.BytesIO(log_content.encode("utf-8"))
+                    await edit_del_channel.send(
+                        f"**Message Deleted** — {message.author.mention} `{message.author.name}` in {message.channel.mention}:",
+                        file=discord.File(log_file, filename="deleted_message.txt"),
+                    )
 
 @bot.event
 async def on_message_edit(message_before, message_after):
@@ -250,21 +316,39 @@ async def on_message_edit(message_before, message_after):
         guild_data = load_guild_data(message_before.guild.id)
         if guild_data:
             edit_del_channel_name = guild_data.get("edit_del_logs")
-            edit_del_channel = discord.utils.get(message_before.guild.channels, name=edit_del_channel_name)
+            edit_del_channel = discord.utils.get(
+                message_before.guild.channels,
+                name=edit_del_channel_name,
+            )
             if edit_del_channel:
-                if len(message_before.content) < 1024 and len(message_after.content) < 1024:
-                    embed = discord.Embed(title="Message Edited", description=f"**User:** {message_before.author.mention} `{message_before.author.name}`\n**Channel:** {message_before.channel.mention} `[#{message_before.channel.name}]`", color=0xFFFF00, timestamp=datetime.now())
-                    embed.add_field(name="**Message Before:**", value=message_before.content, inline=False)
-                    embed.add_field(name="**Message After:**", value=message_after.content, inline=False)
-                    embed.set_footer(text="Village Game")
+                before_len = len(message_before.content)
+                after_len = len(message_after.content)
+                header = (
+                    f"**User:** {message_before.author.mention} `{message_before.author.name}`\n"
+                    f"**Channel:** {message_before.channel.mention} `[#{message_before.channel.name}]`"
+                )
+                if before_len <= 1900 and after_len <= 1900:
+                    embed = plain_embed(
+                        title="Message Edited",
+                        color=0xFFFF00,
+                    )
+                    embed.description = (
+                        f"{header}\n\n"
+                        f"**Message Before:**\n{message_before.content}\n\n"
+                        f"**Message After:**\n{message_after.content}"
+                    )
                     await edit_del_channel.send(embed=embed)
                 else:
-                    log_filename = "edit_log.txt"
-                    with open(log_filename, "w") as log_file:
-                        log_file.write(f"{message_before.author.name} Edited a Message\n\nMessage Before:\n{message_before.content}\n\nMessage After:\n{message_after.content}")
-                    await edit_del_channel.send(f"{message_before.author.display_name} `{message_before.author.name}` edited a message in {message_before.channel.mention}:")
-                    await edit_del_channel.send(file=discord.File(log_filename))
-                    os.remove(log_filename)
+                    log_content = (
+                        f"{message_before.author.name} edited a message\n\n"
+                        f"--- BEFORE ---\n{message_before.content}\n\n"
+                        f"--- AFTER ---\n{message_after.content}"
+                    )
+                    log_file = io.BytesIO(log_content.encode("utf-8"))
+                    await edit_del_channel.send(
+                        f"**Message Edited** — {message_before.author.mention} `{message_before.author.name}` in {message_before.channel.mention}:",
+                        file=discord.File(log_file, filename="edited_message.txt"),
+                    )
 
 @bot.event
 async def on_member_join(member):
@@ -320,7 +404,9 @@ async def on_member_remove(member):
         leave_logs_channel_name = guild_data.get("join_and_leave_logs")
         leave_logs_channel = discord.utils.get(member.guild.channels, name=leave_logs_channel_name)
         if leave_logs_channel:
-            await leave_logs_channel.send(f"## User Left ➖\n**Name:** {member.mention} `{member.name}`")
+            await leave_logs_channel.send(
+                f"## User Left ➖\n**Name:** {member.mention} `{member.name}`"
+            )
 
 @bot.event
 async def on_command(ctx):
@@ -329,58 +415,130 @@ async def on_command(ctx):
     if isinstance(ctx.channel, discord.DMChannel):
         print(f'By {ctx.author}: {ctx.command}')
 
-async def send_first_embed(message, guild_data):
-    embed = discord.Embed(title="What message do you want to send?", description="Answer to this message with the message you want to send, remember to not go against rules like exceed maximum allowed words (there is a log channel)", color=0xff3fb9)
-    embed.set_footer(text="Village Game")
-    bot_message = await message.channel.send(embed=embed)
-    try:
-        def check(m):
-            return (
-                m.channel == message.channel
-                and m.reference and m.reference.message_id == bot_message.id
-            )
-        user_response = await bot.wait_for("message", check=check, timeout=300)
-        await send_second_embed(message, guild_data, user_response.channel, user_response.content, user_response.author)
-    except asyncio.TimeoutError:
-        embedto = discord.Embed(title="Whisper canceled", description="You didn't send a message within the given time", color=discord.Color.red(), timestamp=datetime.now())
-        embedto.set_footer(text="Village Game")
-        await message.channel.send(embed=embedto)
-        return
+class WhisperTargetSelectView(discord.ui.View):
+    def __init__(self, origin_message: discord.Message, guild_data: dict, timeout: int = 300):
+        super().__init__(timeout=timeout)
+        self.origin_message = origin_message
+        self.guild_data = guild_data
 
-async def send_second_embed(message, guild_data, channel, user_response1, author):
-    embed = discord.Embed(title="Who do you want to send it to?", description="Send the user MENTION answering to this message", color=0xff3fb9)
-    embed.set_footer(text="Village Game")
-    bot_message = await channel.send(embed=embed)
-    alive_role = discord.utils.get(message.guild.roles, name=guild_data["alive_role_name"])
-    while True:
-        try:
-            def check(m):
-                return (
-                    m.channel == message.channel
-                    and m.reference and m.reference.message_id == bot_message.id
-                    )
-            user_response2 = await bot.wait_for("message", check=check, timeout=300)
+        guild = origin_message.guild
+        alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
+
+        options: list[discord.SelectOption] = []
+        if alive_role:
+            for member in guild.members:
+                if alive_role in member.roles:
+                    label = member.display_name[:95]
+                    options.append(discord.SelectOption(label=label, value=str(member.id)))
+                    if len(options) >= 25:
+                        break
+
+        select = discord.ui.Select(
+            placeholder="Select the whisper recipient...",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+        async def on_select(interaction: discord.Interaction):
+            # ── Role/permission check ─────────────────────────────────────────
+            guild = interaction.guild
+            gd = self.guild_data
+            alive_role_obj   = discord.utils.get(guild.roles, name=gd.get("alive_role_name"))
+            sponsor_role_obj = discord.utils.get(guild.roles, name=gd.get("sponsor_role_name"))
+            dead_role_obj    = discord.utils.get(guild.roles, name=gd.get("dead_role_name"))
+            alt_role_obj     = discord.utils.get(guild.roles, name=gd.get("alt_role_name"))
+            user_roles = set(interaction.user.roles)
+            is_allowed = (
+                interaction.user.guild_permissions.administrator
+                or alive_role_obj   in user_roles
+                or sponsor_role_obj in user_roles
+                or dead_role_obj    in user_roles
+                or alt_role_obj     in user_roles
+            )
+            if not is_allowed:
+                return await interaction.response.send_message(
+                    "You don't have permission to send whispers.",
+                    ephemeral=True,
+                )
+
+            target_id = int(select.values[0])
+            target_member = guild.get_member(target_id) if guild else None
+            if not target_member:
+                return await interaction.response.send_message(
+                    "Selected user is no longer available.",
+                    ephemeral=True,
+                )
+
+            # ── Lock the menu immediately so no second selection is possible ──
+            select.disabled = True
             try:
-                mentioned_user_id = int(user_response2.content.strip("<@!>"))
-            except ValueError:
-                embed_invalid = discord.Embed(title="Invalid Mention", description="Please mention a valid user.", color=discord.Color.red())
-                embed_invalid.set_footer(text="Village Game")
-                await channel.send(embed=embed_invalid)
-                continue
-            mentioned_user = message.guild.get_member(mentioned_user_id)
-            if mentioned_user and alive_role in mentioned_user.roles:
-                await whisper(message, guild_data, mentioned_user_id, user_response1, author)
-                await message.channel.send('Whisper sent.')
-                break
-            else:
-                embed_invalid = discord.Embed(title="Invalid User Mentioned", description=f"The mentioned user does not have '{alive_role.name}' role. Please mention someone with '{alive_role.name}' role.", color=discord.Color.red())
-                embed_invalid.set_footer(text="Village Game")
-                await channel.send(embed=embed_invalid)
-        except asyncio.TimeoutError:
-            embedto = discord.Embed(title="Whisper canceled", description="You didn't send the user within the given time", color=discord.Color.red(), timestamp=datetime.now())
-            embedto.set_footer(text="Village Game")
-            await channel.send(embed=embedto)
-            return
+                await interaction.message.edit(view=self)
+            except Exception:
+                pass
+
+            # Ask for the whisper message
+            prompt_embed = info_embed(
+                title="What message do you want to send?",
+                description=(
+                    f"Reply to this message with the whisper you want to send to {target_member.mention}.\n"
+                    "Remember not to exceed the maximum allowed words (there is a log channel)."
+                ),
+            )
+            # send_message returns None — fetch the real message object right after
+            await interaction.response.send_message(embed=prompt_embed)
+            prompt_msg = await interaction.original_response()
+
+            try:
+                def check(m: discord.Message):
+                    return (
+                        m.channel == self.origin_message.channel
+                        and m.reference is not None
+                        and m.reference.message_id == prompt_msg.id
+                        and m.author == interaction.user
+                    )
+
+                user_response = await bot.wait_for("message", check=check, timeout=300)
+                await whisper(
+                    self.origin_message,
+                    self.guild_data,
+                    target_id,
+                    user_response.content,
+                    user_response.author,
+                )
+                await self.origin_message.channel.send("Whisper sent.")
+            except asyncio.TimeoutError:
+                embedto = error_embed(
+                    title="Whisper canceled",
+                    description="You didn't send a message within the given time.",
+                )
+                await self.origin_message.channel.send(embed=embedto)
+
+            # Fully remove the view once done
+            try:
+                if interaction.message:
+                    await interaction.message.edit(view=None)
+            except Exception:
+                pass
+
+            self.stop()
+
+        select.callback = on_select
+        self.add_item(select)
+
+
+async def send_first_embed(message, guild_data):
+    """
+    Entry point for automated whispers via the overseer bot message.
+    Step 1: show a dropdown of alive players.
+    Step 2: after a player is selected, ask for the message content by reply.
+    """
+    embed = info_embed(
+        title="Who do you want to send a whisper to?",
+        description="Use the dropdown below to select an **alive** player.",
+    )
+    view = WhisperTargetSelectView(message, guild_data)
+    await message.channel.send(embed=embed, view=view)
 
 async def whisper(message, guild_data, mentioned_user_id, user_response1, author):
     user = bot.get_user(mentioned_user_id)
@@ -388,18 +546,16 @@ async def whisper(message, guild_data, mentioned_user_id, user_response1, author
     whisper_logs_channel = discord.utils.get(message.guild.channels, name=guild_data["whisper_logs_channel_name"])
     for channel in rc_category.channels:
         if user in channel.members:
-            embed = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
+            embed = info_embed()
             if guild_data["showwhispersender"]:
                 embed.add_field(name=f"{author.mention} `[{author.display_name}]` sent you a whisper:", value=f'{user_response1}', inline=False)
             else:
                 embed.add_field(name="Someone sent you a whisper:", value=f'{user_response1}', inline=False)
-            embed.set_footer(text="Village Game")
             await channel.send(f"{user.mention}")
             await channel.send(embed=embed)
             # Log the whisper
-            embedlog = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
+            embedlog = info_embed()
             embedlog.add_field(name=f"{author.mention} sent a whisper to {user.mention}:", value=f'{user_response1}\n\n{channel.mention}', inline=False)
-            embedlog.set_footer(text="Village Game")
             await whisper_logs_channel.send(embed=embedlog)
 
 #fireworks_gifs = ['https://tenor.com/view/fireworks-gif-13143174', 'https://tenor.com/view/fireworks-explosions-lights-gif-17712639', 'https://tenor.com/view/fireworks-firework-night-aesthetic-anime-gif-19222229', 'https://tenor.com/view/firework-2020-2021-2019-fireworks-gif-19768402', 'https://tenor.com/view/firework-gif-21770535', 'https://tenor.com/view/pyroworks-fireworks-mania-firework-happy-new-year-new-year-gif-4556811341928768447', 'https://tenor.com/view/firework-anime-gif-24295480', 'https://tenor.com/view/firework-feuerwerk-s1nnr3-s1nn3rv3-pyroworks-gif-20635964', 'https://tenor.com/view/sono-bisque-doll-wa-koi-wo-suru-fireworks-anime-my-dress-up-darling-festival-gif-25800144']
@@ -408,8 +564,14 @@ fireworks_gifs = ['https://tenor.com/view/lanterns-flying-lantern-chinese-lanter
 async def fireworks(message, guild_data):
     alive_role = discord.utils.get(message.guild.roles, name=guild_data["alive_role_name"])
     sponsor_role = discord.utils.get(message.guild.roles, name=guild_data["sponsor_role_name"])
-    announcements_channel = discord.utils.get(message.guild.channels, name=guild_data["announcements_channel_name"])
-    houses_category = discord.utils.get(message.guild.categories, name=guild_data["houses_category_name"])
+    announcements_channel = discord.utils.get(
+        message.guild.channels,
+        name=guild_data["announcements_channel_name"],
+    )
+    houses_category = discord.utils.get(
+        message.guild.categories,
+        name=guild_data["houses_category_name"],
+    )
     random_fireworks_gif = random.choice(fireworks_gifs)
     members = message.channel.members
     for member in members:
@@ -440,11 +602,18 @@ async def startcog():
     await bot.add_cog(MessageTracker(bot))
     await bot.add_cog(LocationManager(bot))
     await bot.add_cog(GameManager(bot))
-    await bot.add_cog(HelpCommand(bot))
+    await bot.add_cog(GameManagerEn(bot))
+    await bot.add_cog(GameManagerIt(bot))
+    await bot.add_cog(Economy(bot))
+    await bot.add_cog(Dashboard(bot))
     await bot.add_cog(AuxBattle(bot))
-    await bot.add_cog(SoldatiGame(bot))
     await bot.add_cog(Birthday(bot))
     await bot.add_cog(Meetup(bot))
+    await bot.add_cog(Estate(bot))
+    await bot.add_cog(ItemDrop(bot))
+    await bot.add_cog(VgIntro(bot))
+
+
 asyncio.run(startcog())
 
 bot.run(TOKEN)

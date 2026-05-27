@@ -3,19 +3,29 @@ from discord.ext import commands
 from datetime import datetime, timezone
 from discord import Embed, ui
 from cogs.data_utils import load_guild_data
+from utils.bot_db import insert_action_log
 
 
 class ActionButtons(ui.View):
-    def __init__(self, user_embed: discord.Message, log_embed: discord.Message, user_embed_obj: Embed, log_embed_obj: Embed, timeout=86400):
+    def __init__(
+        self,
+        user_embed: discord.Message,
+        log_embed: discord.Message,
+        user_embed_obj: Embed,
+        log_embed_obj: Embed,
+        meta: dict,
+        timeout=86400,
+    ):
         super().__init__(timeout=timeout)
         self.user_embed = user_embed
         self.log_embed = log_embed
         self.user_embed_obj = user_embed_obj
         self.log_embed_obj = log_embed_obj
+        self.meta = meta
 
-    async def update_embed(self, interaction: discord.Interaction, status_text: str, color: int):
+    async def update_embed(self, interaction: discord.Interaction, status_text: str, color: int, store_done: bool):
         timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        footer_text = f"{status_text} at {timestamp} (UTC) by {interaction.user.display_name}"
+        footer_text = f"{status_text} at {timestamp} by {interaction.user.display_name}"
 
         self.user_embed_obj.set_footer(text=footer_text)
         self.user_embed_obj.color = discord.Color(color)
@@ -27,6 +37,23 @@ class ActionButtons(ui.View):
         await interaction.response.edit_message(embed=self.log_embed_obj, view=None)
         await self.user_embed.edit(embed=self.user_embed_obj, view=None)
         await self.log_embed.edit(embed=self.log_embed_obj, view=None)
+
+        # Persist only confirmed "Done" actions
+        if store_done:
+            try:
+                insert_action_log(
+                    guild_id=self.meta["guild_id"],
+                    channel_id=self.meta["channel_id"],
+                    player_id=self.meta.get("player_id"),
+                    message=self.meta.get("message", "")[:1000],
+                    created_at=self.meta.get("created_at", datetime.now(timezone.utc)),
+                    marked_at=datetime.now(timezone.utc),
+                    marked_by_id=interaction.user.id,
+                )
+            except Exception:
+                # Logging failure should not break UX
+                pass
+
         self.stop()
 
     @ui.button(label="Done", style=discord.ButtonStyle.success, emoji="✅")
@@ -45,7 +72,7 @@ class ActionButtons(ui.View):
         ):
             await interaction.response.send_message("You don't have permission to use this button.", ephemeral=True)
             return
-        await self.update_embed(interaction, "✅ Done", 0x00ff00)
+        await self.update_embed(interaction, "✅ Done", 0x00FF00, True)
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.danger, emoji="❌")
     async def cancel_button(self, interaction: discord.Interaction, button: ui.Button):
@@ -63,7 +90,7 @@ class ActionButtons(ui.View):
         ):
             await interaction.response.send_message("You don't have permission to use this button.", ephemeral=True)
             return
-        await self.update_embed(interaction, "❌ Cancelled", 0xff0000)
+        await self.update_embed(interaction, "❌ Cancelled", 0xFF0000, False)
 
 
 class CancelOnlyView(ui.View):
@@ -75,8 +102,8 @@ class CancelOnlyView(ui.View):
         self.log_embed_obj = log_embed_obj
 
     async def update_embed(self, interaction: discord.Interaction, status_text: str, color: int):
-        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        footer_text = f"{status_text} at {timestamp} (UTC) by {interaction.user.display_name}"
+        timestamp = datetime.now(timezone.utc).strftime("%d-%m %H:%M:%S")
+        footer_text = f"{status_text} at {timestamp} by {interaction.user.display_name}"
 
         self.user_embed_obj.set_footer(text=footer_text)
         self.user_embed_obj.color = discord.Color(color)
@@ -165,7 +192,7 @@ class ActionsLogging(commands.Cog):
         if not log_channel:
             return
 
-        timestamp = message.created_at.strftime("%H:%M:%S.") + f"{int(message.created_at.microsecond / 1000):03d}"
+        timestamp = message.created_at.strftime("%d-%m %H:%M:%S")
         jump_url = message.jump_url
         pinned_messages = await message.channel.pins()
         pinned_url = pinned_messages[-1].jump_url if pinned_messages else None
@@ -179,7 +206,7 @@ class ActionsLogging(commands.Cog):
         embed_log.description = (
             f"**Message:**\n{content}\n\n"
             f"**Channel:** {message.channel.mention}\n"
-            f"**Time:** {timestamp} (UTC)\n"
+            f"**Time:** {timestamp}\n"
             f"{jump_link}{pinned_link}"
         )
         embed_log.set_footer(text="⏳ Pending...")
@@ -188,7 +215,7 @@ class ActionsLogging(commands.Cog):
         embed_user.description = (
             f"**Message:**\n{content}\n\n"
             f"**Log Channel:** {log_channel.mention}\n"
-            f"**Time:** {timestamp} (UTC)\n"
+            f"**Time:** {timestamp}\n"
             f"{jump_link}{pinned_link}"
         )
         embed_user.set_footer(text="⏳ Pending...")
@@ -199,11 +226,20 @@ class ActionsLogging(commands.Cog):
         log_message = await log_channel.send(embed=embed_log)
         user_message = await message.channel.send(embed=embed_user)
 
+        meta = {
+            "guild_id": guild.id,
+            "channel_id": message.channel.id,
+            "player_id": message.author.id,
+            "message": content,
+            "created_at": message.created_at.replace(tzinfo=timezone.utc),
+        }
+
         log_view = ActionButtons(
             user_embed=user_message,
             log_embed=log_message,
             user_embed_obj=embed_user.copy(),
-            log_embed_obj=embed_log.copy()
+            log_embed_obj=embed_log.copy(),
+            meta=meta,
         )
         user_view = CancelOnlyView(
             user_embed=user_message,

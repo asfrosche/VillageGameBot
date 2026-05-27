@@ -1,34 +1,18 @@
 import discord
 from discord.ext import commands
-import json
-import os
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_FOLDER = os.path.join(BASE_DIR, "db")
-DATA_FILE = os.path.join(DB_FOLDER, "target_channels.json")
-
-def load_target_id():
-    if not os.path.exists(DATA_FILE):
-        return {}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
-
-def save_target_id(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+from utils.bot_db import get_target_channel, set_target_channel
 
 class SendRole(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.target_channels = load_target_id()
 
     @commands.command()
     async def settarget(self, ctx, channel_id: int):
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command.")
             return
-        self.target_channels[str(ctx.guild.id)] = channel_id
-        save_target_id(self.target_channels)
+        set_target_channel(ctx.guild.id, channel_id)
         await ctx.send(f"Target channel set to {channel_id}")
 
     @commands.command(aliases=["sr"])
@@ -41,11 +25,10 @@ class SendRole(commands.Cog):
             await ctx.send("You need admin permissions in this server to use this command.")
             return
         try:
-            guild_id = str(ctx.guild.id)
-            if guild_id not in self.target_channels:
+            target_channel_id = get_target_channel(ctx.guild.id)
+            if not target_channel_id:
                 await ctx.send("No target channel set. Use `.settarget #channel` first.")
                 return
-            target_channel_id = self.target_channels[guild_id]
             target_channel = self.bot.get_channel(target_channel_id)
             if not target_channel:
                 await ctx.send("Couldn't find the target channel.")

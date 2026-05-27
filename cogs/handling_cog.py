@@ -48,6 +48,9 @@ class Handling(commands.Cog):
             if house.name in guild_data["houselist"]:
                 guild_data["houselist"].remove(house.name)
             save_guild_data(ctx.guild.id, guild_data)
+            estate_cog = self.bot.get_cog('Estate')
+            if estate_cog:
+                await estate_cog.update_estate_map(ctx.guild)
         else:
             await ctx.send("You don't have enough perms to use this command")
 
@@ -100,6 +103,9 @@ class Handling(commands.Cog):
             if house.name in guild_data["houselist"]:
                 guild_data["houselist"].remove(house.name)
             save_guild_data(ctx.guild.id, guild_data)
+            estate_cog = self.bot.get_cog('Estate')
+            if estate_cog:
+                await estate_cog.update_estate_map(ctx.guild)
         else:
             await ctx.send("You don't have enough perms to use this command")
 
@@ -128,6 +134,9 @@ class Handling(commands.Cog):
             guild_data["houselist"].remove(house.name)
         save_guild_data(ctx.guild.id, guild_data)
         await ctx.message.add_reaction("👍")
+        estate_cog = self.bot.get_cog('Estate')
+        if estate_cog:
+            await estate_cog.update_estate_map(ctx.guild)
 
     rebuild_gifs = ['https://media2.giphy.com/media/v1.Y2lkPTZjMDliOTUycmU4YXZwMzNwcjFzZGMwdzVreG44a3poOGJqOTF4cTJ3cGk3N2Z1dCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Rm1p7xp3Odl2o/giphy.gif', 'https://media1.giphy.com/media/v1.Y2lkPTZjMDliOTUyc3R1NmZzZjZvN29zem4ydXR3aHVoNDBtbWtzdXBwd2NxNDNiOXUxaiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xT8qB5POKfq8lGclkQ/giphy.gif', 'https://media2.giphy.com/media/v1.Y2lkPTZjMDliOTUybGQwZG1mdnFmbjN4ZGhlazhlbmZqMzg0MjRxZWppN3ZldHBpaGRseiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/OmfuBa7G55geGgC2Kn/giphy.gif', 'https://media4.giphy.com/media/v1.Y2lkPTZjMDliOTUyN3c5aTNiNTA1OHZ3Y3piOGVjNTU3NjJ4a2diczRxdXpzcXkyaWs0ZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/c5eqVJN7oNLTq/giphy.gif', 'https://media0.giphy.com/media/v1.Y2lkPTZjMDliOTUyOWR4bnY5NzRkZmtra3pvcjFhOTNrNjVzbmgzaDdtNDBvd3BvNTR2NCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Mah9dFWo1WZX0WM62Q/giphy.gif', 'https://media0.giphy.com/media/v1.Y2lkPTZjMDliOTUyNGIzdzh6OXc4bTh0aXEyN3lncWM2ZmNmenc3Z2s3cm1jZ3VqN2MxdCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ZTans30ONaaIM/giphy.gif', 'https://media4.giphy.com/media/v1.Y2lkPTZjMDliOTUyMTlqYmlvMnRwdmlwNGYyNGowMjA1MHZ4NjZrM2JjeGRlbzl6aDhkciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3oEduHHt9xZMlUY9m8/giphy.gif']
 
@@ -245,8 +254,14 @@ class Handling(commands.Cog):
                     await chat.set_permissions(role, overwrite=None)
             await chat.set_permissions(ctx.guild.default_role, read_messages=False)
             await chat.set_permissions(spect_role, read_messages=True, send_messages=False)
-            await chat.edit(category=old_pcs_category)
+            save_guild_data(ctx.guild.id, guild_data)
+            if old_pcs_category:
+                if chat.category is not old_pcs_category:
+                    await chat.edit(category=old_pcs_category)
             await ctx.send('Done')
+            estate_cog = self.bot.get_cog('Estate')
+            if estate_cog:
+                await estate_cog.update_estate_map(ctx.guild)
         else:
             await ctx.send("You don't have enough perms to use this command")
 
