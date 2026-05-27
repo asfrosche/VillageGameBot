@@ -1,17 +1,21 @@
 import uuid
 import discord
 import asyncio
-import datetime
 from datetime import datetime
 from discord.ext import commands
 from cogs.data_utils import load_guild_data
+from utils.bot_db import get_role_dashboard
+from utils.embeds import info_embed, warning_embed, error_embed
+
 
 class Moving(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.visit_counts = {}  # {channel_id: int}
 
+    # ──────────────────────────────────────────────────────────────────────────
     # Add commands
+    # ──────────────────────────────────────────────────────────────────────────
+
     @commands.command()
     async def add(self, ctx, channel_str: str, *args):
         if ctx.author.guild_permissions.administrator:
@@ -48,7 +52,7 @@ class Moving(commands.Cog):
                 await ctx.send("Guild data not loaded.")
         else:
             await ctx.send("You don't have enough permissions to use this command.")
-    
+
     @commands.command()
     async def addhere(self, ctx, *rolechats: discord.TextChannel):
         if not ctx.author.guild_permissions.administrator:
@@ -58,9 +62,7 @@ class Moving(commands.Cog):
             if rolechat is not None:
                 channel = rolechat
                 new_channel = ctx.channel
-                stealth = False
-                read_only = False
-                await self.process_add(ctx, new_channel, channel, is_stealth=stealth, read_only=read_only)
+                await self.process_add(ctx, new_channel, channel, is_stealth=False, read_only=False)
             else:
                 await ctx.send(f"{rolechat.name} not found.")
 
@@ -81,7 +83,7 @@ class Moving(commands.Cog):
                 try:
                     response = await self.bot.wait_for("message", timeout=60, check=check)
                     if response.content.lower() == "yes":
-                        done = "Yes"
+                        pass  # proceed
                     else:
                         await ctx.send("Action cancelled.")
                         return
@@ -93,20 +95,26 @@ class Moving(commands.Cog):
                     await new_channel.set_permissions(member, read_messages=True, send_messages=not read_only)
                     if not is_stealth:
                         await new_channel.send(f'{member.mention} Joins')
-                    embed = discord.Embed(title='Member added', description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`', color=0xff3fb9, timestamp=datetime.now())
+                    embed = discord.Embed(
+                        title='Member added',
+                        description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`',
+                        color=0xff3fb9,
+                        timestamp=datetime.now(),
+                    )
                     embed.add_field(name='Added To:', value=f"{new_channel.mention} `[{new_channel.name}]`", inline=False)
                     embed.set_footer(text="Village Game")
                     if log_channel:
                         await log_channel.send(embed=embed)
                 elif sponsor_role in member.roles:
-                    await new_channel.set_permissions(member, read_messages=True, send_messages=not read_only )
+                    await new_channel.set_permissions(member, read_messages=True, send_messages=not read_only)
             await ctx.send('Done')
         else:
             await ctx.send("Guild data not loaded.")
 
-    ##############################################################################################################################################
-
+    # ──────────────────────────────────────────────────────────────────────────
     # Remove commands
+    # ──────────────────────────────────────────────────────────────────────────
+
     @commands.command()
     async def remove(self, ctx, channel_str: str, stealth: str = None):
         if ctx.author.guild_permissions.administrator:
@@ -165,7 +173,12 @@ class Moving(commands.Cog):
                         await new_channel.set_permissions(member, overwrite=None)
                         if not is_stealth:
                             await new_channel.send(f'{member.mention} Leaves')
-                        embed = discord.Embed(title='Member removed', description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`', color=0xff3fb9, timestamp=datetime.now())
+                        embed = discord.Embed(
+                            title='Member removed',
+                            description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`',
+                            color=0xff3fb9,
+                            timestamp=datetime.now(),
+                        )
                         embed.add_field(name='Removed From:', value=f"{new_channel.mention} `[{new_channel.name}]`", inline=False)
                         embed.set_footer(text="Village Game")
                         if log_channel:
@@ -178,9 +191,10 @@ class Moving(commands.Cog):
         else:
             await ctx.send("Guild data not loaded.")
 
-    ##############################################################################################################################################
-
+    # ──────────────────────────────────────────────────────────────────────────
     # Moving commands
+    # ──────────────────────────────────────────────────────────────────────────
+
     @commands.command()
     async def move(self, ctx, channel_str: str, *args):
         if ctx.author.guild_permissions.administrator:
@@ -219,15 +233,6 @@ class Moving(commands.Cog):
     async def process_move(self, ctx, new_channel: discord.TextChannel, is_stealth=False, read_only=False):
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
-
-            # =======================
-            # ADDED: Visit Counter
-            # Counts how many times move/knock has been used on this channel
-            # =======================
-            if new_channel.id not in self.visit_counts:
-                self.visit_counts[new_channel.id] = 0
-            self.visit_counts[new_channel.id] += 1
-            # =======================
             alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
             sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
             dead_role = discord.utils.get(ctx.guild.roles, name=guild_data["dead_role_name"])
@@ -243,9 +248,7 @@ class Moving(commands.Cog):
                     return m.author == ctx.author and m.content.lower() in ["yes", "no"]
                 try:
                     response = await self.bot.wait_for("message", timeout=60, check=check)
-                    if response.lower() == "yes":
-                        done = "Yes"
-                    else:
+                    if response.content.lower() != "yes":
                         await ctx.send("Action cancelled.")
                         return
                 except asyncio.TimeoutError:
@@ -254,17 +257,22 @@ class Moving(commands.Cog):
             old_house_list = []
             for member in members:
                 if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
-                    for channel in category.channels:
-                        permissions = channel.permissions_for(member)
+                    for ch in category.channels:
+                        permissions = ch.permissions_for(member)
                         if permissions.send_messages:
-                            await channel.set_permissions(member, overwrite=None)
-                            old_house_list.append(f"{channel.mention} `[{channel.name}]`")
+                            await ch.set_permissions(member, overwrite=None)
+                            old_house_list.append(f"{ch.mention} `[{ch.name}]`")
                             if not is_stealth:
-                                await channel.send(f'{member.mention} Leaves')
+                                await ch.send(f'{member.mention} Leaves')
                     await new_channel.set_permissions(member, read_messages=True, send_messages=not read_only)
                     if not is_stealth:
                         await new_channel.send(f'{member.mention} Joins')
-                    embed = discord.Embed(title='Member moved', description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`', color=0xff3fb9, timestamp=datetime.now())
+                    embed = discord.Embed(
+                        title='Member moved',
+                        description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`',
+                        color=0xff3fb9,
+                        timestamp=datetime.now(),
+                    )
                     if old_house_list:
                         embed.add_field(name='Removed From:', value="\n".join(old_house_list), inline=False)
                     embed.add_field(name='Added To:', value=f'{new_channel.mention} `[{new_channel.name}]`', inline=False)
@@ -272,40 +280,19 @@ class Moving(commands.Cog):
                     if log_channel:
                         await log_channel.send(embed=embed)
                 elif sponsor_role in member.roles:
-                    for channel in category.channels:
-                        permissions = channel.permissions_for(member)
+                    for ch in category.channels:
+                        permissions = ch.permissions_for(member)
                         if permissions.send_messages:
-                            await channel.set_permissions(member, overwrite=None)
+                            await ch.set_permissions(member, overwrite=None)
                     await new_channel.set_permissions(member, read_messages=True, send_messages=not read_only)
             await ctx.send('Done')
         else:
             await ctx.send("Guild data not loaded.")
 
-    ##############################################################################################################################################
-
-    # check visits command
-    @commands.command()
-    async def visitscheck(self, ctx, channel: discord.TextChannel = None):
-        if channel is None:
-            channel = ctx.channel
-
-        count = self.visit_counts.get(channel.id, 0)
-        await ctx.send(f"{channel.mention} has {count} visits since last reset.")
-
-    # reset it
-    @commands.command()
-    async def resetvisits(self, ctx, channel: discord.TextChannel = None):
-        if not ctx.author.guild_permissions.administrator:
-            await ctx.send("You don't have permission to reset visit counts.")
-            return
-
-        if channel is None:
-            channel = ctx.channel
-
-        self.visit_counts[channel.id] = 0
-        await ctx.send(f"Visit count reset for {channel.mention}.")
-
+    # ──────────────────────────────────────────────────────────────────────────
     # Knocking commands
+    # ──────────────────────────────────────────────────────────────────────────
+
     @commands.command()
     async def knock(self, ctx, channel_str: str):
         if ctx.author.guild_permissions.administrator:
@@ -338,14 +325,6 @@ class Moving(commands.Cog):
             await ctx.send("You don't have enough perms to use this command")
 
     async def process_knock(self, ctx, new_channel: discord.TextChannel, guild_data):
-        # =======================
-        # ADDED: Visit Counter
-        # Counts how many times knock/move has been used on this channel
-        # =======================
-        if new_channel.id not in self.visit_counts:
-            self.visit_counts[new_channel.id] = 0
-        self.visit_counts[new_channel.id] += 1
-        # =======================
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
         sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
         dead_role = discord.utils.get(ctx.guild.roles, name=guild_data["dead_role_name"])
@@ -359,6 +338,7 @@ class Moving(commands.Cog):
         alive_members_with_permission = []
         dead_members_with_permissions = []
         alt_members_with_permissions = []
+
         for member in new_channel.members:
             if alive_role in member.roles:
                 permissions = new_channel.permissions_for(member)
@@ -372,6 +352,7 @@ class Moving(commands.Cog):
                 permissions = new_channel.permissions_for(member)
                 if permissions.send_messages:
                     alt_members_with_permissions.append(member)
+
         check = True
         if alive_members_with_permission:
             check = False
@@ -380,153 +361,329 @@ class Moving(commands.Cog):
                 check = False
             elif guild_data["alt_count"] and alt_members_with_permissions:
                 check = False
+
         if check:
             if guild_data["autojoinifempty"]:
                 for member in members:
                     if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
-                        for channel in category.channels:
-                            permissions = channel.permissions_for(member)
+                        for ch in category.channels:
+                            permissions = ch.permissions_for(member)
                             if permissions.send_messages:
-                                await channel.set_permissions(member, overwrite=None)
-                                old_house_list.append(f"{channel.mention} `[{channel.name}]`")
-                                await channel.send(f'{member.mention} Leaves')
+                                await ch.set_permissions(member, overwrite=None)
+                                old_house_list.append(f"{ch.mention} `[{ch.name}]`")
+                                await ch.send(f'{member.mention} Leaves')
                         await new_channel.set_permissions(member, read_messages=True, send_messages=True)
                         await new_channel.send(f'{member.mention} Joins')
-                        embed = discord.Embed(title='Member moved', description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`', color=0xff3fb9, timestamp=datetime.now())
+                        embed = discord.Embed(
+                            title='Member moved',
+                            description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`',
+                            color=0xff3fb9,
+                            timestamp=datetime.now(),
+                        )
                         if old_house_list:
                             embed.add_field(name='Removed From:', value="\n".join(old_house_list), inline=False)
                         embed.add_field(name='Added To:', value=f'{new_channel.mention} `[{new_channel.name}]`', inline=False)
                         embed.set_footer(text="Village Game")
-                        if log_channel:    
+                        if log_channel:
                             await log_channel.send(embed=embed)
                         await ctx.send("The house is empty. Auto Joining...")
                     elif sponsor_role in member.roles:
-                        for channel in category.channels:
-                            permissions = channel.permissions_for(member)
+                        for ch in category.channels:
+                            permissions = ch.permissions_for(member)
                             if permissions.send_messages:
-                                await channel.set_permissions(member, overwrite=None)
+                                await ch.set_permissions(member, overwrite=None)
                         await new_channel.set_permissions(member, read_messages=True, send_messages=True)
                 return
             else:
                 await ctx.send("The house is empty")
                 return
+
         total_members = len(alive_members_with_permission)
         if guild_data["dead_count"]:
             total_members += len(dead_members_with_permissions)
         if guild_data["alt_count"]:
             total_members += len(alt_members_with_permissions)
+
         if total_members >= guild_data["maxmembersinhome"]:
             await ctx.send("The house is full")
             return
-        await ctx.send('Knocking...')
-        bot_message = await new_channel.send(f'{alive_role.mention} {sponsor_role.mention} Knock Knock')
-        await bot_message.pin()
+
+        await ctx.send("Knocking...")
+
+        embed = discord.Embed(
+            title="🚪 Someone is knocking...",
+            description="Use buttons below to open/refuse the knock.",
+            color=0xff3fb9,
+        )
+
+        view = discord.ui.View(timeout=guild_data["timeout_duration"])
+        # Flag to track whether a handler completed (vs. timeout)
+        view.handled = False
+
+        async def handle_open(interaction: discord.Interaction):
+            is_admin = interaction.user.guild_permissions.administrator
+            if not is_admin:
+                perms = new_channel.permissions_for(interaction.user)
+                if not (perms.read_messages and perms.send_messages):
+                    await interaction.response.send_message("You are not in this house.", ephemeral=True)
+                    return
+                author_roles = set(interaction.user.roles)
+                is_alive = alive_role in author_roles
+                is_sponsor = sponsor_role in author_roles
+                is_dead = dead_role in author_roles and guild_data["can_dead_open"]
+                is_alt = alt_role in author_roles and guild_data["can_alt_open"]
+                if not (is_alive or is_sponsor or is_dead or is_alt):
+                    await interaction.response.send_message("You can't interact with the door.", ephemeral=True)
+                    return
+
+            # Mark as handled and stop the view so view.wait() returns immediately
+            view.handled = True
+            view.stop()
+
+            await interaction.response.defer()
+            entered_members = []
+            open_old_house_list = []
+            for member in members:
+                if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
+                    for ch in category.channels:
+                        permissions = ch.permissions_for(member)
+                        if permissions.send_messages:
+                            await ch.set_permissions(member, overwrite=None)
+                            open_old_house_list.append(f"{ch.mention} `[{ch.name}]`")
+                            await ch.send(f"{member.mention} Leaves")
+                    await new_channel.set_permissions(member, read_messages=True, send_messages=True)
+                    await new_channel.send(f"{member.mention} Joins")
+                    entered_members.append(member)
+                    embed_move = info_embed(
+                        title="Member moved",
+                        description=f"{channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`",
+                    )
+                    if open_old_house_list:
+                        embed_move.add_field(
+                            name="Removed From:",
+                            value="\n".join(open_old_house_list),
+                            inline=False,
+                        )
+                    embed_move.add_field(
+                        name="Added To:",
+                        value=f"{new_channel.mention} `[{new_channel.name}]`",
+                        inline=False,
+                    )
+                    if log_channel:
+                        await log_channel.send(embed=embed_move)
+                elif sponsor_role in member.roles:
+                    for ch in category.channels:
+                        permissions = ch.permissions_for(member)
+                        if permissions.send_messages:
+                            await ch.set_permissions(member, overwrite=None)
+                    await new_channel.set_permissions(member, read_messages=True, send_messages=True)
+
+            now_ts = int(datetime.now().timestamp())
+            joined_lines = "\n".join(
+                f"**Member joined:** {m.mention} `[{m.display_name}, {m.name}]`"
+                for m in entered_members
+            ) or "**Member joined:** None"
+            embed_final = discord.Embed(
+                description=(
+                    f"{joined_lines}\n"
+                    f"**Opened by:** {interaction.user.mention} `[{interaction.user.display_name}, {interaction.user.name}]`\n"
+                    f"**Time:** <t:{now_ts}:T>"
+                ),
+                color=0x2ecc71,
+            )
+            await interaction.edit_original_response(
+                content=f"{alive_role.mention} {sponsor_role.mention} knock knock",
+                embed=embed_final,
+                view=None,
+            )
+            await knock_message.unpin()
+
+        async def handle_refuse(interaction: discord.Interaction):
+            is_admin = interaction.user.guild_permissions.administrator
+            if not is_admin:
+                perms = new_channel.permissions_for(interaction.user)
+                if not (perms.read_messages and perms.send_messages):
+                    await interaction.response.send_message("You are not in this house.", ephemeral=True)
+                    return
+                author_roles = set(interaction.user.roles)
+                is_alive = alive_role in author_roles
+                is_sponsor = sponsor_role in author_roles
+                is_dead = dead_role in author_roles and guild_data["can_dead_open"]
+                is_alt = alt_role in author_roles and guild_data["can_alt_open"]
+                if not (is_alive or is_sponsor or is_dead or is_alt):
+                    await interaction.response.send_message("You can't interact with the door.", ephemeral=True)
+                    return
+
+            view.handled = True
+            view.stop()
+
+            await interaction.response.defer()
+            alive_users = []
+            for member in new_channel.members:
+                if alive_role in member.roles:
+                    alive_users.append(f"{member.mention} `{member.name}`")
+                if guild_data["show_dead_on_refuse"] and dead_role in member.roles:
+                    alive_users.append(f"{member.mention} `{member.name}`")
+                if guild_data["show_alt_on_refuse"] and alt_role in member.roles:
+                    alive_users.append(f"{member.mention} `{member.name}`")
+
+            if guild_data["refuseresponse"] == 1:
+                players_list = "\n".join(alive_users)
+                embedr = info_embed(
+                    title="Knock Refused",
+                    description=f"Players inside the house:\n{players_list}",
+                )
+                await ctx.send(f"{alive_role.mention} {sponsor_role.mention}", embed=embedr)
+            elif guild_data["refuseresponse"] == 2:
+                await ctx.send(
+                    f"Your knock in {new_channel.name} got refused.\n"
+                    f"There are currently {len(alive_users)} players inside the house."
+                )
+            elif guild_data["refuseresponse"] == 3:
+                await ctx.send(f"Your knock in {new_channel.name} got refused.")
+
+            now_ts = int(datetime.now().timestamp())
+            embed_final = discord.Embed(
+                description=(
+                    f"**Refused by:** {interaction.user.mention} `[{interaction.user.display_name}, {interaction.user.name}]`\n"
+                    f"**Time:** <t:{now_ts}:T>"
+                ),
+                color=0xe74c3c,
+            )
+            await interaction.edit_original_response(
+                content=f"{alive_role.mention} {sponsor_role.mention} knock knock",
+                embed=embed_final,
+                view=None,
+            )
+            await knock_message.unpin()
+
+        async def handle_cancel(interaction: discord.Interaction):
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "You don't have permission to cancel the knock.",
+                    ephemeral=True,
+                )
+                return
+
+            view.handled = True
+            view.stop()
+
+            await interaction.response.defer()
+            await ctx.send("The knock has been cancelled.")
+            now_ts = int(datetime.now().timestamp())
+            embed_final = discord.Embed(
+                description=(
+                    f"**Cancelled by:** {interaction.user.mention} `[{interaction.user.display_name}, {interaction.user.name}]`\n"
+                    f"**Time:** <t:{now_ts}:T>"
+                ),
+                color=0xe74c3c,
+            )
+            await interaction.edit_original_response(
+                content=f"{alive_role.mention} {sponsor_role.mention} knock knock",
+                embed=embed_final,
+                view=None,
+            )
+            await knock_message.unpin()
+
+        btn_open = discord.ui.Button(label="Open", style=discord.ButtonStyle.success, emoji="✅", row=0)
+        btn_refuse = discord.ui.Button(label="Refuse", style=discord.ButtonStyle.danger, emoji="❌", row=0)
+        btn_cancel = discord.ui.Button(label=None, style=discord.ButtonStyle.secondary, emoji="🛑", row=0)
+
+        btn_open.callback = handle_open
+        btn_refuse.callback = handle_refuse
+        btn_cancel.callback = handle_cancel
+
+        view.add_item(btn_open)
+        view.add_item(btn_refuse)
+        view.add_item(btn_cancel)
+
+        knock_message = await new_channel.send(
+            content=f"{alive_role.mention} {sponsor_role.mention} knock knock",
+            embed=embed,
+            view=view,
+        )
+        await knock_message.pin()
         async for messages in new_channel.history(limit=3):
             if messages.type == discord.MessageType.pins_add and messages.author == self.bot.user:
                 await messages.delete()
                 break
-        def check(message):
-            return (
-                message.channel == new_channel
-                and message.content.lower() in ['open', 'refuse', 'cancel']
-                and message.reference and message.reference.message_id == bot_message.id
-                )
-        while True:
+
+        # Wait for a button press or timeout
+        await view.wait()
+
+        # ── Handle timeout ─────────────────────────────────────────────────────
+        # view.handled is True only if one of the handlers completed successfully.
+        # If it's still False here, the view timed out without any interaction.
+        if not view.handled:
             try:
-                response = await self.bot.wait_for('message', check=check, timeout=guild_data["timeout_duration"])
-                if response.content.lower() == 'open':
-                    author_roles = {role for role in response.author.roles}
-                    if (dead_role in author_roles and not guild_data["can_dead_open"]) or (alt_role in author_roles and not guild_data["can_alt_open"]):
-                        await response.channel.send("You can't interact with the door.")
-                        continue
-                    for member in members:
-                        if alive_role in member.roles or alt_role in member.roles:
-                            for channel in category.channels:
-                                permissions = channel.permissions_for(member)
-                                if permissions.send_messages:
-                                    await channel.set_permissions(member, overwrite=None)
-                                    old_house_list.append(f"{channel.mention} `[{channel.name}]`")
-                                    await channel.send(f'{member.mention} Leaves')
-                            await new_channel.set_permissions(member, read_messages=True, send_messages=True)
-                            await bot_message.reply(f'{member.mention} Joins')
-                            embed = discord.Embed(title='Member moved', description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`', color=0xff3fb9, timestamp=datetime.now())
-                            if old_house_list:
-                                embed.add_field(name='Removed From:', value="\n".join(old_house_list), inline=False)
-                            embed.add_field(name='Added To:', value=f'{new_channel.mention} `[{new_channel.name}]`', inline=False)
-                            embed.set_footer(text="Village Game")
-                            await log_channel.send(embed=embed)
-                        elif sponsor_role in member.roles:
-                            for channel in category.channels:
-                                permissions = channel.permissions_for(member)
-                                if permissions.send_messages:
-                                    await channel.set_permissions(member, overwrite=None)
-                            await new_channel.set_permissions(member, read_messages=True, send_messages=True)
-                    await bot_message.edit(content=f"**ACCEPTED**\n~~{alive_role.mention} {sponsor_role.mention} Knock Knock~~")
-                    await bot_message.unpin()
-                    break
-                elif response.content.lower() == 'refuse':
-                    author_roles = {role for role in response.author.roles}
-                    if (dead_role in author_roles and not guild_data["can_dead_open"]) or (alt_role in author_roles and not guild_data["can_alt_open"]):
-                        await response.channel.send("You can't interact with the door.")
-                        continue
-                    alive_users = []
-                    for member in new_channel.members:
-                        if alive_role in member.roles:
-                            alive_users.append(f'{member.mention} `{member.name}`')
-                        if guild_data["show_dead_on_refuse"]:
-                            if dead_role in member.roles:
-                                alive_users.append(f'{member.mention} `{member.name}`')
-                        if guild_data["show_alt_on_refuse"]:
-                            if alt_role in member.roles:
-                                alive_users.append(f'{member.mention} `{member.name}`')
-                    if guild_data["refuseresponse"] == 1:
-                        players_list = '\n'.join(alive_users)
-                        embedr = discord.Embed(title="Knock Refused", description=f"Players inside the house:\n{players_list}", color=0xff3fb9, timestamp=datetime.now())
-                        embedr.set_footer(text="Village Game")
-                        await ctx.send(f'{alive_role.mention} {sponsor_role.mention}', embed=embedr)
-                    elif guild_data["refuseresponse"] == 2:
-                        await ctx.send(f"Your knock in {new_channel.name} got refused.\nThere are currently {len(alive_users)} players inside the house.")
-                    elif guild_data["refuseresponse"] == 3:
-                        await ctx.send(f"Your knock in {new_channel.name} got refused.")
-                    await bot_message.unpin()
-                    await bot_message.edit(content=f"**REFUSED**\n~~{alive_role.mention} {sponsor_role.mention} Knock Knock~~")
-                    await bot_message.reply("Knock refused")
-                    break
-                elif response.content.lower() == 'cancel':
-                    if response.author.guild_permissions.administrator:
-                        await ctx.send("The knock has been cancelled.")
-                        await bot_message.unpin()
-                        await bot_message.edit(content=f"**CANCELLED**\n~~{alive_role.mention} {sponsor_role.mention} Knock Knock~~")
-                        await bot_message.reply("Knock cancelled")
-                        break
-                    else:
-                        await new_channel.send("You don't have permission to cancel the knock.")
-            except asyncio.TimeoutError:
+                now_ts = int(datetime.now().timestamp())
+                timeout_duration_hours = guild_data["timeout_duration"] // 3600
+
                 if guild_data["autojoinknockexpired"]:
+                    # Auto-join all members from the knocking channel into the target house
+                    auto_join_old_house_list = []
                     for member in members:
-                        if alive_role in member.roles or sponsor_role in member.roles or alt_role in member.roles:
-                            for channel in category.channels:
-                                permissions = channel.permissions_for(member)
+                        if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
+                            for ch in category.channels:
+                                permissions = ch.permissions_for(member)
                                 if permissions.send_messages:
-                                    await channel.set_permissions(member, overwrite=None)
+                                    await ch.set_permissions(member, overwrite=None)
                                     if alive_role in member.roles or alt_role in member.roles:
-                                        old_house_list.append(f"{channel.mention}`[{channel.name}]`")
-                                        await channel.send(f'{member.mention} Leaves')
+                                        auto_join_old_house_list.append(f"{ch.mention} `[{ch.name}]`")
+                                        await ch.send(f'{member.mention} Leaves')
                             await new_channel.set_permissions(member, read_messages=True, send_messages=True)
                             if alive_role in member.roles or alt_role in member.roles:
-                                await bot_message.reply(f'{member.mention} Joins')
-                                await bot_message.edit(content=f"**EXPIRED, AUTO JOINED**\n~~{alive_role.mention} {sponsor_role.mention} Knock Knock~~")
-                                embed = discord.Embed(title='Member moved', description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`', color=0xff3fb9, timestamp=datetime.now())
-                                if old_house_list:
-                                    embed.add_field(name='Removed From:', value="\n".join(old_house_list), inline=False)
-                                embed.add_field(name='Added To:', value=f'{new_channel.mention} `[{new_channel.name}]`', inline=False)
-                                embed.set_footer(text="Village Game")
-                                await log_channel.send(embed=embed)
-                                timeout_duration_hours = guild_data["timeout_duration"] // 3600
+                                await new_channel.send(f'{member.mention} Joins')
+                                timeout_embed = discord.Embed(
+                                    description=(
+                                        f"⏰ **Knock expired — Auto Joined**\n"
+                                        f"**Time:** <t:{now_ts}:T>"
+                                    ),
+                                    color=0x95a5a6,
+                                )
+                                await knock_message.edit(
+                                    content=f"{alive_role.mention} {sponsor_role.mention} knock knock",
+                                    embed=timeout_embed,
+                                    view=None,
+                                )
+                                embed_move = discord.Embed(
+                                    title='Member moved',
+                                    description=f'{ctx.channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`',
+                                    color=0xff3fb9,
+                                    timestamp=datetime.now(),
+                                )
+                                if auto_join_old_house_list:
+                                    embed_move.add_field(name='Removed From:', value="\n".join(auto_join_old_house_list), inline=False)
+                                embed_move.add_field(name='Added To:', value=f'{new_channel.mention} `[{new_channel.name}]`', inline=False)
+                                embed_move.set_footer(text="Village Game")
+                                if log_channel:
+                                    await log_channel.send(embed=embed_move)
                                 await ctx.send(f"{timeout_duration_hours} hours went by from the knock in {new_channel.mention}. Auto Joining...")
                 else:
-                    timeout_duration_hours = guild_data["timeout_duration"] // 3600
-                    await ctx.send(f"{overseer_role.mention} {alive_role.mention} {sponsor_role.mention}\n{timeout_duration_hours} hours went by from the knock in {new_channel.mention}")
-                    await bot_message.edit(content=f"**EXPIRED**\n~~{alive_role.mention} {sponsor_role.mention} Knock Knock~~")
-                await bot_message.unpin()
-                break
+                    # Notify overseer/roles that the knock expired, no auto-join
+                    await ctx.send(
+                        f"{overseer_role.mention} {alive_role.mention} {sponsor_role.mention}\n"
+                        f"{timeout_duration_hours} hours went by from the knock in {new_channel.mention}"
+                    )
+                    timeout_embed = discord.Embed(
+                        description=(
+                            f"⏰ **Knock expired** — no response received.\n"
+                            f"**Time:** <t:{now_ts}:T>"
+                        ),
+                        color=0x95a5a6,
+                    )
+                    await knock_message.edit(
+                        content=f"{alive_role.mention} {sponsor_role.mention} knock knock",
+                        embed=timeout_embed,
+                        view=None,
+                    )
+
+                await knock_message.unpin()
+            except discord.NotFound:
+                pass  # message was deleted externally, nothing to do
+            except Exception as e:
+                print(f"[Moving] Error handling knock timeout: {e}")
+
+
+async def setup(bot):
+    await bot.add_cog(Moving(bot))

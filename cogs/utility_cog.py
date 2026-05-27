@@ -9,6 +9,147 @@ from discord.ext import commands
 from discord.ui import View, Button
 from cogs.data_utils import load_guild_data, save_guild_data, add_player
 
+class SkipNightView(discord.ui.View):
+
+    def __init__(self, session):
+        super().__init__(timeout=None)
+        self.session = session
+
+    def is_alive(self, member, guild_data):
+        alive_role = discord.utils.get(
+            member.guild.roles,
+            name=guild_data["alive_role_name"]
+        )
+
+        return alive_role in member.roles if alive_role else False
+
+    async def refresh_embed(self, interaction):
+
+        guild_data = load_guild_data(interaction.guild.id)
+
+        alive_role = discord.utils.get(
+            interaction.guild.roles,
+            name=guild_data["alive_role_name"]
+        )
+
+        alive_count = len([
+            m for m in interaction.guild.members
+            if alive_role in m.roles
+        ]) if alive_role else 0
+
+        current_votes = len(self.session["voters"])
+        required_votes = self.session["required"]
+
+        progress = (
+            "🟩" * current_votes
+            + "⬛" * max(0, alive_count - current_votes)
+        )
+
+        embed = discord.Embed(
+            title="🌙 Vote to Skip the Night",
+            description=(
+                f"{progress}\n\n"
+                f"**{current_votes}/{required_votes}** votes needed\n"
+                f"👥 {alive_count} alive players"
+            ),
+            color=0xff3fb9,
+            timestamp=datetime.now()
+        )
+
+        embed.set_footer(text="Votes are anonymous • Village Game")
+
+        await interaction.message.edit(embed=embed, view=self)
+
+    @discord.ui.button(
+        label="✅ Vote",
+        style=discord.ButtonStyle.success
+    )
+    async def vote(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        guild_data = load_guild_data(interaction.guild.id)
+
+        if not self.is_alive(interaction.user, guild_data):
+            return await interaction.response.send_message(
+                "Only Alive players can vote.",
+                ephemeral=True
+            )
+
+        uid = interaction.user.id
+
+        if uid in self.session["voters"]:
+            return await interaction.response.send_message(
+                "You already voted.",
+                ephemeral=True
+            )
+
+        self.session["voters"].add(uid)
+
+        await interaction.response.send_message(
+            "Vote cast anonymously. ✅",
+            ephemeral=True
+        )
+
+        await self.refresh_embed(interaction)
+
+        current = len(self.session["voters"])
+
+        if (
+            current >= self.session["required"]
+            and not self.session.get("pinged")
+        ):
+
+            self.session["pinged"] = True
+
+            os_role = discord.utils.get(
+                interaction.guild.roles,
+                name=guild_data["overseer_role_name"]
+            )
+
+            if os_role:
+                await interaction.channel.send(
+                    f"{os_role.mention} Skip-night vote threshold reached."
+                )
+
+    @discord.ui.button(
+        label="❌ Unvote",
+        style=discord.ButtonStyle.danger
+    )
+    async def unvote(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        guild_data = load_guild_data(interaction.guild.id)
+
+        if not self.is_alive(interaction.user, guild_data):
+            return await interaction.response.send_message(
+                "Only Alive players can interact.",
+                ephemeral=True
+            )
+
+        uid = interaction.user.id
+
+        if uid not in self.session["voters"]:
+            return await interaction.response.send_message(
+                "You have not voted yet.",
+                ephemeral=True
+            )
+
+        self.session["voters"].discard(uid)
+
+        await interaction.response.send_message(
+            "Vote removed. ❌",
+            ephemeral=True
+        )
+
+        await self.refresh_embed(interaction)
+
+        
 class Utility(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -298,6 +439,53 @@ class Utility(commands.Cog):
         self.bot.dispatch("phase_change", "night") # added for meetupmatrix.py
         await self._manage_channels(ctx, False)
 
+    def _build_stats_embed(self, guild_data, guild):
+        """Build the message stats embed from current tracking data."""
+        counts = guild_data.get("tracked_message_counts") or {}
+        if not counts:
+            return None
+        sorted_counts = sorted(counts.items(), key=lambda x: int(x[1]), reverse=True)
+        list_str = []
+        for user_id_str, count in sorted_counts:
+            user = guild.get_member(int(user_id_str))
+            user_name = user.display_name if user else f"User {user_id_str}"
+            list_str.append(f"**{user_name}:** {count}")
+        embed = discord.Embed(title="📊 Message Stats", color=0xff3fb9, timestamp=datetime.now())
+        embed.description = "\n".join(list_str)
+        embed.set_footer(text="Village Game")
+        return embed
+
+    def _build_votelist_embeds(self, guild_data, guild):
+        """Build votelist embeds from current vote data."""
+        votes_sessions = {
+            "LYNCH SESSION 1": guild_data.get("lynch_votes1", {}),
+            "LYNCH SESSION 2": guild_data.get("lynch_votes2", {}),
+            "LEADER ELECTION": guild_data.get("leader_votes", {}),
+        }
+        embeds = []
+        for session, votes in votes_sessions.items():
+            if not votes:
+                continue
+            session_votes = {}
+            for voter_id, voted_id in votes.items():
+                voted_user = guild.get_member(voted_id)
+                voter_user = guild.get_member(int(voter_id))
+                if voted_user and voter_user:
+                    if voted_user.display_name not in session_votes:
+                        session_votes[voted_user.display_name] = []
+                    session_votes[voted_user.display_name].append(voter_user.display_name)
+            if not session_votes:
+                continue
+            description = ""
+            for voted, voters in session_votes.items():
+                vote_count = len(voters)
+                vote_text = "vote" if vote_count == 1 else "votes"
+                description += f"**{voted} ({vote_count} {vote_text}):**\n" + "\n".join(voters) + "\n\n"
+            embed = discord.Embed(title=session, description=description, color=0xff3fb9, timestamp=datetime.now())
+            embed.set_footer(text="Village Game")
+            embeds.append(embed)
+        return embeds
+
     async def _manage_channels(self, ctx, allow_messages):
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
@@ -327,8 +515,34 @@ class Utility(commands.Cog):
                 leader_channel = discord.utils.get(guild.channels, name=guild_data["leader_channel_name"])
                 daychat_channels = [daychat, megaphone]
                 voting_channels = [lynch_channel1, lynch_channel2, leader_channel]
+
+                if allow_messages:
+                    # --- DAY START: reset votes and restart message tracking ---
+                    guild_data["lynch_votes1"] = {}
+                    guild_data["lynch_votes2"] = {}
+                    guild_data["leader_votes"] = {}
+                    guild_data["tracked_message_counts"] = {}
+                    guild_data["message_tracking_enabled"] = True
+                    save_guild_data(ctx.guild.id, guild_data)
+                    # Refresh the live vote-count display via the Voting cog
+                    voting_cog = self.bot.get_cog("Voting")
+                    if voting_cog:
+                        await voting_cog.aggiorna_risultati(ctx)
+
                 if announcements_channel:
-                	await announcements_channel.send(f'{alive_role.mention} {sponsor_role.mention}', embed=annnightembed if not allow_messages else anndayembed)
+                    await announcements_channel.send(f'{alive_role.mention} {sponsor_role.mention}', embed=annnightembed if not allow_messages else anndayembed)
+                    if not allow_messages:
+                        # --- NIGHT START: post stats and votelist into announcements ---
+                        stats_embed = self._build_stats_embed(guild_data, guild)
+                        if stats_embed:
+                            await announcements_channel.send(embed=stats_embed)
+                        vote_embeds = self._build_votelist_embeds(guild_data, guild)
+                        for ve in vote_embeds:
+                            await announcements_channel.send(embed=ve)
+                        # Stop tracking for the night
+                        guild_data["message_tracking_enabled"] = False
+                        save_guild_data(ctx.guild.id, guild_data)
+
                 for channel in daychat_channels:
                     if channel:
                     	await channel.set_permissions(alive_role, view_channel=True, send_messages=allow_messages)
@@ -487,6 +701,11 @@ class Utility(commands.Cog):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
+                save_guild_data(ctx.guild.id, guild_data)
+                await ctx.send('Done')
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
             else:
                 await ctx.send("Guild data not loaded.")
         else:
@@ -573,6 +792,11 @@ class Utility(commands.Cog):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
+                save_guild_data(ctx.guild.id, guild_data)
+                await ctx.send('Done')
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
             else:
                 await ctx.send("Guild data not loaded.")
         else:
@@ -664,8 +888,11 @@ class Utility(commands.Cog):
             if not team or not role:
                 return
 
-        add_player(target_member.name, team, role, ctx.guild.id)
+        add_player(target_member.display_name, team, role, ctx.guild.id)
         await ctx.send(f"{target_member.display_name} successfully added to deadlist.")
+        estate_cog = self.bot.get_cog('Estate')
+        if estate_cog:
+            await estate_cog.update_estate_map(ctx.guild)
     
     @commands.command()
     async def addrole(self, ctx, role: discord.Role, *members):
@@ -787,3 +1014,80 @@ class Utility(commands.Cog):
         view.add_item(btn_yes)
         view.add_item(btn_no)
         await ctx.send(embed=prompt, view=view)
+
+    @commands.command(name="skipnight")
+    async def skipnight(self, ctx, min_votes: int):
+
+        guild_data = load_guild_data(ctx.guild.id)
+
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+
+        os_role = discord.utils.get(
+            ctx.guild.roles,
+            name=guild_data["overseer_role_name"]
+        )
+        if not os_role:
+            return await ctx.send("Overseer role not found.")
+        if (
+            os_role not in ctx.author.roles
+            and not ctx.author.guild_permissions.administrator
+        ):
+            return await ctx.send(
+                "You don't have permission to use this command."
+            )
+
+        announcements_channel = discord.utils.get(
+            ctx.guild.channels,
+            name=guild_data["announcements_channel_name"]
+        )
+
+        if not announcements_channel:
+            return await ctx.send(
+                "Announcements channel not found."
+            )
+
+        alive_role = discord.utils.get(
+            ctx.guild.roles,
+            name=guild_data["alive_role_name"]
+        )
+
+        alive_count = len([
+            m for m in ctx.guild.members
+            if alive_role in m.roles
+        ]) if alive_role else 0
+
+        session = {
+            "required": min_votes,
+            "voters": set(),
+            "pinged": False
+        }
+
+        progress = "⬛" * alive_count
+
+        embed = discord.Embed(
+            title="🌙 Vote to Skip the Night",
+            description=(
+                f"{progress}\n\n"
+                f"**0/{min_votes}** votes needed\n"
+                f"👥 {alive_count} alive players"
+            ),
+            color=0xff3fb9,
+            timestamp=datetime.now()
+        )
+
+        embed.set_footer(
+            text="Votes are anonymous • Village Game"
+        )
+
+        view = SkipNightView(session)
+
+        await announcements_channel.send(
+            content=alive_role.mention if alive_role else "",
+            embed=embed,
+            view=view
+        )
+
+        await ctx.send(
+            f"Skip-night vote started in {announcements_channel.mention}."
+        )

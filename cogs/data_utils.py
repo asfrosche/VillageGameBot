@@ -2,6 +2,14 @@ import os
 import json
 import sqlite3
 
+from utils.bot_db import (
+    delete_guild_data as _delete_guild_data,
+    get_guild_data as _get_guild_data,
+    init_db as _init_db,
+    migrate_legacy_json as _migrate_legacy_json,
+    upsert_guild_data as _upsert_guild_data,
+)
+
 base_variables = {
     "overseer_role_name": 'Overseer',
     "alive_role_name": 'Alive',
@@ -59,21 +67,44 @@ base_variables = {
     "lynch_votes2": {},
     "leader_votes": {},
     "vote_value" : [],
-    "houselist": {}
+    "houselist": {},
+    "dashboard_enabled": False,
+    "economy_collect_amount": 250,
+    # Meeting system (per-guild)
+    "meeting_enabled": False,
+    "meeting_channel_id": None,
+    "target_guild_id": None,
+    "meeting_category_id": None,
+    # Message tracking (per-guild; channel = day discussion by default)
+    "message_tracking_enabled": False,
+    "tracked_message_counts": {},
 }
 
 def load_guild_data(guild_id):
-    guild_data_file = os.path.join("db", f"{guild_id}.json")
-    if os.path.exists(guild_data_file):
-        with open(guild_data_file, "r") as f:
-            return json.load(f)
-    else:
-        return None
+    _ensure_db_ready()
+    return _get_guild_data(int(guild_id))
 
 def save_guild_data(guild_id, data):
-    guild_data_file = os.path.join("db", f"{guild_id}.json")
-    with open(guild_data_file, "w") as f:
-        json.dump(data, f, indent=4)
+    _ensure_db_ready()
+    _upsert_guild_data(int(guild_id), data)
+
+
+def delete_guild_data(guild_id):
+    _ensure_db_ready()
+    _delete_guild_data(int(guild_id))
+
+
+_DB_READY = False
+
+
+def _ensure_db_ready() -> None:
+    global _DB_READY
+    if _DB_READY:
+        return
+    _init_db()
+    # One-time migration from legacy JSON settings
+    _migrate_legacy_json()
+    _DB_READY = True
 
 invites_db_path = 'db/invites.db'
 

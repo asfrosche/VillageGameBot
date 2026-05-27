@@ -2,11 +2,20 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
-from typing import List, Optional
-import json
+from typing import List, Optional, Union
 import os
 from datetime import datetime, timedelta
-from cogs.data_utils import load_guild_data
+from cogs.data_utils import load_guild_data, save_guild_data
+from utils.bot_db import (
+    add_blocked_user,
+    clear_meeting_cooldown,
+    get_blocked_users,
+    get_meeting_cooldown_until,
+    list_meeting_cooldowns,
+    migrate_legacy_json,
+    remove_blocked_user,
+    set_meeting_cooldown,
+)
 
 class MeetingCog(commands.Cog):
     def __init__(self, bot):
@@ -19,109 +28,58 @@ class MeetingCog(commands.Cog):
         # Create db folder if it doesn't exist
         os.makedirs(self.db_path, exist_ok=True)
         
-        self.blocked_users = self.load_blocked_users()
-        self.meeting_cooldowns = self.load_meeting_cooldowns()
-        self.pending_meetings = {}  # {message_id: meeting_data}
-        self.user_pending_meetings = {}  # {user_id: message_id} to track user's pending meetings
-        self.active_meetings = {}  # {channel_id: {message_id, start_time, participants}}
+        # Ensure legacy JSON settings are migrated into SQLite (one-time)
+        migrate_legacy_json()
+        # Per-guild state: guild_id -> ...
+        self.pending_meetings = {}  # {guild_id: {message_id: meeting_data}}
+        self.user_pending_meetings = {}  # {guild_id: {user_id: message_id}}
+        self.active_meetings = {}  # {channel_id: {message_id, start_time, participants}} (channel_id is global)
         
-        # Fixed IDs
-        self.MEETING_CHANNEL_ID = 1451263087913992353
-        self.TARGET_GUILD_ID = 1451261733678223486
-        self.MEETING_CATEGORY_ID = 1451262840173363240
         self.ARCHIVE_BASE_NAME = "ARCHIVE"  # Base name for archive categories
         self.MAX_CHANNELS_PER_ARCHIVE = 50
         
         # Cooldown duration in minutes
         self.MEETING_COOLDOWN_MINUTES = 60
-    
-    def load_blocked_users(self):
-        """Load the list of blocked users"""
-        try:
-            file_path = os.path.join(self.db_path, 'blocked_users.json')
-            if os.path.exists(file_path):
-                with open(file_path, 'r') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"Error loading blocked_users: {e}")
-        return {}
-    
-    def save_blocked_users(self):
-        """Save the list of blocked users"""
-        try:
-            file_path = os.path.join(self.db_path, 'blocked_users.json')
-            with open(file_path, 'w') as f:
-                json.dump(self.blocked_users, f, indent=4)
-        except Exception as e:
-            print(f"Error saving blocked_users: {e}")
-    
-    def load_meeting_cooldowns(self):
-        """Load meeting cooldowns"""
-        try:
-            file_path = os.path.join(self.db_path, 'meeting_cooldowns.json')
-            if os.path.exists(file_path):
-                with open(file_path, 'r') as f:
-                    data = json.load(f)
-                    # Convert string timestamps back to datetime objects
-                    cooldowns = {}
-                    for guild_id, users in data.items():
-                        cooldowns[guild_id] = {}
-                        for user_id, timestamp_str in users.items():
-                            cooldowns[guild_id][user_id] = datetime.fromisoformat(timestamp_str)
-                    return cooldowns
-        except Exception as e:
-            print(f"Error loading meeting_cooldowns: {e}")
-        return {}
-    
-    def save_meeting_cooldowns(self):
-        """Save meeting cooldowns"""
-        try:
-            file_path = os.path.join(self.db_path, 'meeting_cooldowns.json')
-            # Convert datetime objects to ISO format strings
-            data = {}
-            for guild_id, users in self.meeting_cooldowns.items():
-                data[guild_id] = {}
-                for user_id, timestamp in users.items():
-                    data[guild_id][user_id] = timestamp.isoformat()
-            
-            with open(file_path, 'w') as f:
-                json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"Error saving meeting_cooldowns: {e}")
+
+    def _meeting_config(self, guild_id: int):
+        """Get meeting config for a guild from guild_data. Returns dict with meeting_enabled, meeting_channel_id, target_guild_id, meeting_category_id (any can be None)."""
+        data = load_guild_data(guild_id) or {}
+        return {
+            "meeting_enabled": bool(data.get("meeting_enabled", False)),
+            "meeting_channel_id": data.get("meeting_channel_id"),
+            "target_guild_id": data.get("target_guild_id"),
+            "meeting_category_id": data.get("meeting_category_id"),
+        }
+
+    def _pending_for_guild(self, guild_id: int):
+        if guild_id not in self.pending_meetings:
+            self.pending_meetings[guild_id] = {}
+        return self.pending_meetings[guild_id]
+
+    def _user_pending_for_guild(self, guild_id: int):
+        if guild_id not in self.user_pending_meetings:
+            self.user_pending_meetings[guild_id] = {}
+        return self.user_pending_meetings[guild_id]
     
     def is_user_blocked(self, guild_id: int, user_id: int) -> bool:
         """Check if a user is blocked"""
-        guild_key = str(guild_id)
-        return guild_key in self.blocked_users and user_id in self.blocked_users[guild_key]
+        return user_id in set(get_blocked_users(guild_id))
     
     def add_meeting_cooldown(self, guild_id: int, user_id: int):
         """Add a user to meeting cooldown"""
-        guild_key = str(guild_id)
-        if guild_key not in self.meeting_cooldowns:
-            self.meeting_cooldowns[guild_key] = {}
-        
         cooldown_until = datetime.utcnow() + timedelta(minutes=self.MEETING_COOLDOWN_MINUTES)
-        self.meeting_cooldowns[guild_key][str(user_id)] = cooldown_until
-        self.save_meeting_cooldowns()
+        set_meeting_cooldown(guild_id, user_id, cooldown_until)
     
     def get_user_cooldown(self, guild_id: int, user_id: int) -> Optional[datetime]:
         """Get user's cooldown end time, returns None if no cooldown"""
-        guild_key = str(guild_id)
-        user_key = str(user_id)
-        
-        if guild_key not in self.meeting_cooldowns:
+        cooldown_until = get_meeting_cooldown_until(guild_id, user_id)
+        if not cooldown_until:
             return None
-        
-        if user_key not in self.meeting_cooldowns[guild_key]:
-            return None
-        
-        cooldown_until = self.meeting_cooldowns[guild_key][user_key]
         
         # Check if cooldown has expired
         if datetime.utcnow() >= cooldown_until:
             # Remove expired cooldown
-            del self.meeting_cooldowns[guild_key][user_key]
-            self.save_meeting_cooldowns()
+            clear_meeting_cooldown(guild_id, user_id)
             return None
         
         return cooldown_until
@@ -223,8 +181,11 @@ class MeetingCog(commands.Cog):
             await ctx.message.delete()
             return
         
-        # Verify it's in the correct channel
-        if ctx.channel.id != self.MEETING_CHANNEL_ID:
+        cfg = self._meeting_config(ctx.guild.id)
+        if not cfg["meeting_enabled"] or not cfg["meeting_channel_id"]:
+            await ctx.send("❌ Meeting system is not enabled or not configured for this server.", delete_after=10)
+            return
+        if ctx.channel.id != cfg["meeting_channel_id"]:
             await ctx.send("❌ This command can only be used in the meeting channel.", delete_after=10)
             return
         
@@ -257,10 +218,10 @@ class MeetingCog(commands.Cog):
                 await ctx.send(f"❌ {member.mention} is on meeting cooldown for {member_cooldown}.", delete_after=15)
                 return
         
-        # Check if user has a pending meeting and cancel it
-        if ctx.author.id in self.user_pending_meetings:
-            old_message_id = self.user_pending_meetings[ctx.author.id]
-            await self.cancel_meeting(old_message_id, f"Cancelled by {ctx.author.mention} to create a new meeting request")
+        user_pending = self._user_pending_for_guild(ctx.guild.id)
+        if ctx.author.id in user_pending:
+            old_message_id = user_pending[ctx.author.id]
+            await self.cancel_meeting(ctx.guild.id, old_message_id, f"Cancelled by {ctx.author.mention} to create a new meeting request")
         
         # Delete command message
         await ctx.message.delete()
@@ -288,9 +249,8 @@ class MeetingCog(commands.Cog):
         await message.add_reaction("👍")
         await message.add_reaction("👎")
         
-        # Save pending meeting data
         all_participants = [ctx.author] + list(members)
-        self.pending_meetings[message.id] = {
+        self._pending_for_guild(ctx.guild.id)[message.id] = {
             'organizer': ctx.author,
             'participants': all_participants,
             'members': list(members),
@@ -298,47 +258,40 @@ class MeetingCog(commands.Cog):
             'guild_id': ctx.guild.id,
             'channel_id': ctx.channel.id
         }
-        
-        # Track user's pending meeting
-        self.user_pending_meetings[ctx.author.id] = message.id
+        self._user_pending_for_guild(ctx.guild.id)[ctx.author.id] = message.id
     
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
         """Handle reactions to meeting embeds"""
-        
-        # Ignore bot reactions
         if payload.user_id == self.bot.user.id:
             return
-        
-        # Check if it's a pending meeting
-        if payload.message_id not in self.pending_meetings:
+
+        meeting_data = None
+        origin_guild_id = None
+        for gid, pending in self.pending_meetings.items():
+            if payload.message_id in pending:
+                meeting_data = pending[payload.message_id]
+                origin_guild_id = gid
+                break
+        if not meeting_data or origin_guild_id is None:
             return
-        
-        meeting_data = self.pending_meetings[payload.message_id]
-        
-        # Check if user is a participant
+
         user = self.bot.get_user(payload.user_id)
         if user not in meeting_data['participants']:
             return
-        
-        # Check emoji
+
         if str(payload.emoji) == "👍":
             meeting_data['votes'][payload.user_id] = True
         elif str(payload.emoji) == "👎":
-            # Meeting declined
-            await self.cancel_meeting(payload.message_id, f"{user.mention} declined the meeting")
+            await self.cancel_meeting(origin_guild_id, payload.message_id, f"{user.mention} declined the meeting")
             return
         else:
             return
-        
-        # Update embed
+
         channel = self.bot.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
-        
-        # Count votes
         total_participants = len(meeting_data['participants'])
         votes_count = len(meeting_data['votes'])
-        
         embed = message.embeds[0]
         embed.set_field_at(
             1,
@@ -347,21 +300,24 @@ class MeetingCog(commands.Cog):
             inline=False
         )
         await message.edit(embed=embed)
-        
-        # If everyone voted yes, create the meeting
         if votes_count == total_participants:
-            await self.create_meeting_channel(payload.message_id, channel)
+            await self.create_meeting_channel(origin_guild_id, payload.message_id, channel)
     
-    async def create_meeting_channel(self, message_id: int, origin_channel):
-        """Create the meeting channel in the other server"""
-        
-        meeting_data = self.pending_meetings[message_id]
-        
+    async def create_meeting_channel(self, origin_guild_id: int, message_id: int, origin_channel):
+        """Create the meeting channel in the target server (config from origin guild)."""
+        pending = self._pending_for_guild(origin_guild_id)
+        if message_id not in pending:
+            return
+        meeting_data = pending[message_id]
+        cfg = self._meeting_config(origin_guild_id)
+        target_guild_id = cfg.get("target_guild_id")
+        meeting_category_id = cfg.get("meeting_category_id")
+        if not target_guild_id or not meeting_category_id:
+            await origin_channel.send("❌ Meeting target server or category not configured.")
+            return
+
         try:
-            # Get original message
             message = await origin_channel.fetch_message(message_id)
-            
-            # Update embed
             embed = message.embeds[0]
             embed.color = discord.Color.green()
             embed.set_field_at(
@@ -371,15 +327,12 @@ class MeetingCog(commands.Cog):
                 inline=False
             )
             await message.edit(embed=embed)
-            
-            # Get target server
-            target_guild = self.bot.get_guild(self.TARGET_GUILD_ID)
+
+            target_guild = self.bot.get_guild(int(target_guild_id))
             if not target_guild:
                 await origin_channel.send("❌ Error: target server not found.")
                 return
-            
-            # Get category
-            category = target_guild.get_channel(self.MEETING_CATEGORY_ID)
+            category = target_guild.get_channel(int(meeting_category_id))
             if not category:
                 await origin_channel.send("❌ Error: meeting category not found.")
                 return
@@ -498,13 +451,13 @@ class MeetingCog(commands.Cog):
 
 
             
-            # Store active meeting data
             start_time = datetime.utcnow()
             self.active_meetings[new_channel.id] = {
                 'message_id': message.id,
                 'start_time': start_time,
                 'participants': meeting_data['participants'],
-                'origin_channel_id': meeting_data['channel_id']
+                'origin_channel_id': meeting_data['channel_id'],
+                'origin_guild_id': origin_guild_id,
             }
             
             # Update original embed with start time
@@ -517,11 +470,11 @@ class MeetingCog(commands.Cog):
             )
             await message.edit(embed=embed)
             
-            # Remove from pending meetings and user tracking
             organizer_id = meeting_data['organizer'].id
-            if organizer_id in self.user_pending_meetings:
-                del self.user_pending_meetings[organizer_id]
-            del self.pending_meetings[message_id]
+            user_pending = self._user_pending_for_guild(origin_guild_id)
+            if organizer_id in user_pending:
+                del user_pending[organizer_id]
+            del pending[message_id]
             
         except Exception as e:
             await origin_channel.send(f"❌ Error creating meeting: {str(e)}")
@@ -620,18 +573,15 @@ class MeetingCog(commands.Cog):
         except Exception as e:
             print(f"Error close_meeting_channel: {e}")
     
-    async def cancel_meeting(self, message_id: int, reason: str):
-        """Cancel a pending meeting"""
-        
-        if message_id not in self.pending_meetings:
+    async def cancel_meeting(self, guild_id: int, message_id: int, reason: str):
+        """Cancel a pending meeting."""
+        pending = self._pending_for_guild(guild_id)
+        if message_id not in pending:
             return
-        
-        meeting_data = self.pending_meetings[message_id]
-        
+        meeting_data = pending[message_id]
         try:
             channel = self.bot.get_channel(meeting_data['channel_id'])
             message = await channel.fetch_message(message_id)
-            
             embed = message.embeds[0]
             embed.color = discord.Color.red()
             embed.set_field_at(
@@ -641,35 +591,32 @@ class MeetingCog(commands.Cog):
                 inline=False
             )
             await message.edit(embed=embed)
-            
-            # Remove from user tracking
             organizer_id = meeting_data['organizer'].id
-            if organizer_id in self.user_pending_meetings:
-                del self.user_pending_meetings[organizer_id]
-            
-            del self.pending_meetings[message_id]
-            
+            user_pending = self._user_pending_for_guild(guild_id)
+            if organizer_id in user_pending:
+                del user_pending[organizer_id]
+            del pending[message_id]
         except Exception as e:
             print(f"Error cancel_meeting: {e}")
     
     @commands.command(name='endmeeting')
     async def endmeeting(self, ctx):
         """End your active meeting"""
-        
-        # Check if user is blocked
         if self.is_user_blocked(ctx.guild.id, ctx.author.id):
             await ctx.send("❌ You have been blocked from using this command.", delete_after=10)
             return
-        
         try:
-            # Get target server
-            target_guild = self.bot.get_guild(self.TARGET_GUILD_ID)
-            if not target_guild:
-                await ctx.send("❌ Target server not found.")
+            target_guild = ctx.guild
+            cfg = None
+            for guild in self.bot.guilds:
+                c = self._meeting_config(guild.id)
+                if c.get("target_guild_id") and int(c["target_guild_id"]) == ctx.guild.id and c.get("meeting_category_id"):
+                    cfg = c
+                    break
+            if not cfg:
+                await ctx.send("❌ Meeting system is not configured for this server.")
                 return
-            
-            # Get meeting category
-            category = target_guild.get_channel(self.MEETING_CATEGORY_ID)
+            category = target_guild.get_channel(int(cfg["meeting_category_id"]))
             if not category:
                 await ctx.send("❌ Meeting category not found.")
                 return
@@ -702,23 +649,93 @@ class MeetingCog(commands.Cog):
             await ctx.send(f"❌ Error closing meeting: {str(e)}")
             print(f"Error endmeeting: {e}")
     
-    # ADMIN COMMANDS
-    
+    # ---------- Setup commands (admin) ----------
+    @commands.command(name='meetingenable')
+    @commands.has_permissions(administrator=True)
+    async def meetingenable(self, ctx, value: bool):
+        """Enable or disable the meeting system for this server. Requires meeting channel, target guild and category to be set first."""
+        data = load_guild_data(ctx.guild.id) or {}
+        if value and (not data.get("meeting_channel_id") or not data.get("target_guild_id") or not data.get("meeting_category_id")):
+            await ctx.send("❌ Set meeting channel, target guild and meeting category first (`.setmeetingchannel`, `.setmeetingtargetguild`, `.setmeetingcategory`).")
+            return
+        data["meeting_enabled"] = bool(value)
+        save_guild_data(ctx.guild.id, data)
+        await ctx.send(f"Meeting system **{'enabled' if value else 'disabled'}** for this server.")
+
+    @commands.command(name='setmeetingchannel')
+    @commands.has_permissions(administrator=True)
+    async def setmeetingchannel(self, ctx, channel: discord.TextChannel):
+        """Set the channel where users run `.meeting` to request meetings. Should be a channel only alive players can use."""
+        data = load_guild_data(ctx.guild.id) or {}
+        data["meeting_channel_id"] = channel.id
+        save_guild_data(ctx.guild.id, data)
+        await ctx.send(f"Meeting request channel set to {channel.mention}. Use `.meetingenable true` when ready.")
+
+    @commands.command(name='setmeetingtargetguild')
+    @commands.has_permissions(administrator=True)
+    async def setmeetingtargetguild(self, ctx, guild_id: int = None):
+        """Set the server where meeting private channels are created. Use the server's ID (right-click server → Copy ID). If omitted, uses this server."""
+        gid = guild_id or ctx.guild.id
+        guild = self.bot.get_guild(gid)
+        if not guild:
+            await ctx.send("❌ Bot is not in that server. Use the server ID where meeting channels should be created (same server or another the bot is in).")
+            return
+        data = load_guild_data(ctx.guild.id) or {}
+        data["target_guild_id"] = gid
+        save_guild_data(ctx.guild.id, data)
+        await ctx.send(f"Target guild set to **{guild.name}** (ID: {gid}). Use `.setmeetingcategory` to set the category there.")
+
+    @commands.command(name='setmeetingcategory')
+    @commands.has_permissions(administrator=True)
+    async def setmeetingcategory(self, ctx, category_or_id: Union[discord.CategoryChannel, int]):
+        """Set the category (in the target server) where new meeting channels are created. Use a category mention, or the category ID from the target server."""
+        data = load_guild_data(ctx.guild.id) or {}
+        target_gid = data.get("target_guild_id") or ctx.guild.id
+        target_guild = self.bot.get_guild(int(target_gid))
+        if not target_guild:
+            await ctx.send("❌ Target server not found. Set target guild first.")
+            return
+        if isinstance(category_or_id, int):
+            category = target_guild.get_channel(category_or_id)
+        else:
+            category = category_or_id
+        if not category or not isinstance(category, discord.CategoryChannel):
+            await ctx.send("❌ Category not found or not in the target server.")
+            return
+        if category.guild.id != target_gid:
+            await ctx.send(f"❌ That category is not in the target server (**{target_guild.name}**). Use a category from that server (or its ID).")
+            return
+        data["meeting_category_id"] = category.id
+        save_guild_data(ctx.guild.id, data)
+        await ctx.send(f"Meeting category set to **{category.name}**. Use `.meetingenable true` when all is set.")
+
+    @commands.command(name='meetingconfig')
+    @commands.has_permissions(administrator=True)
+    async def meetingconfig(self, ctx):
+        """Show current meeting configuration for this server."""
+        cfg = self._meeting_config(ctx.guild.id)
+        channel = self.bot.get_channel(cfg["meeting_channel_id"]) if cfg.get("meeting_channel_id") else None
+        target_guild = self.bot.get_guild(int(cfg["target_guild_id"])) if cfg.get("target_guild_id") else None
+        category = target_guild.get_channel(cfg["meeting_category_id"]) if target_guild and cfg.get("meeting_category_id") else None
+        embed = discord.Embed(title="Meeting configuration", color=0xff3fb9, timestamp=datetime.utcnow())
+        embed.add_field(name="Enabled", value="Yes" if cfg["meeting_enabled"] else "No", inline=True)
+        embed.add_field(name="Meeting channel", value=channel.mention if channel else "Not set", inline=True)
+        embed.add_field(name="Target server", value=target_guild.name if target_guild else "Not set", inline=True)
+        embed.add_field(name="Meeting category", value=category.name if category else "Not set", inline=True)
+        await ctx.send(embed=embed)
+
+    # ---------- Admin moderation ----------
     @commands.command(name='blockmeeting')
     @commands.has_permissions(administrator=True)
     async def blockmeeting(self, ctx, member: discord.Member):
         """Block a user from using meeting commands"""
-        
-        guild_key = str(ctx.guild.id)
-        if guild_key not in self.blocked_users:
-            self.blocked_users[guild_key] = []
-        
-        if member.id in self.blocked_users[guild_key]:
+
+        blocked = set(get_blocked_users(ctx.guild.id))
+        if member.id in blocked:
             await ctx.send(f"⚠️ {member.mention} is already blocked.")
             return
-        
-        self.blocked_users[guild_key].append(member.id)
-        self.save_blocked_users()
+
+        add_blocked_user(ctx.guild.id, member.id)
         
         embed = discord.Embed(
             title="🚫 User Blocked",
@@ -733,14 +750,13 @@ class MeetingCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def unblockmeeting(self, ctx, member: discord.Member):
         """Unblock a user from using meeting commands"""
-        
-        guild_key = str(ctx.guild.id)
-        if guild_key not in self.blocked_users or member.id not in self.blocked_users[guild_key]:
+
+        blocked = set(get_blocked_users(ctx.guild.id))
+        if member.id not in blocked:
             await ctx.send(f"⚠️ {member.mention} is not blocked.")
             return
-        
-        self.blocked_users[guild_key].remove(member.id)
-        self.save_blocked_users()
+
+        remove_blocked_user(ctx.guild.id, member.id)
         
         embed = discord.Embed(
             title="✅ User Unblocked",
@@ -755,13 +771,9 @@ class MeetingCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def removecooldown(self, ctx, member: discord.Member):
         """Remove meeting cooldown from a user (admin only)"""
-        
-        guild_key = str(ctx.guild.id)
-        user_key = str(member.id)
-        
-        if guild_key in self.meeting_cooldowns and user_key in self.meeting_cooldowns[guild_key]:
-            del self.meeting_cooldowns[guild_key][user_key]
-            self.save_meeting_cooldowns()
+
+        if get_meeting_cooldown_until(ctx.guild.id, member.id):
+            clear_meeting_cooldown(ctx.guild.id, member.id)
             
             embed = discord.Embed(
                 title="✅ Cooldown Removed",
@@ -803,22 +815,20 @@ class MeetingCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def forcemeeting(self, ctx, *members: discord.Member):
         """Create a forced meeting without voting (admin only) - does not apply cooldowns"""
-        
         if len(members) < 1 or len(members) > 5:
             await ctx.send("❌ You must mention between 1 and 5 players.")
             return
-        
+        cfg = self._meeting_config(ctx.guild.id)
+        if not cfg["meeting_enabled"] or not cfg.get("target_guild_id") or not cfg.get("meeting_category_id"):
+            await ctx.send("❌ Meeting system is not configured. Use `.setmeetingchannel`, `.setmeetingtargetguild`, `.setmeetingcategory`, then `.meetingenable true`.")
+            return
         try:
-            # Delete command message
             await ctx.message.delete()
-            
-            # Create meeting directly
-            target_guild = self.bot.get_guild(self.TARGET_GUILD_ID)
+            target_guild = self.bot.get_guild(int(cfg["target_guild_id"]))
             if not target_guild:
                 await ctx.send("❌ Target server not found.")
                 return
-            
-            category = target_guild.get_channel(self.MEETING_CATEGORY_ID)
+            category = target_guild.get_channel(int(cfg["meeting_category_id"]))
             if not category:
                 await ctx.send("❌ Meeting category not found.")
                 return
@@ -922,7 +932,8 @@ class MeetingCog(commands.Cog):
             # Store active meeting data
             start_time = datetime.utcnow()
             self.active_meetings[new_channel.id] = {
-                'message_id': None,  # No original message for forced meetings
+                'message_id': None,
+                'origin_guild_id': ctx.guild.id,
                 'start_time': start_time,
                 'participants': list(members),
                 'origin_channel_id': ctx.channel.id
@@ -939,14 +950,14 @@ class MeetingCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def listblocked(self, ctx):
         """Show the list of blocked users"""
-        
-        guild_key = str(ctx.guild.id)
-        if guild_key not in self.blocked_users or not self.blocked_users[guild_key]:
+
+        blocked_user_ids = get_blocked_users(ctx.guild.id)
+        if not blocked_user_ids:
             await ctx.send("✅ No blocked users.")
             return
         
         blocked_mentions = []
-        for user_id in self.blocked_users[guild_key]:
+        for user_id in blocked_user_ids:
             member = ctx.guild.get_member(user_id)
             if member:
                 blocked_mentions.append(f"• {member.mention} (`{member.id}`)")
@@ -959,28 +970,28 @@ class MeetingCog(commands.Cog):
             color=discord.Color.red(),
             timestamp=datetime.utcnow()
         )
-        embed.set_footer(text=f"Total: {len(self.blocked_users[guild_key])}")
+        embed.set_footer(text=f"Total: {len(blocked_user_ids)}")
         await ctx.send(embed=embed)
     
     @commands.command(name='listcooldowns')
     @commands.has_permissions(administrator=True)
     async def listcooldowns(self, ctx):
         """Show all users currently on meeting cooldown"""
-        
-        guild_key = str(ctx.guild.id)
-        if guild_key not in self.meeting_cooldowns or not self.meeting_cooldowns[guild_key]:
+
+        rows = list_meeting_cooldowns(ctx.guild.id)
+        if not rows:
             await ctx.send("✅ No users on cooldown.")
             return
         
         cooldown_list = []
         current_time = datetime.utcnow()
-        
-        for user_id_str, cooldown_until in list(self.meeting_cooldowns[guild_key].items()):
-            # Check if cooldown has expired
+
+        for user_id, cooldown_until in rows:
             if current_time >= cooldown_until:
+                # best-effort cleanup of expired entries
+                clear_meeting_cooldown(ctx.guild.id, user_id)
                 continue
-            
-            user_id = int(user_id_str)
+
             member = ctx.guild.get_member(user_id)
             
             time_remaining = cooldown_until - current_time
@@ -1014,46 +1025,44 @@ class MeetingCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def cancelmeeting_admin(self, ctx, message_id: int):
         """Cancel a pending meeting (admin only)"""
-        
-        if message_id not in self.pending_meetings:
-            await ctx.send("❌ Meeting not found or already completed.")
-            return
-        
-        await self.cancel_meeting(message_id, f"Cancelled by administrator {ctx.author.mention}")
-        await ctx.send("✅ Meeting cancelled.")
+        for gid, pending in self.pending_meetings.items():
+            if message_id in pending:
+                await self.cancel_meeting(gid, message_id, f"Cancelled by administrator {ctx.author.mention}")
+                await ctx.send("✅ Meeting cancelled.")
+                return
+        await ctx.send("❌ Meeting not found or already completed.")
     
     @commands.command(name='meetingstats')
     @commands.has_permissions(administrator=True)
     async def meetingstats(self, ctx):
-        """Show meeting statistics"""
-        
+        """Show meeting statistics (for this server's meeting config)."""
+        cfg = self._meeting_config(ctx.guild.id)
+        if not cfg.get("target_guild_id") or not cfg.get("meeting_category_id"):
+            await ctx.send("❌ Meeting system not configured. Set target guild and category first.")
+            return
         try:
-            target_guild = self.bot.get_guild(self.TARGET_GUILD_ID)
+            target_guild = self.bot.get_guild(int(cfg["target_guild_id"]))
             if not target_guild:
                 await ctx.send("❌ Target server not found.")
                 return
-            
-            category = target_guild.get_channel(self.MEETING_CATEGORY_ID)
-            
-            # Count all archive categories
+            category = target_guild.get_channel(int(cfg["meeting_category_id"]))
             total_archived = 0
             archive_categories = []
             for cat in target_guild.categories:
                 if cat.name.startswith(self.ARCHIVE_BASE_NAME):
                     archive_categories.append((cat.name, len(cat.channels)))
                     total_archived += len(cat.channels)
-            
             active_meetings = len(category.text_channels) if category else 0
-            pending_meetings = len(self.pending_meetings)
+            pending_meetings = sum(len(p) for p in self.pending_meetings.values())
             
             # Count cooldowns
-            guild_key = str(ctx.guild.id)
+            current_time = datetime.utcnow()
             active_cooldowns = 0
-            if guild_key in self.meeting_cooldowns:
-                current_time = datetime.utcnow()
-                for cooldown_until in self.meeting_cooldowns[guild_key].values():
-                    if current_time < cooldown_until:
-                        active_cooldowns += 1
+            for user_id, cooldown_until in list_meeting_cooldowns(ctx.guild.id):
+                if current_time < cooldown_until:
+                    active_cooldowns += 1
+                else:
+                    clear_meeting_cooldown(ctx.guild.id, user_id)
             
             embed = discord.Embed(
                 title="📊 Meeting Statistics",
