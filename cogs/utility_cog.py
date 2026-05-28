@@ -654,6 +654,15 @@ class Utility(commands.Cog):
                 await ctx.channel.edit(category=dead_category)
                 for member in members:
                     if alive_role in member.roles:
+                        current_houses_ids = []
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    current_houses_ids.append(house_channel.id)
+                        if current_houses_ids:
+                            guild_data.setdefault("current_houses", {})[str(member.id)] = current_houses_ids
+                            save_guild_data(ctx.guild.id, guild_data)
                         if str(member.id) in guild_data["member_homes"]:
                             old_house_id = guild_data["member_homes"].get(str(member.id))
                             old_house = ctx.guild.get_channel(old_house_id)
@@ -682,6 +691,15 @@ class Utility(commands.Cog):
                                     await publ_channel.set_permissions(member, overwrite=None)
                                     await publ_channel.send(f'{member.mention} Leaves')
                     elif sponsor_role in member.roles:
+                        current_houses_ids = []
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    current_houses_ids.append(house_channel.id)
+                        if current_houses_ids:
+                            guild_data.setdefault("current_houses", {})[str(member.id)] = current_houses_ids
+                            save_guild_data(ctx.guild.id, guild_data)
                         if str(member.id) in guild_data["member_homes"]:
                             del guild_data["member_homes"][str(member.id)]
                             await ctx.send(f'{member.mention} is now homeless')
@@ -815,7 +833,6 @@ class Utility(commands.Cog):
         dead_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("dead_role_name"))
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
         sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
-        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
         privc_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("privc_category_name"))
         publc_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("publc_category_name"))
         if not dead_role:
@@ -837,29 +854,34 @@ class Utility(commands.Cog):
             await ctx.send("No alive player or sponsor was found in this channel.")
             return
 
-        current_houses = []
-        if houses_category:
-            for house_channel in houses_category.channels:
-                permissions = house_channel.permissions_for(target_member)
-                if permissions.send_messages:
-                    current_houses.append(house_channel)
+        stored_houses = guild_data.setdefault("current_houses", {}).get(str(target_member.id), [])
+        corpse_houses = [ctx.guild.get_channel(ch_id) for ch_id in stored_houses if ctx.guild.get_channel(ch_id)]
 
-        selected_house = await self._choose_house_for_corpse(ctx, target_member, current_houses)
-        if selected_house is False:
-            return
+        selected_house = None
+        if not corpse_houses:
+            await ctx.send("No stored house found for this player. Mention the channel for the corpse message:")
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel and m.mentions
+            try:
+                reply = await self.bot.wait_for("message", timeout=60, check=check)
+                selected_house = reply.mentions[0] if reply.mentions else None
+            except asyncio.TimeoutError:
+                await ctx.send("Timed out. No corpse message will be sent.")
+        elif len(corpse_houses) == 1:
+            selected_house = corpse_houses[0]
+        else:
+            selected_house = await self._choose_house_for_corpse(ctx, target_member, corpse_houses)
+            if selected_house is False:
+                return
 
         if str(target_member.id) in guild_data["member_homes"]:
             del guild_data["member_homes"][str(target_member.id)]
             save_guild_data(ctx.guild.id, guild_data)
             await ctx.send(f"{target_member.mention} is now homeless")
 
-        for house_channel in current_houses:
-            await house_channel.set_permissions(target_member, overwrite=None)
-            if house_channel == selected_house:
-                corpse_message = await house_channel.send(f"{target_member.mention} corpse is here")
-                await corpse_message.pin()
-            else:
-                await house_channel.send(f"{target_member.mention} Leaves")
+        if selected_house:
+            corpse_message = await selected_house.send(f"{target_member.mention} corpse is here")
+            await corpse_message.pin()
 
         await self._remove_member_from_side_channels(target_member, privc_category)
         await self._remove_member_from_side_channels(target_member, publc_category)
