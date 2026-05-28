@@ -62,6 +62,7 @@ base_variables = {
     "can_dead_open": False,
     "can_alt_open": False,
     "member_homes": {},
+    "current_houses": {},
     "infos": {},
     "lynch_votes1": {},
     "lynch_votes2": {},
