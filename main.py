@@ -51,6 +51,7 @@ from config import PREFIX, TOKEN
 from utils.embeds import error_embed, info_embed, plain_embed
 from cogs.estate_cog import Estate
 from cogs.item_drop_cog import ItemDrop
+from cogs.channel_cog import ChannelMap
 
 
 
@@ -611,6 +612,7 @@ async def startcog():
     await bot.add_cog(Meetup(bot))
     await bot.add_cog(Estate(bot))
     await bot.add_cog(ItemDrop(bot))
+    await bot.add_cog(ChannelMap(bot))
     await bot.add_cog(VgIntro(bot))
 
 
