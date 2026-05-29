@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 import os
@@ -78,13 +79,13 @@ class ChannelMap(commands.Cog):
         return ImageFont.load_default()
 
     def _get_fonts(self):
-        title_font = self._resolve_font(52, bold=True)
-        subtitle_font = self._resolve_font(26)
-        header_font = self._resolve_font(22, bold=True)
-        name_font = self._resolve_font(20)
+        title_font = self._resolve_font(38, bold=True)
+        subtitle_font = self._resolve_font(22)
+        header_font = self._resolve_font(24, bold=True)
+        name_font = self._resolve_font(21)
         count_font = self._resolve_font(18, bold=True)
         small_font = self._resolve_font(16)
-        tiny_font = self._resolve_font(14)
+        tiny_font = self._resolve_font(13)
         return {
             "title": title_font,
             "subtitle": subtitle_font,
@@ -132,11 +133,13 @@ class ChannelMap(commands.Cog):
         if not category:
             return []
 
-        channels = []
+        # First pass: collect all qualifying members across channels
+        all_members = {}
+        channels_raw = []
         for ch in category.text_channels:
             if ch.name == "duplicate-this":
                 continue
-            members = []
+            member_ids = []
             for member in ch.members:
                 if member.bot:
                     continue
@@ -146,19 +149,44 @@ class ChannelMap(commands.Cog):
                 has_alt = alt_role is not None and alt_role in member.roles
                 if not (has_alive or has_alt):
                     continue
-                members.append({
-                    "id": member.id,
-                    "name": member.display_name,
-                })
-
+                member_ids.append(member.id)
+                all_members[member.id] = member
             everyone_overwrites = ch.overwrites_for(guild.default_role)
-            hidden = everyone_overwrites.read_messages is False
-
-            channels.append({
+            channels_raw.append({
                 "name": ch.name,
-                "members": members,
-                "hidden": hidden,
+                "member_ids": member_ids,
+                "hidden": everyone_overwrites.read_messages is False,
                 "channel": ch,
+            })
+
+        # Fetch all avatars concurrently
+        avatar_map = {}
+        async def _fetch_avatar(member):
+            try:
+                avatar_map[member.id] = await member.display_avatar.replace(size=64).read()
+            except Exception:
+                avatar_map[member.id] = None
+        tasks = [_fetch_avatar(m) for m in all_members.values()]
+        if tasks:
+            await asyncio.gather(*tasks)
+
+        # Build final channel data
+        channels = []
+        for ch_raw in channels_raw:
+            members = []
+            for mid in ch_raw["member_ids"]:
+                m = all_members.get(mid)
+                if m:
+                    members.append({
+                        "id": m.id,
+                        "name": m.display_name,
+                        "avatar": avatar_map.get(mid),
+                    })
+            channels.append({
+                "name": ch_raw["name"],
+                "members": members,
+                "hidden": ch_raw["hidden"],
+                "channel": ch_raw["channel"],
             })
 
         channels.sort(key=lambda c: (c["hidden"], c["name"]))
@@ -279,6 +307,14 @@ class ChannelMap(commands.Cog):
             width=glow_w,
         )
 
+        # Terminal corner accents on card
+        ac_len = 10
+        ac_color = (*glow_color[:3], 120)
+        draw.line([(box_x1 + 2, box_y1 + ac_len), (box_x1 + 2, box_y1 + 2), (box_x1 + ac_len, box_y1 + 2)], fill=ac_color, width=2)
+        draw.line([(box_x2 - 2, box_y1 + ac_len), (box_x2 - 2, box_y1 + 2), (box_x2 - ac_len, box_y1 + 2)], fill=ac_color, width=2)
+        draw.line([(box_x1 + 2, box_y2 - ac_len), (box_x1 + 2, box_y2 - 2), (box_x1 + ac_len, box_y2 - 2)], fill=ac_color, width=2)
+        draw.line([(box_x2 - 2, box_y2 - ac_len), (box_x2 - 2, box_y2 - 2), (box_x2 - ac_len, box_y2 - 2)], fill=ac_color, width=2)
+
         if member_count >= 4:
             draw.rounded_rectangle(
                 [box_x1 - 2, box_y1 - 2, box_x2 + 2, box_y2 + 2],
@@ -294,35 +330,46 @@ class ChannelMap(commands.Cog):
         small_font = fonts["small"]
 
         header_text = f"{icon}  {name}"
-        max_header_w = box_w - 32
+        max_header_w = box_w - 40
         header_text = self._truncate_text(draw, header_text, header_font, max_header_w)
         hdr_y = box_y1 + 10
         self._draw_text_with_shadow(
-            draw, box_x1 + 14, hdr_y, header_text, header_font,
+            draw, box_x1 + 16, hdr_y, header_text, header_font,
             colors["header_text"], shadow_offset=1
         )
 
-        sep_y = hdr_y + 28
+        sep_y = hdr_y + 30
         draw.line(
             [(box_x1 + 14, sep_y), (box_x2 - 14, sep_y)],
-            fill=(*colors["separator"][:3], 60),
+            fill=(*colors["separator"][:3], 120),
+            width=2,
+        )
+        draw.line(
+            [(box_x1 + 14, sep_y + 3), (box_x2 - 14, sep_y + 3)],
+            fill=(*colors["separator"][:3], 30),
             width=1,
         )
 
-        name_y = sep_y + 8
+        name_y = sep_y + 10
         if member_count == 0:
             empty_text = "[ EMPTY ]"
             etw = self._text_width(draw, empty_text, count_font)
             ex = box_x1 + (box_w - etw) // 2
             ey = box_y1 + (box_h // 2) - 4
+            draw.rounded_rectangle(
+                [ex - 12, ey - 4, ex + etw + 12, ey + 22],
+                radius=4, fill=(*colors["card_bg"][:3], 200),
+                outline=(*colors["empty_text"][:3], 60), width=1,
+            )
             self._draw_text_with_shadow(
                 draw, ex, ey, empty_text, count_font,
                 colors["empty_text"], shadow_offset=1
             )
         else:
+            avatar_size = 26
             max_names_h = box_h - (name_y - box_y1) - 36
             visible_members = ch_data["members"]
-            line_h = 24
+            line_h = max(avatar_size + 4, 28)
             max_show = max(0, int(max_names_h // line_h))
             if max_show == 0:
                 max_show = 1
@@ -331,11 +378,29 @@ class ChannelMap(commands.Cog):
             overflow = len(visible_members) - len(show_members)
 
             for i, m in enumerate(show_members):
-                m_text = f"• {m['name']}"
-                m_text = self._truncate_text(draw, m_text, name_font, box_w - 44)
                 my = name_y + i * line_h
+                tx = box_x1 + 18
+
+                avatar_bytes = m.get("avatar")
+                if avatar_bytes:
+                    try:
+                        av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+                        av_img = av_img.resize((avatar_size, avatar_size))
+                        mask = Image.new("L", (avatar_size, avatar_size), 0)
+                        m_draw = ImageDraw.Draw(mask)
+                        m_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+                        av_img.putalpha(mask)
+                        av_y = my + (line_h - avatar_size) // 2
+                        img.paste(av_img, (int(tx), int(av_y)), av_img)
+                    except Exception:
+                        pass
+                    tx += avatar_size + 8
+
+                m_text = m['name']
+                m_text = self._truncate_text(draw, m_text, name_font, box_w - (tx - box_x1) - 22)
+                ty = my + (line_h - 16) // 2
                 self._draw_text_with_shadow(
-                    draw, box_x1 + 18, my, m_text, name_font,
+                    draw, tx, ty, m_text, name_font,
                     colors["player_text"], shadow_offset=1
                 )
 
@@ -360,13 +425,13 @@ class ChannelMap(commands.Cog):
             return img.convert("RGB")
 
         # Layout calculations
-        card_w = 280
-        card_min_h = 120
-        card_pad_x = 24
-        card_pad_y = 20
-        margin_x = 40
-        margin_y_top = 140
-        margin_y_bot = 40
+        card_w = 330
+        card_min_h = 110
+        card_pad_x = 20
+        card_pad_y = 16
+        margin_x = 36
+        margin_y_top = 110
+        margin_y_bot = 56
 
         n = len(channels)
 
@@ -386,7 +451,7 @@ class ChannelMap(commands.Cog):
             mc = len(ch_data["members"])
             if mc == 0:
                 return card_min_h
-            return max(card_min_h, 120 + mc * 24)
+            return max(card_min_h, 110 + mc * 30)
 
         row_heights = []
         for r in range(rows):
@@ -406,6 +471,18 @@ class ChannelMap(commands.Cog):
 
         img = self._load_background(canvas_w, canvas_h)
         self._apply_noise(img, intensity=6)
+
+        # Vignette overlay — apply BEFORE creating draw so both stay in sync
+        vignette = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+        v_draw = ImageDraw.Draw(vignette)
+        for r in range(canvas_h):
+            factor = 1.0 - (r / canvas_h)
+            edge = min(r, canvas_h - r, canvas_w // 2) / (canvas_h // 3)
+            alpha = int(max(0, min(255, (1.0 - factor) * 60 * edge)))
+            if alpha > 0:
+                v_draw.line([(0, r), (canvas_w, r)], fill=(0, 0, 0, alpha))
+        img = Image.alpha_composite(img, vignette)
+
         draw = ImageDraw.Draw(img, "RGBA")
 
         # Sci-fi border frame around entire map
@@ -419,14 +496,14 @@ class ChannelMap(commands.Cog):
         title_text = title
         tw = self._text_width(draw, title_text, fonts["title"])
         tx = (canvas_w - tw) // 2
-        self._draw_text_with_shadow(draw, tx, 42, title_text, fonts["title"],
+        self._draw_text_with_shadow(draw, tx, 28, title_text, fonts["title"],
                                     theme["colors"]["title_text"])
 
         # Subtitle
         if subtitle:
             sw = self._text_width(draw, subtitle, fonts["subtitle"])
             sx = (canvas_w - sw) // 2
-            self._draw_text_with_shadow(draw, sx, 102, subtitle, fonts["subtitle"],
+            self._draw_text_with_shadow(draw, sx, 68, subtitle, fonts["subtitle"],
                                         theme["colors"]["subtitle_text"])
 
         # Grid layout — draw channel boxes
@@ -442,6 +519,30 @@ class ChannelMap(commands.Cog):
                 draw, img, cx, cy, card_w, ch, ch_data, fonts, theme, canvas_w
             )
 
+        # Footer HUD
+        total_members = sum(len(c["members"]) for c in channels)
+        hidden_count = sum(1 for c in channels if c.get("hidden"))
+        now_str = datetime.datetime.utcnow().strftime("%H:%M UTC")
+        footer_parts = [
+            f"TOTAL CHANNELS: {n}",
+            f"ACTIVE PLAYERS: {total_members}",
+        ]
+        if hidden_count:
+            footer_parts.append(f"HIDDEN: {hidden_count}")
+        footer_text = "  │  ".join(footer_parts)
+        footer_right = f"LAST UPDATED: {now_str}"
+
+        fl_font = fonts["tiny"]
+        fy = canvas_h - 28
+        self._draw_text_with_shadow(draw, 20, fy, footer_text, fl_font,
+                                    theme["colors"]["footer_text"], shadow_offset=1)
+        fr_w = self._text_width(draw, footer_right, fl_font)
+        self._draw_text_with_shadow(draw, canvas_w - fr_w - 20, fy, footer_right,
+                                    fl_font, theme["colors"]["footer_text"], shadow_offset=1)
+
+        draw.line([(16, fy - 8), (canvas_w - 16, fy - 8)],
+                  fill=(255, 255, 255, 15), width=1)
+
         self._draw_sci_fi_frame(
             draw, 14, margin_y_top - 6, canvas_w - 14, canvas_h - margin_y_bot + 14,
             theme["colors"]["frame"], corner_len=16, width=1
@@ -456,21 +557,21 @@ class ChannelMap(commands.Cog):
         return {
             "name": "public",
             "colors": {
-                "title_text": (0, 255, 200),
+                "title_text": (80, 255, 210),
                 "subtitle_text": (160, 255, 220),
-                "header_text": (0, 255, 200),
-                "player_text": (140, 255, 180),
+                "header_text": (120, 255, 220),
+                "player_text": (180, 255, 190),
                 "count_text": (0, 255, 160),
-                "empty_text": (80, 120, 100),
-                "dim_text": (100, 160, 140),
-                "footer_text": (80, 200, 170),
-                "separator": (0, 180, 140),
-                "card_bg": (8, 20, 18, 200),
+                "empty_text": (100, 170, 140),
+                "dim_text": (120, 180, 160),
+                "footer_text": (100, 220, 180),
+                "separator": (0, 220, 170),
+                "card_bg": (10, 24, 20, 210),
                 "frame": (0, 255, 200),
-                "glow_normal": (0, 255, 200, 80),
-                "glow_empty": (0, 120, 100, 40),
-                "glow_crowded": (255, 180, 0, 120),
-                "warning": (255, 160, 0, 100),
+                "glow_normal": (0, 255, 200, 90),
+                "glow_empty": (0, 140, 110, 40),
+                "glow_crowded": (255, 200, 0, 130),
+                "warning": (255, 180, 0, 110),
             },
         }
 
@@ -479,21 +580,21 @@ class ChannelMap(commands.Cog):
         return {
             "name": "private",
             "colors": {
-                "title_text": (255, 60, 80),
-                "subtitle_text": (255, 140, 150),
-                "header_text": (255, 80, 100),
-                "player_text": (255, 150, 160),
+                "title_text": (255, 90, 110),
+                "subtitle_text": (255, 150, 160),
+                "header_text": (255, 120, 135),
+                "player_text": (255, 170, 175),
                 "count_text": (255, 70, 90),
-                "empty_text": (120, 60, 60),
-                "dim_text": (160, 100, 100),
-                "footer_text": (200, 80, 80),
-                "separator": (180, 40, 40),
-                "card_bg": (20, 8, 10, 200),
+                "empty_text": (140, 80, 80),
+                "dim_text": (170, 110, 110),
+                "footer_text": (220, 100, 100),
+                "separator": (200, 60, 60),
+                "card_bg": (22, 10, 12, 210),
                 "frame": (255, 60, 80),
-                "glow_normal": (255, 60, 80, 80),
-                "glow_empty": (120, 30, 40, 40),
-                "glow_crowded": (255, 100, 0, 120),
-                "warning": (255, 100, 0, 100),
+                "glow_normal": (255, 70, 90, 90),
+                "glow_empty": (140, 40, 50, 40),
+                "glow_crowded": (255, 120, 0, 130),
+                "warning": (255, 110, 0, 110),
             },
         }
 
@@ -600,3 +701,4 @@ class ChannelMap(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ChannelMap(bot))
+# [1] ------------------------------------------------------------------------------

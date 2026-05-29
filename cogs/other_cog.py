@@ -386,7 +386,7 @@ class Other(commands.Cog):
         embedh.add_field(name="🏗️ - Setup", value="19 Commands\n`.help setup`", inline=True)
         embedh.add_field(name="👟 - Moving", value="9 Commands\n`.help moving`", inline=True)
         embedh.add_field(name="🏡 - Home", value="12 Commands\n`.help home`", inline=True)
-        embedh.add_field(name="🔓 - Houses and PCs handling", value="9 Commands\n`.help handling`", inline=True)
+        embedh.add_field(name="🔓 - Houses and PCs handling", value="12 Commands\n`.help handling`", inline=True)
         embedh.add_field(name="📜 - Infos", value="4 Commands\n`.help infos`", inline=True)
         embedh.add_field(name="🎟️ - Presets", value="2 Commands\n`.help presets`", inline=True)
         embedh.add_field(name="🗳️ - Voting", value="7 Commands\n`.help voting`", inline=True)
@@ -422,8 +422,8 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedh, self.help_home)
 
     async def help_handling(self, ctx):
-        embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="9 commands", color=0xff3fb9)
-        embedhan.add_field(name=" ", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**newpc {Public/Private} {Name} {#RoleChannel}** • Generate a Chat in Public/Private Channels category. Players of the specified RoleChats will be added in there\n**close {#PCName}** • Move the Chat in Old PCS category, remove everyone from the chat\n**public {#Channel}** • Make the Channel public\n**private {#Channel}** • Make the Channel private\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner", inline=False)
+        embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="12 commands", color=0xff3fb9)
+        embedhan.add_field(name=" ", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**newpc {Public/Private} {Name} {#RoleChannel}** • Generate a Chat in Public/Private Channels category. Players of the specified RoleChats will be added in there\n**close {#PCName}** • Move the Chat in Old PCS category, remove everyone from the chat\n**public {#Channel}** • Make the Channel public\n**private {#Channel}** • Make the Channel private\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner\n**channels** • Generate a visual map of all Public and Private Channels\n**publicmap** • Generate a visual map of only Public Channels\n**privatemap** • Generate a visual map of only Private Channels", inline=False)
         embedhan.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedhan, self.help_handling)
 
