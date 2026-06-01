@@ -184,7 +184,7 @@ class Privatecommands(commands.Cog):
                 if guild.me.guild_permissions.create_instant_invite:
                     channel = next((channel for channel in guild.text_channels if channel.permissions_for(guild.me).create_instant_invite), None)
                     if channel is not None:
-                        invite = await channel.create_invite(max_age=0, max_uses=1)
+                        invite = await channel.create_invite(max_age=0, max_uses=0)
                         await ctx.send(f"{invite.url}")
                     else:
                         await ctx.send("Nessun canale trovato.")
@@ -192,7 +192,27 @@ class Privatecommands(commands.Cog):
                     await ctx.send("Non ho i permessi per creare un invito.")
             else:
                 await ctx.send("Non ho trovato nessun server con quell'ID.")
-    
+
+    @commands.command()
+    async def invites(self, ctx):
+        hearthside = self.bot.get_guild(1074546612887638086)
+        village = self.bot.get_guild(1072964790546350102)
+        links = []
+        for guild, label in [(hearthside, "English Village Games server — Hearthside"), (village, "Italian Village Games server — The Village")]:
+            if not guild:
+                links.append(f"❌ **{label}** — bot not in server")
+                continue
+            if not guild.me.guild_permissions.create_instant_invite:
+                links.append(f"❌ **{label}** — no invite permission")
+                continue
+            channel = next((ch for ch in guild.text_channels if ch.permissions_for(guild.me).create_instant_invite), None)
+            if not channel:
+                links.append(f"❌ **{label}** — no accessible channel")
+                continue
+            invite = await channel.create_invite(max_age=0, max_uses=0)
+            links.append(f"**{label}**:\n{invite.url}")
+        await ctx.send("\n\n".join(links))
+
     @commands.command(name='teamroll')
     @commands.has_permissions(administrator=True)
     @commands.guild_only()
