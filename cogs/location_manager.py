@@ -799,12 +799,15 @@ class LocationsView(discord.ui.View):
             city = info.get("city", "Unknown")
 
             member = self.guild.get_member(int(uid))
-            global_name = member.name if member else info.get("username", f"User-{uid}")
+            if member:
+                user_part = f"<@{uid}>"
+            else:
+                user_part = f"<@{uid}> ({info.get('username', f'User-{uid}')})"
 
             cont_data.setdefault(cont, {"countries": {}, "count": 0})
             cont_data[cont]["countries"].setdefault(country, {})
             cont_data[cont]["countries"][country].setdefault(city, [])
-            cont_data[cont]["countries"][country][city].append(f"<@{uid}> ({global_name})")
+            cont_data[cont]["countries"][country][city].append(user_part)
             cont_data[cont]["count"] += 1
 
         self.sorted_continents = sorted(cont_data.items(), key=lambda x: -x[1]["count"])
@@ -853,8 +856,11 @@ class LocationsView(discord.ui.View):
             for city, users in cities.items():
                 lines.append(f"• **{city}** — {', '.join(users)}")
             lines.append("")
-        text = "\n".join(lines)[:1024]
-        embed.add_field(name=f"📍 {info['count']} user{'s' if info['count'] > 1 else ''}", value=text or "*No locations*", inline=False)
+        text = "\n".join(lines) or "*No locations*"
+        # embed description has 4096 char limit
+        embed.description = text[:4096]
+        if len(text) > 4096:
+            embed.set_footer(text=f"⚠️ Showing first 4096 chars — {info['count']} users total")
         return embed
 
 
