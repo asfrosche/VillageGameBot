@@ -259,7 +259,7 @@ class LibraryDatabase:
                 cursor.execute("""
                     INSERT OR REPLACE INTO game_hosts (game_number, host_name, host_id, count)
                     VALUES (?, ?, ?, 1)
-                """, (game_number, member.display_name, member.id))
+                """, (game_number, getattr(member, 'display_name', member.name), member.id))
             conn.commit()
 
     # -------------------------------------------------------------------------
@@ -2273,7 +2273,10 @@ class GameLibrary(commands.Cog):
                 try:
                     hosts.append(await ctx.guild.fetch_member(mid))
                 except Exception:
-                    pass
+                    try:
+                        hosts.append(await ctx.bot.fetch_user(mid))
+                    except Exception:
+                        pass
 
             if not hosts:
                 await ctx.send("❌ Could not resolve mentioned users.")
@@ -2282,7 +2285,7 @@ class GameLibrary(commands.Cog):
             self.db.add_hosts(game_number, hosts)
             embed = discord.Embed(
                 title="🎤 Hosts Added",
-                description=", ".join(m.display_name for m in hosts),
+                description=", ".join(getattr(m, 'display_name', m.name) for m in hosts),
                 color=discord.Color.green(),
             )
             embed.add_field(name="Game", value=f"{game_number} | {game_name}")
@@ -2307,7 +2310,10 @@ class GameLibrary(commands.Cog):
             try:
                 mentioned_members.append(await ctx.guild.fetch_member(mid))
             except Exception:
-                pass
+                try:
+                    mentioned_members.append(await ctx.bot.fetch_user(mid))
+                except Exception:
+                    pass
 
         player_name = player_id = sponsor_name = sponsor_id = None
         args_list = list(args)
@@ -2315,13 +2321,13 @@ class GameLibrary(commands.Cog):
 
         if idx < len(args_list) and args_list[idx].startswith("<@") and mention_idx < len(mentioned_members):
             m = mentioned_members[mention_idx]
-            player_name, player_id = m.display_name, m.id
+            player_name, player_id = getattr(m, 'display_name', m.name), m.id
             mention_idx += 1
             idx += 1
 
         if idx < len(args_list) and args_list[idx].startswith("<@") and mention_idx < len(mentioned_members):
             m = mentioned_members[mention_idx]
-            sponsor_name, sponsor_id = m.display_name, m.id
+            sponsor_name, sponsor_id = getattr(m, 'display_name', m.name), m.id
 
         description1 = None
         if ctx.message.reference:
