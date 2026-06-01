@@ -38,7 +38,7 @@ from cogs.location_manager import LocationManager
 from cogs.meetupmatrix import Meetup
 from cogs.moving_cog import Moving
 from cogs.nominations_cog import Nominations
-from cogs.other_cog import Other
+from cogs.help_misc_cog import Other
 from cogs.presets_cog import Presets
 from cogs.privatecommands_cog import Privatecommands
 from cogs.send_role import SendRole

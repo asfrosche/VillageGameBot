@@ -872,6 +872,34 @@ def remove_shop_item_by_name(guild_id: int, item_name: str) -> bool:
     return remove_shop_item(guild_id, item["id"])
 
 
+def get_top_economy_users(guild_id: int, limit: int = 10) -> list[dict]:
+    """
+    Return top users by total (wallet + bank), descending.
+    Each entry: {user_id, wallet, bank, total}.
+    """
+    _ensure_ready()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT user_id, wallet, bank
+            FROM economy_accounts
+            WHERE guild_id = ? AND (wallet + bank) > 0
+            ORDER BY (wallet + bank) DESC
+            LIMIT ?
+            """,
+            (guild_id, limit),
+        ).fetchall()
+        return [
+            {
+                "user_id": int(r["user_id"]),
+                "wallet": int(r["wallet"]),
+                "bank": int(r["bank"]),
+                "total": int(r["wallet"]) + int(r["bank"]),
+            }
+            for r in rows
+        ]
+
+
 # ---------------------------------------------------------------------------
 # Role dashboard helpers
 # ---------------------------------------------------------------------------

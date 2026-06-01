@@ -412,7 +412,7 @@ the same house.
 
 MECHANIC_PAGES_IT = {
     1: {
-        "title": "Cos'è Hearthside?",
+        "title": "Cos'è The Village?",
         "image": None,
         "content": """
   🎲  VILLAGE GAMES
