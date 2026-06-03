@@ -11,22 +11,22 @@ from cogs.data_utils import (
     save_guild_data,
 )
 from utils.bot_db import (
-    add_inventory_item,
     add_inventory_item_channel,
     add_shop_item,
     get_economy_account,
     get_economy_channel_balance,
-    get_inventory,
     get_inventory_channel,
     get_shop_item_by_name,
     get_shop_items,
-    get_top_economy_users,
+    get_top_economy_channels,
     remove_shop_item_by_name,
+    transfer_channel_balance,
+    transfer_economy_balance,
     update_economy_balance,
     update_economy_channel_balance,
     update_shop_item_by_name,
 )
-from utils.embeds import info_embed, success_embed, error_embed, plain_embed
+from utils.embeds import info_embed, success_embed, plain_embed
 
 
 DEFAULT_SHOP_ITEMS = [
@@ -35,7 +35,6 @@ DEFAULT_SHOP_ITEMS = [
     {"name": "✉ Whisper", "description": "Send a private message to someone", "price": 200},
     {"name": "🧹 Broom", "description": "Clears messages in a house channel", "price": 300},
     {"name": "📜 Will", "description": "Notify Overseers to pin your last will", "price": 150},
-    {"name": "🚪 Extra Visit", "description": "Grants an extra visit to your rolechat", "price": 200},
 ]
 
 # Maximum value accepted by .setcollect to prevent accidental huge payouts.
@@ -111,6 +110,296 @@ async def _log_economy(
         await log_ch.send(embed=embed)
     except discord.HTTPException:
         pass
+
+
+# ─────────────────────────────────────────────
+# Inventory use components
+# ─────────────────────────────────────────────
+
+class InventoryUseSelect(Select):
+    """Dropdown to select an item from the inventory."""
+
+    def __init__(self, items: list[dict]):
+        options = []
+        for item in items:
+            label = f"{item['name']} × {item['quantity']}"
+            options.append(
+                discord.SelectOption(
+                    label=label[:100],
+                    description=(item.get("description") or "")[:100],
+                    value=str(item["item_id"]),
+                )
+            )
+        super().__init__(placeholder="Select an item...", options=options, min_values=1, max_values=1, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user != self.view.invoker:
+            return await interaction.response.send_message("Not your inventory.", ephemeral=True)
+        self.view.selected_item_id = int(self.values[0])
+        await interaction.response.send_message("Item selected. Use **Use** or **Sell** below.", ephemeral=True)
+
+
+class InventoryView(View):
+    """Dropdown + buttons to use or sell items from inventory."""
+
+    def __init__(self, items: list[dict], invoker: discord.Member, channel_id: int, cog):
+        super().__init__(timeout=120)
+        self.items = items
+        self.invoker = invoker
+        self.channel_id = channel_id
+        self.cog = cog
+        self.selected_item_id: int | None = None
+        self.add_item(InventoryUseSelect(items))
+
+    def _get_owned(self, interaction: discord.Interaction, item_id: int) -> dict | None:
+        current = get_inventory_channel(interaction.guild_id, self.channel_id)
+        return next((i for i in current if i["item_id"] == item_id and i["quantity"] > 0), None)
+
+    async def _do_use(self, interaction: discord.Interaction) -> None:
+        owned = self._get_owned(interaction, self.selected_item_id)
+        if not owned:
+            await interaction.response.send_message("Item no longer available. Refresh with `.inv`.", ephemeral=True)
+            return
+
+        name_lower = owned["name"].lower()
+
+        if "firework" in name_lower:
+            ok = await self._do_fireworks(interaction)
+        elif "whisper" in name_lower:
+            ok = await self._do_whisper(interaction)
+        elif "broom" in name_lower:
+            ok = await self._do_broom(interaction)
+        elif "shoe" in name_lower:
+            ok = await self._do_extra_visit(interaction)
+        elif "will" in name_lower:
+            ok = await self._do_will(interaction)
+        else:
+            ok = True
+            await interaction.response.send_message(f"Used **{owned['name']}**.", ephemeral=True)
+
+        if ok:
+            add_inventory_item_channel(interaction.guild_id, self.channel_id, owned["item_id"], -1)
+
+    async def _do_sell(self, interaction: discord.Interaction) -> None:
+        owned = self._get_owned(interaction, self.selected_item_id)
+        if not owned:
+            await interaction.response.send_message("Item no longer available. Refresh with `.inv`.", ephemeral=True)
+            return
+
+        item = get_shop_item_by_name(interaction.guild_id, owned["name"])
+        if not item:
+            await interaction.response.send_message("Could not determine shop price for that item.", ephemeral=True)
+            return
+
+        refund = item["price"] // 2
+        add_inventory_item_channel(interaction.guild_id, self.channel_id, owned["item_id"], -1)
+        update_economy_channel_balance(interaction.guild_id, self.channel_id, refund)
+        await interaction.response.send_message(
+            f"Sold **{owned['name']}** for **{refund:,}** coins (50% refund).", ephemeral=True
+        )
+
+    @discord.ui.button(label="✅ Use", style=discord.ButtonStyle.success, row=1)
+    async def btn_use(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.invoker:
+            return await interaction.response.send_message("Not your inventory.", ephemeral=True)
+        if self.selected_item_id is None:
+            return await interaction.response.send_message("Select an item from the dropdown first.", ephemeral=True)
+        await self._do_use(interaction)
+
+    @discord.ui.button(label="💰 Sell (50%)", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_sell(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.invoker:
+            return await interaction.response.send_message("Not your inventory.", ephemeral=True)
+        if self.selected_item_id is None:
+            return await interaction.response.send_message("Select an item from the dropdown first.", ephemeral=True)
+        await self._do_sell(interaction)
+
+    async def _do_fireworks(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        alive_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("alive_role_name"))
+        sponsor_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("sponsor_role_name"))
+        ann_ch = discord.utils.get(interaction.guild.channels, name=guild_data.get("announcements_channel_name"))
+        if not ann_ch:
+            await interaction.response.send_message("Announcements channel not set up.", ephemeral=True)
+            return False
+
+        user = interaction.user
+        if not (alive_role in user.roles or sponsor_role in user.roles):
+            await interaction.response.send_message("You need the Alive or Sponsor role to use fireworks.", ephemeral=True)
+            return False
+
+        gifs = [
+            "https://tenor.com/view/lanterns-flying-lantern-chinese-lantern-gif-9054613",
+            "https://tenor.com/view/lanterns-lights-peace-gif-15906930",
+            "https://tenor.com/view/tangled-tangled-movie-lanterns-tangled-lanterns-i-see-the-light-gif-12379369862241479266",
+        ]
+        gif = random.choice(gifs)
+        house, err = self.cog._resolve_fireworks_house(interaction.guild, user, guild_data)
+        if not house:
+            await interaction.response.send_message(err, ephemeral=True)
+            return False
+        await ann_ch.send(
+            f"{alive_role.mention}{sponsor_role.mention}\n{user.mention} is in {house.name}"
+        )
+        await ann_ch.send(gif)
+        await interaction.response.send_message("🎆 Fireworks launched!", ephemeral=True)
+        return True
+
+    async def _do_whisper(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        alive_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("alive_role_name"))
+        if not alive_role:
+            await interaction.response.send_message("Alive role not configured.", ephemeral=True)
+            return False
+
+        await interaction.response.defer()
+
+        members = [m for m in interaction.guild.members if alive_role in m.roles]
+        members.sort(key=lambda m: m.display_name.lower())
+        if not members:
+            await interaction.followup.send("No alive players to whisper to.", ephemeral=True)
+            return False
+
+        done = asyncio.Event()
+        delivered = False
+        view = View()
+
+        for chunk_start in range(0, len(members), 25):
+            chunk = members[chunk_start:chunk_start + 25]
+            page = chunk_start // 25 + 1
+            total_pages = (len(members) + 24) // 25
+            options = [
+                discord.SelectOption(label=m.display_name[:95], value=str(m.id))
+                for m in chunk
+            ]
+            select = discord.ui.Select(
+                placeholder=f"Select recipient... ({page}/{total_pages})",
+                min_values=1,
+                max_values=1,
+                options=options,
+            )
+
+            async def on_select(wi: discord.Interaction, sel=select):
+                nonlocal delivered
+                try:
+                    if wi.user != interaction.user:
+                        return await wi.response.send_message("Not your menu.", ephemeral=True)
+
+                    for child in view.children:
+                        child.disabled = True
+                    await wi.message.edit(view=view)
+
+                    target_id = int(sel.values[0])
+                    target = wi.guild.get_member(target_id)
+                    if not target:
+                        await wi.response.send_message("User not found.", ephemeral=True)
+                        done.set()
+                        return
+                    await wi.response.defer()
+
+                    prompt = await interaction.channel.send(
+                        embed=plain_embed(title="✉ Whisper", description=f"Reply to this message with your whisper to {target.mention}."),
+                    )
+
+                    def reply_check(m):
+                        return m.author == interaction.user and m.channel == interaction.channel and m.reference and m.reference.message_id == prompt.id
+
+                    try:
+                        reply = await interaction.client.wait_for("message", check=reply_check, timeout=300)
+                    except asyncio.TimeoutError:
+                        await interaction.channel.send("Whisper cancelled (timeout).")
+                        return
+
+                    rc_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("rc_category_name"))
+                    if not rc_cat:
+                        await interaction.channel.send("RoleChats category not configured.")
+                        return
+                    log_ch = discord.utils.get(interaction.guild.channels, name=guild_data.get("whisper_logs_channel_name"))
+                    for ch in rc_cat.text_channels:
+                        if target in ch.members:
+                            embed = info_embed()
+                            if guild_data.get("showwhispersender"):
+                                embed.add_field(name=f"{interaction.user.mention} sent you a whisper:", value=reply.content, inline=False)
+                            else:
+                                embed.add_field(name="Someone sent you a whisper:", value=reply.content, inline=False)
+                            await ch.send(f"{target.mention}", embed=embed)
+                            if log_ch:
+                                log_embed = info_embed()
+                                log_embed.add_field(name=f"{interaction.user.mention} → {target.mention}:", value=reply.content, inline=False)
+                                await log_ch.send(embed=log_embed)
+                            delivered = True
+                            break
+                    if delivered:
+                        await interaction.channel.send("✉ Whisper sent.")
+                except Exception as e:
+                    if not delivered:
+                        await interaction.channel.send(f"An error occurred: {e}")
+                finally:
+                    done.set()
+
+            select.callback = on_select
+            view.add_item(select)
+
+        await interaction.followup.send(
+            embed=plain_embed(title="✉ Whisper", description="Select the recipient from the dropdowns below."),
+            view=view,
+            ephemeral=True,
+        )
+        await done.wait()
+        return delivered
+
+    async def _do_broom(self, interaction: discord.Interaction) -> bool:
+        try:
+            deleted = await interaction.channel.purge(limit=5, bulk=True)
+            await interaction.response.send_message(f"🧹 Broom swept away **{len(deleted)}** messages.", ephemeral=True)
+            return True
+        except discord.Forbidden:
+            await interaction.response.send_message("I need Manage Messages permission to use the broom here.", ephemeral=True)
+            return False
+
+    async def _do_extra_visit(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        rc_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("rc_category_name"))
+        alt_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("alt_category_name"))
+        dead_rc = discord.utils.get(interaction.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        sent = False
+        for cat in (rc_cat, alt_cat, dead_rc):
+            if not cat:
+                continue
+            for ch in cat.text_channels:
+                if interaction.user in ch.members and ch.permissions_for(interaction.user).send_messages:
+                    await ch.send(f"🚪 **{interaction.user.display_name}** used an extra visit!")
+                    sent = True
+                    break
+            if sent:
+                break
+        if not sent:
+            await interaction.response.send_message("Could not find a rolechat to announce the visit.", ephemeral=True)
+        else:
+            await interaction.response.send_message("🚪 Extra visit used!", ephemeral=True)
+        return sent
+
+    async def _do_will(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        overseer_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("overseer_role_name", "Overseer"))
+        if not overseer_role:
+            await interaction.response.send_message("Overseer role not found.", ephemeral=True)
+            return False
+        await interaction.response.send_message(
+            f"{overseer_role.mention} **{interaction.user.display_name}** has used a Will. "
+            f"Please check their will message and pin it.\n"
+            f"Will message (reply below):"
+        )
+        prompt_msg = await interaction.original_response()
+        try:
+            def check(m):
+                return m.author == interaction.user and m.channel == interaction.channel and m.reference and m.reference.message_id == prompt_msg.id
+            reply = await interaction.client.wait_for("message", check=check, timeout=300)
+        except asyncio.TimeoutError:
+            await interaction.channel.send("Will cancelled (timeout).")
+            return False
+        await interaction.channel.send(f"{overseer_role.mention} {reply.jump_url} — please pin this will.")
+        return True
 
 
 # ─────────────────────────────────────────────
@@ -240,6 +529,7 @@ class ShopView(View):
 
         update_economy_channel_balance(self.guild_id, self.channel_id, -item["price"])
         new_qty = add_inventory_item_channel(self.guild_id, self.channel_id, item["id"], 1)
+
         await interaction.response.send_message(
             f"Bought **{item['name']}** for **{item['price']:,}**. ×{new_qty}", ephemeral=True
         )
@@ -259,6 +549,48 @@ class ShopView(View):
             return await interaction.response.send_message("Item not found.", ephemeral=True)
 
         await interaction.response.send_modal(EditPriceModal(self.guild_id, item))
+
+
+class LeaderboardView(View):
+    """Paginated leaderboard with prev/next buttons."""
+
+    def __init__(self, pages: list[str], total: int, invoker: discord.Member):
+        super().__init__(timeout=120)
+        self.pages = pages
+        self.total = total
+        self.invoker = invoker
+        self.page_index = 0
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        self.btn_prev.disabled = self.page_index == 0
+        self.btn_next.disabled = self.page_index == len(self.pages) - 1
+
+    def _embed(self) -> discord.Embed:
+        embed = plain_embed(
+            title=f"🏆 Leaderboard — {self.total} RoleChats (Roles)",
+            description=self.pages[self.page_index],
+        )
+        embed.set_footer(text=f"Page {self.page_index + 1}/{len(self.pages)}")
+        return embed
+
+    @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.invoker:
+            return await interaction.response.send_message("Not your menu.", ephemeral=True)
+        if self.page_index > 0:
+            self.page_index -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.invoker:
+            return await interaction.response.send_message("Not your menu.", ephemeral=True)
+        if self.page_index < len(self.pages) - 1:
+            self.page_index += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self._embed(), view=self)
 
 
 # ─────────────────────────────────────────────
@@ -284,6 +616,30 @@ class Economy(commands.Cog):
                 price=item["price"],
                 is_default=True,
             )
+
+    def _resolve_fireworks_house(self, guild, user, guild_data) -> tuple[discord.TextChannel | None, str]:
+        houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
+        if not houses_cat:
+            return None, "Houses category not set up."
+
+        matches = [ch for ch in houses_cat.text_channels if ch.permissions_for(user).send_messages]
+        if len(matches) == 1:
+            return matches[0], ""
+
+        sponsor_role = discord.utils.get(guild.roles, name=guild_data.get("sponsor_role_name"))
+        alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
+        if sponsor_role in user.roles and not matches:
+            rc_cat = discord.utils.get(guild.categories, name=guild_data.get("rc_category_name"))
+            if rc_cat:
+                sponsor_rc = next((ch for ch in rc_cat.text_channels if ch.permissions_for(user).send_messages), None)
+                if sponsor_rc:
+                    for m in sponsor_rc.members:
+                        if alive_role in m.roles and m != user:
+                            player_matches = [ch for ch in houses_cat.text_channels if ch.permissions_for(m).send_messages]
+                            if len(player_matches) == 1:
+                                return player_matches[0], ""
+
+        return None, "Cannot determine unique house location. Fireworks aborted."
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -391,20 +747,19 @@ class Economy(commands.Cog):
         if not _is_rolechat_category(ctx, guild_data=guild_data):
             return await ctx.send("Buy items only in a RoleChat channel.")
         if quantity <= 0:
-            return await ctx.send("Quantity must be at least 1.")
+            return await ctx.send("Quantity must be at least 1. Usage: `.buy <item_name> [quantity]`.")
 
         item = get_shop_item_by_name(ctx.guild.id, item_name)
         if not item:
-            return await ctx.send("Item not found. Use a part of the name (e.g. .buy fumo).")
+            return await ctx.send("Item not found. Use a part of the name (e.g. `.buy fumo`).")
 
         cost = item["price"] * quantity
-        channel_id = ctx.channel.id
-        bal = get_economy_channel_balance(ctx.guild.id, channel_id)
+        bal = get_economy_channel_balance(ctx.guild.id, ctx.channel.id)
         if cost > bal:
-            return await ctx.send(f"You don't have enough coins. You need **{cost:,}**.")
+            return await ctx.send(f"You don't have enough coins. You need **{cost:,}**, have **{bal:,}**.")
 
-        update_economy_channel_balance(ctx.guild.id, channel_id, -cost)
-        new_qty = add_inventory_item_channel(ctx.guild.id, channel_id, item["id"], quantity)
+        update_economy_channel_balance(ctx.guild.id, ctx.channel.id, -cost)
+        new_qty = add_inventory_item_channel(ctx.guild.id, ctx.channel.id, item["id"], quantity)
 
         embed = success_embed(
             title="✅ Purchase successful",
@@ -437,17 +792,16 @@ class Economy(commands.Cog):
                 line += f"\n> {it['description']}"
             lines.append(line)
         embed = plain_embed(title=f"🎒 Inventory — #{target.name}", description="\n\n".join(lines))
-        await ctx.send(embed=embed)
+        view = InventoryView(items, ctx.author, target.id, self)
+        await ctx.send(embed=embed, view=view)
 
     @commands.command(name="give")
-    async def give(self, ctx: commands.Context, member: discord.Member, amount: int):
-        """Give coins to a member. Use in a house channel; both you and the member must have read/send there."""
+    async def give(self, ctx: commands.Context, member: discord.Member, amount: str):
+        """Give coins to a member. Use `.give @user <amount>` or `.give @user all`. Must be in a house channel."""
         guild_data = load_guild_data(ctx.guild.id)
 
         if not _is_houses_category(ctx, guild_data=guild_data):
-            return await ctx.send("Use `.give` in a channel inside the Houses category.")
-        if amount <= 0:
-            return await ctx.send("Amount must be greater than 0.")
+            return await ctx.send("Use `.give` in a channel inside the Houses category. Usage: `.give @user <amount>` or `.give @user all`.")
         if member.bot:
             return await ctx.send("You can't give coins to a bot.")
         if member == ctx.author:
@@ -461,7 +815,7 @@ class Economy(commands.Cog):
         if not (perms_recv.read_messages and perms_recv.send_messages):
             return await ctx.send("The recipient must have read and send permission in this channel.")
 
-        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
+        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
         alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
         dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
 
@@ -484,12 +838,19 @@ class Economy(commands.Cog):
         if sender_rc == target_rc:
             return await ctx.send("You can't give coins to someone in the same rolechat.")
 
-        sender_bal = get_economy_channel_balance(ctx.guild.id, sender_rc.id)
-        if amount > sender_bal:
-            return await ctx.send(f"You don't have enough coins. Balance: **{sender_bal:,}**.")
+        if amount.lower() == "all":
+            amount = get_economy_channel_balance(ctx.guild.id, sender_rc.id)
+        else:
+            try:
+                amount = int(amount)
+            except ValueError:
+                return await ctx.send("Amount must be a number or `all`. Usage: `.give @user <amount>` or `.give @user all`.")
+        if amount <= 0:
+            return await ctx.send("Amount must be greater than 0. Usage: `.give @user <amount>` or `.give @user all`.")
 
-        update_economy_channel_balance(ctx.guild.id, sender_rc.id, -amount)
-        update_economy_channel_balance(ctx.guild.id, target_rc.id, amount)
+        if not transfer_channel_balance(ctx.guild.id, sender_rc.id, target_rc.id, amount):
+            bal = get_economy_channel_balance(ctx.guild.id, sender_rc.id)
+            return await ctx.send(f"Insufficient coins. Balance: **{bal:,}**.")
 
         await ctx.send(f"You gave **{amount:,}** to {member.mention}.")
         await _log_economy(
@@ -512,7 +873,7 @@ class Economy(commands.Cog):
     async def additem(self, ctx: commands.Context, price: int, *, name: str):
         """Add a shop item. Usage: .additem <price> <name>"""
         if price <= 0:
-            return await ctx.send("Price must be greater than 0.")
+            return await ctx.send("Price must be greater than 0. Usage: `.additem <price> <name>`.")
         name = name.strip()
         if not name:
             return await ctx.send("Item name cannot be empty.")
@@ -557,10 +918,10 @@ class Economy(commands.Cog):
     async def addmoney(self, ctx: commands.Context, channel: discord.TextChannel, amount: int):
         """Add money to a rolechat's balance. Usage: .addmoney #channel <amount>"""
         if amount <= 0:
-            return await ctx.send("Amount must be greater than 0.")
+            return await ctx.send("Amount must be greater than 0. Usage: `.addmoney #channel <amount>`.")
         guild_data = load_guild_data(ctx.guild.id)
         if not _is_rolechat_category(ctx, channel, guild_data):
-            return await ctx.send("Channel must be in the RoleChats category.")
+            return await ctx.send("Channel must be in the RoleChats category. Usage: `.addmoney #channel <amount>`.")
         bal = update_economy_channel_balance(ctx.guild.id, channel.id, amount)
         await ctx.send(f"Added **{amount:,}** to {channel.mention}. New balance: **{bal:,}**.")
         await _log_economy(
@@ -576,10 +937,10 @@ class Economy(commands.Cog):
     async def removemoney(self, ctx: commands.Context, channel: discord.TextChannel, amount: int):
         """Remove money from a rolechat's balance. Usage: .removemoney #channel <amount>"""
         if amount <= 0:
-            return await ctx.send("Amount must be greater than 0.")
+            return await ctx.send("Amount must be greater than 0. Usage: `.removemoney #channel <amount>`.")
         guild_data = load_guild_data(ctx.guild.id)
         if not _is_rolechat_category(ctx, channel, guild_data):
-            return await ctx.send("Channel must be in the RoleChats category.")
+            return await ctx.send("Channel must be in the RoleChats category. Usage: `.removemoney #channel <amount>`.")
         bal = get_economy_channel_balance(ctx.guild.id, channel.id)
         amount = min(amount, bal)
         new_bal = update_economy_channel_balance(ctx.guild.id, channel.id, -amount)
@@ -592,43 +953,6 @@ class Economy(commands.Cog):
             details=f"Removed **{amount:,}** from {channel.mention}. New balance: **{new_bal:,}**.",
         )
 
-    @commands.command(name="richlist")
-    @commands.has_permissions(administrator=True)
-    async def richlist(self, ctx: commands.Context, top: int = 10):
-        """Show the top rolechats ranked by balance. Usage: .richlist [top=10]"""
-        guild_data = load_guild_data(ctx.guild.id)
-        if not guild_data:
-            return await ctx.send("Guild data not loaded.")
-
-        top = max(1, min(top, 50))
-
-        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
-        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
-        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
-
-        entries: list[tuple[int, discord.TextChannel]] = []
-        for cat in (rc_cat, alt_cat, dead_rc):
-            if not cat:
-                continue
-            for ch in cat.text_channels:
-                bal = get_economy_channel_balance(ctx.guild.id, ch.id)
-                entries.append((bal, ch))
-
-        if not entries:
-            return await ctx.send("No rolechats found.")
-
-        entries.sort(reverse=True)
-        lines = [
-            f"**#{rank}.** {ch.mention} — **{bal:,}** coins"
-            for rank, (bal, ch) in enumerate(entries[:top], start=1)
-        ]
-        embed = plain_embed(
-            title=f"💰 Rich List — Top {min(top, len(entries))}",
-            description="\n".join(lines),
-        )
-        await ctx.send(embed=embed)
-
-
     # ------------------------------------------------------------------ #
     # User-based economy (ebeblieve-style)
     # ------------------------------------------------------------------ #
@@ -637,38 +961,37 @@ class Economy(commands.Cog):
     async def give_money(self, ctx: commands.Context, member: discord.Member, amount: int):
         """Transfer coins from your wallet to another user."""
         if amount <= 0:
-            return await ctx.send("Amount must be greater than 0.")
+            return await ctx.send("Amount must be greater than 0. Usage: `.give-money @user <amount>`.")
         if member.bot:
             return await ctx.send("You can't give coins to a bot.")
         if member == ctx.author:
             return await ctx.send("You can't give coins to yourself.")
 
-        wallet, _ = get_economy_account(ctx.guild.id, ctx.author.id)
-        if amount > wallet:
-            return await ctx.send(
-                f"You don't have enough coins. Your wallet: **{wallet:,}**."
-            )
-
-        update_economy_balance(ctx.guild.id, ctx.author.id, delta_wallet=-amount)
-        update_economy_balance(ctx.guild.id, member.id, delta_wallet=amount)
+        if not transfer_economy_balance(ctx.guild.id, ctx.author.id, member.id, amount):
+            wallet, _ = get_economy_account(ctx.guild.id, ctx.author.id)
+            return await ctx.send(f"Insufficient coins. Wallet: **{wallet:,}**.")
 
         await ctx.send(f"You gave **{amount:,}** coins to {member.mention}.")
 
     @commands.command(name="sell-item", aliases=["sell_item", "sell"])
     async def sell_item(self, ctx: commands.Context, *, item_name: str):
-        """Sell an item from your inventory back to the shop (50% refund)."""
+        """Sell an item from your rolechat's inventory back to the shop (50% refund)."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not _is_rolechat_category(ctx, guild_data=guild_data):
+            return await ctx.send("Sell items only in a RoleChat channel. Usage: `.sell <item_name>`.")
+
         item = get_shop_item_by_name(ctx.guild.id, item_name)
         if not item:
-            return await ctx.send("Item not found.")
+            return await ctx.send("Item not found. Usage: `.sell <item_name>`.")
 
-        inv = get_inventory(ctx.guild.id, ctx.author.id)
-        owned = next((i for i in inv if i["item_id"] == item["id"]), None)
-        if not owned or owned["quantity"] < 1:
+        inv = get_inventory_channel(ctx.guild.id, ctx.channel.id)
+        owned = next((i for i in inv if i["item_id"] == item["id"] and i["quantity"] > 0), None)
+        if not owned:
             return await ctx.send("You don't own that item.")
 
         refund = item["price"] // 2
-        add_inventory_item(ctx.guild.id, ctx.author.id, item["id"], -1)
-        update_economy_balance(ctx.guild.id, ctx.author.id, delta_wallet=refund)
+        add_inventory_item_channel(ctx.guild.id, ctx.channel.id, item["id"], -1)
+        update_economy_channel_balance(ctx.guild.id, ctx.channel.id, refund)
 
         await ctx.send(
             f"Sold **{item['name']}** for **{refund:,}** coins (50% of shop price)."
@@ -677,42 +1000,75 @@ class Economy(commands.Cog):
     @commands.command(name="add-money-role", aliases=["add_money_role", "addmrole"])
     @commands.has_permissions(administrator=True)
     async def add_money_role(self, ctx: commands.Context, role: discord.Role, amount: int):
-        """Add money to all members with a specific role."""
+        """Add money to rolechats of all members with a specific role."""
         if amount <= 0:
-            return await ctx.send("Amount must be greater than 0.")
+            return await ctx.send("Amount must be greater than 0. Usage: `.addmrole @role <amount>`.")
         if amount > 10_000:
             return await ctx.send("Amount cannot exceed **10,000** per user.")
 
+        guild_data = load_guild_data(ctx.guild.id)
+        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
+        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        cats = [c for c in (rc_cat, alt_cat, dead_rc) if c]
+
+        def _find_rc(target: discord.Member) -> discord.TextChannel | None:
+            for cat in cats:
+                for c in cat.text_channels:
+                    if c.permissions_for(target).send_messages:
+                        return c
+            return None
+
         count = 0
         for member in role.members:
-            if not member.bot:
-                update_economy_balance(ctx.guild.id, member.id, delta_wallet=amount)
+            if member.bot:
+                continue
+            rc = _find_rc(member)
+            if rc:
+                update_economy_channel_balance(ctx.guild.id, rc.id, amount)
                 count += 1
 
-        await ctx.send(f"Added **{amount:,}** coins to **{count}** members with {role.mention}.")
+        await ctx.send(f"Added **{amount:,}** to **{count}** rolechats of members with {role.mention}.")
 
     @commands.command(name="leaderboard", aliases=["lb", "top"])
-    async def leaderboard(self, ctx: commands.Context, top: int = 10):
-        """Show the richest users by total (wallet + bank)."""
-        top = max(1, min(top, 50))
-        entries = get_top_economy_users(ctx.guild.id, top)
-        if not entries:
-            return await ctx.send("No economy data yet.")
+    @commands.has_permissions(administrator=True)
+    async def leaderboard(self, ctx: commands.Context):
+        """Show all rolechats ranked by balance (Roles category only), paginated."""
+        guild_data = load_guild_data(ctx.guild.id)
+        roles_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name", "ROLES"))
+        if not roles_cat:
+            return await ctx.send("Roles category not found.")
 
-        lines = []
-        for rank, entry in enumerate(entries, start=1):
-            user = ctx.guild.get_member(entry["user_id"])
-            name = user.mention if user else f"`{entry['user_id']}`"
-            lines.append(
-                f"**#{rank}.** {name} — **{entry['total']:,}** "
-                f"(wallet: {entry['wallet']:,}, bank: {entry['bank']:,})"
-            )
+        entries = get_top_economy_channels(ctx.guild.id, 1000)
 
-        embed = plain_embed(
-            title=f"🏆 Leaderboard — Top {len(entries)}",
-            description="\n".join(lines),
-        )
-        await ctx.send(embed=embed)
+        clean = []
+        deleted_ids = []
+        for entry in entries:
+            ch = ctx.guild.get_channel(entry["channel_id"])
+            if ch:
+                if ch.category_id == roles_cat.id:
+                    clean.append((ch, entry["balance"]))
+            else:
+                deleted_ids.append(entry["channel_id"])
+
+        for cid in deleted_ids:
+            update_economy_channel_balance(ctx.guild.id, cid, 0)
+
+        if not clean:
+            return await ctx.send("No active rolechats with economy data.")
+
+        per_page = 10
+        pages = []
+        for i in range(0, len(clean), per_page):
+            chunk = clean[i:i + per_page]
+            lines = []
+            for rank, (ch, bal) in enumerate(chunk, start=i + 1):
+                lines.append(f"**#{rank}.** {ch.mention} — **{bal:,}**")
+            pages.append("\n".join(lines))
+
+        view = LeaderboardView(pages, len(clean), ctx.author)
+        embed = view._embed()
+        await ctx.send(embed=embed, view=view)
 
     # ------------------------------------------------------------------ #
     # Item usage & admin distribution
@@ -720,41 +1076,54 @@ class Economy(commands.Cog):
 
     @commands.command(name="use")
     async def use_item(self, ctx: commands.Context, *, item_name: str):
-        """Use an item from your user inventory."""
+        """Use an item from your rolechat's inventory."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not _is_rolechat_category(ctx, guild_data=guild_data):
+            return await ctx.send("Use items only in a RoleChat channel. Usage: `.use <item_name>`.")
+
         item = get_shop_item_by_name(ctx.guild.id, item_name)
         if not item:
-            return await ctx.send("Item not found.")
+            return await ctx.send("Item not found. Usage: `.use <item_name>`.")
 
-        inv = get_inventory(ctx.guild.id, ctx.author.id)
-        owned = next((i for i in inv if i["item_id"] == item["id"]), None)
-        if not owned or owned["quantity"] < 1:
+        inv = get_inventory_channel(ctx.guild.id, ctx.channel.id)
+        owned = next((i for i in inv if i["item_id"] == item["id"] and i["quantity"] > 0), None)
+        if not owned:
             return await ctx.send("You don't have that item. Buy it first with `.buy` or get it from an Overseer.")
 
-        add_inventory_item(ctx.guild.id, ctx.author.id, item["id"], -1)
         name_lower = item["name"].lower()
+        ok = False
 
         if "firework" in name_lower:
-            await self._trigger_fireworks(ctx)
+            ok = await self._trigger_fireworks(ctx)
         elif "whisper" in name_lower:
-            await self._trigger_whisper(ctx)
+            ok = await self._trigger_whisper(ctx)
         elif "broom" in name_lower:
-            await self._trigger_broom(ctx)
-        elif "extra visit" in name_lower or "shoe" in name_lower:
-            await self._trigger_extra_visit(ctx)
+            ok = await self._trigger_broom(ctx)
+        elif "shoe" in name_lower:
+            ok = await self._trigger_extra_visit(ctx)
         elif "will" in name_lower:
-            await self._trigger_will(ctx)
+            ok = await self._trigger_will(ctx)
         else:
             await ctx.send(f"Used **{item['name']}**.")
+            ok = True
 
-    async def _trigger_fireworks(self, ctx: commands.Context) -> None:
+        if ok:
+            add_inventory_item_channel(ctx.guild.id, ctx.channel.id, item["id"], -1)
+
+    async def _trigger_fireworks(self, ctx: commands.Context) -> bool:
         """Reveal the caller's position in announcements."""
         guild_data = load_guild_data(ctx.guild.id)
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
         sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
         ann_ch = discord.utils.get(ctx.guild.channels, name=guild_data.get("announcements_channel_name"))
-        houses_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
-        if not ann_ch or not houses_cat:
-            return await ctx.send("Announcements channel or Houses category not set up.")
+        if not ann_ch:
+            await ctx.send("Announcements channel not set up.")
+            return False
+
+        user = ctx.author
+        if not (alive_role in user.roles or sponsor_role in user.roles):
+            await ctx.send("You need the Alive or Sponsor role to use fireworks.")
+            return False
 
         gifs = [
             "https://tenor.com/view/lanterns-flying-lantern-chinese-lantern-gif-9054613",
@@ -762,92 +1131,128 @@ class Economy(commands.Cog):
             "https://tenor.com/view/tangled-tangled-movie-lanterns-tangled-lanterns-i-see-the-light-gif-12379369862241479266",
         ]
         gif = random.choice(gifs)
-        for member in ctx.channel.members:
-            if alive_role in member.roles or sponsor_role in member.roles:
-                for ch in houses_cat.text_channels:
-                    if ch.permissions_for(member).send_messages:
-                        await ann_ch.send(
-                            f"{alive_role.mention}{sponsor_role.mention}\n{member.mention} is in {ch.name}"
-                        )
-                        await ann_ch.send(gif)
-                        await ctx.send("🎆 Fireworks launched!")
-                        return
-        await ctx.send("No eligible member found in this channel.")
+        house, err = self._resolve_fireworks_house(ctx.guild, user, guild_data)
+        if not house:
+            await ctx.send(err)
+            return False
+        await ann_ch.send(
+            f"{alive_role.mention}{sponsor_role.mention}\n{user.mention} is in {house.name}"
+        )
+        await ann_ch.send(gif)
+        await ctx.send("🎆 Fireworks launched!")
+        return True
 
-    async def _trigger_whisper(self, ctx: commands.Context) -> None:
+    async def _trigger_whisper(self, ctx: commands.Context) -> bool:
         """Start the whisper target selection UI."""
         guild_data = load_guild_data(ctx.guild.id)
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
         if not alive_role:
-            return await ctx.send("Alive role not configured.")
+            await ctx.send("Alive role not configured.")
+            return False
 
-        options = []
-        for member in ctx.guild.members:
-            if alive_role in member.roles:
-                options.append(discord.SelectOption(label=member.display_name[:95], value=str(member.id)))
-                if len(options) >= 25:
-                    break
+        members = [m for m in ctx.guild.members if alive_role in m.roles]
+        members.sort(key=lambda m: m.display_name.lower())
+        if not members:
+            await ctx.send("No alive players to whisper to.")
+            return False
 
-        if not options:
-            return await ctx.send("No alive players to whisper to.")
-
-        select = discord.ui.Select(placeholder="Select recipient...", options=options, min_values=1, max_values=1)
-
-        async def on_select(interaction: discord.Interaction):
-            if interaction.user != ctx.author:
-                return await interaction.response.send_message("Not your menu.", ephemeral=True)
-            select.disabled = True
-            await interaction.message.edit(view=view)
-            target_id = int(select.values[0])
-            target = ctx.guild.get_member(target_id)
-            if not target:
-                return await interaction.response.send_message("User not found.", ephemeral=True)
-
-            prompt = await interaction.response.send_message(
-                embed=plain_embed(title="✉ Whisper", description=f"Reply to this message with your whisper to {target.mention}."),
-            )
-            prompt_msg = await interaction.original_response()
-
-            try:
-                def check(m):
-                    return m.author == ctx.author and m.channel == ctx.channel and m.reference and m.reference.message_id == prompt_msg.id
-                reply = await ctx.bot.wait_for("message", check=check, timeout=300)
-            except asyncio.TimeoutError:
-                await ctx.send("Whisper cancelled (timeout).")
-                return
-
-            rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
-            log_ch = discord.utils.get(ctx.guild.channels, name=guild_data.get("whisper_logs_channel_name"))
-            for ch in rc_cat.text_channels:
-                if target in ch.members:
-                    embed = info_embed()
-                    if guild_data.get("showwhispersender"):
-                        embed.add_field(name=f"{ctx.author.mention} sent you a whisper:", value=reply.content, inline=False)
-                    else:
-                        embed.add_field(name="Someone sent you a whisper:", value=reply.content, inline=False)
-                    await ch.send(f"{target.mention}", embed=embed)
-                    if log_ch:
-                        log_embed = info_embed()
-                        log_embed.add_field(name=f"{ctx.author.mention} → {target.mention}:", value=reply.content, inline=False)
-                        await log_ch.send(embed=log_embed)
-                    break
-            await ctx.send("✉ Whisper sent.")
-
-        select.callback = on_select
+        done = asyncio.Event()
+        delivered = False
         view = View(timeout=300)
-        view.add_item(select)
-        embed = info_embed(title="Who do you want to whisper?", description="Select an alive player.")
+
+        for chunk_start in range(0, len(members), 25):
+            chunk = members[chunk_start:chunk_start + 25]
+            page = chunk_start // 25 + 1
+            total_pages = (len(members) + 24) // 25
+            options = [
+                discord.SelectOption(label=m.display_name[:95], value=str(m.id))
+                for m in chunk
+            ]
+            select = discord.ui.Select(
+                placeholder=f"Select recipient... ({page}/{total_pages})",
+                min_values=1,
+                max_values=1,
+                options=options,
+            )
+
+            async def on_select(interaction: discord.Interaction, sel=select):
+                nonlocal delivered
+                try:
+                    if interaction.user != ctx.author:
+                        return await interaction.response.send_message("Not your menu.", ephemeral=True)
+
+                    for child in view.children:
+                        child.disabled = True
+                    await interaction.message.edit(view=view)
+
+                    target_id = int(sel.values[0])
+                    target = ctx.guild.get_member(target_id)
+                    if not target:
+                        await interaction.response.send_message("User not found.", ephemeral=True)
+                        done.set()
+                        return
+                    await interaction.response.defer()
+
+                    prompt = await ctx.send(
+                        embed=plain_embed(title="✉ Whisper", description=f"Reply to this message with your whisper to {target.mention}."),
+                    )
+
+                    def reply_check(m):
+                        return m.author == ctx.author and m.channel == ctx.channel and m.reference and m.reference.message_id == prompt.id
+
+                    try:
+                        reply = await ctx.bot.wait_for("message", check=reply_check, timeout=300)
+                    except asyncio.TimeoutError:
+                        await ctx.send("Whisper cancelled (timeout).")
+                        return
+
+                    rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+                    if not rc_cat:
+                        await ctx.send("RoleChats category not configured.")
+                        return
+                    log_ch = discord.utils.get(ctx.guild.channels, name=guild_data.get("whisper_logs_channel_name"))
+                    for ch in rc_cat.text_channels:
+                        if target in ch.members:
+                            embed = info_embed()
+                            if guild_data.get("showwhispersender"):
+                                embed.add_field(name=f"{ctx.author.mention} sent you a whisper:", value=reply.content, inline=False)
+                            else:
+                                embed.add_field(name="Someone sent you a whisper:", value=reply.content, inline=False)
+                            await ch.send(f"{target.mention}", embed=embed)
+                            if log_ch:
+                                log_embed = info_embed()
+                                log_embed.add_field(name=f"{ctx.author.mention} → {target.mention}:", value=reply.content, inline=False)
+                                await log_ch.send(embed=log_embed)
+                            delivered = True
+                            break
+                    if delivered:
+                        await ctx.send("✉ Whisper sent.")
+                finally:
+                    done.set()
+
+            select.callback = on_select
+            view.add_item(select)
+
+        embed = info_embed(title="Who do you want to whisper?", description="Select a recipient from the dropdowns below.")
         await ctx.send(embed=embed, view=view)
 
-    async def _trigger_broom(self, ctx: commands.Context) -> None:
+        try:
+            await asyncio.wait_for(done.wait(), timeout=300)
+        except asyncio.TimeoutError:
+            pass
+        return delivered
+
+    async def _trigger_broom(self, ctx: commands.Context) -> bool:
         """Clears messages in the current channel (last 5 messages)."""
         try:
             deleted = await ctx.channel.purge(limit=5, bulk=True)
             await ctx.send(f"🧹 Broom swept away **{len(deleted)}** messages.", delete_after=5)
+            return True
         except discord.Forbidden:
             await ctx.send("I need Manage Messages permission to use the broom here.")
+            return False
 
-    async def _trigger_extra_visit(self, ctx: commands.Context) -> None:
+    async def _trigger_extra_visit(self, ctx: commands.Context) -> bool:
         """Grants an extra visit and announces in the rolechat."""
         guild_data = load_guild_data(ctx.guild.id)
         rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
@@ -868,30 +1273,40 @@ class Economy(commands.Cog):
             await ctx.send("Could not find a rolechat to announce the visit.")
         else:
             await ctx.send("🚪 Extra visit used!")
+        return sent
 
-    async def _trigger_will(self, ctx: commands.Context) -> None:
+    async def _trigger_will(self, ctx: commands.Context) -> bool:
         """Notify Overseers to pin the user's last will."""
         guild_data = load_guild_data(ctx.guild.id)
         overseer_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("overseer_role_name", "Overseer"))
         if not overseer_role:
-            return await ctx.send("Overseer role not found.")
-        await ctx.send(
+            await ctx.send("Overseer role not found.")
+            return False
+        msg = await ctx.send(
             f"{overseer_role.mention} **{ctx.author.display_name}** has used a Will. "
             f"Please check their will message and pin it.\n"
             f"Will message (reply below):"
         )
         try:
             def check(m):
-                return m.author == ctx.author and m.channel == ctx.channel
+                return m.author == ctx.author and m.channel == ctx.channel and m.reference and m.reference.message_id == msg.id
             reply = await ctx.bot.wait_for("message", check=check, timeout=300)
         except asyncio.TimeoutError:
-            return await ctx.send("Will cancelled (timeout).")
+            await ctx.send("Will cancelled (timeout).")
+            return False
         await ctx.send(f"{overseer_role.mention} {reply.jump_url} — please pin this will.")
+        return True
 
     @commands.command(name="additemrole")
     @commands.has_permissions(administrator=True)
     async def additemrole(self, ctx: commands.Context, role: discord.Role, *, items_str: str):
-        """Add items to all members with a role. Format: .additemrole @Alive broom 3, fireworks 1"""
+        """Add items to rolechats of all members with a role. Format: .additemrole @Alive broom 3, fireworks 1"""
+        guild_data = load_guild_data(ctx.guild.id)
+        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
+        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        cats = [c for c in (rc_cat, alt_cat, dead_rc) if c]
+
         pairs = [p.strip() for p in items_str.split(",")]
         items_to_add = []
         for pair in pairs:
@@ -914,16 +1329,26 @@ class Economy(commands.Cog):
         if not items_to_add:
             return await ctx.send("No valid items specified.")
 
+        def _find_rc(target: discord.Member) -> discord.TextChannel | None:
+            for cat in cats:
+                for c in cat.text_channels:
+                    if c.permissions_for(target).send_messages:
+                        return c
+            return None
+
         count = 0
         for member in role.members:
             if member.bot:
                 continue
+            rc = _find_rc(member)
+            if not rc:
+                continue
             for item_id, _, qty in items_to_add:
-                add_inventory_item(ctx.guild.id, member.id, item_id, qty)
+                add_inventory_item_channel(ctx.guild.id, rc.id, item_id, qty)
             count += 1
 
         summary = ", ".join(f"{qty}× {name}" for _, name, qty in items_to_add)
-        await ctx.send(f"Added {summary} to **{count}** members with {role.mention}.")
+        await ctx.send(f"Added {summary} to **{count}** rolechats of members with {role.mention}.")
 
 
 async def setup(bot: commands.Bot):

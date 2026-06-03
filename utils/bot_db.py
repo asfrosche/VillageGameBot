@@ -18,6 +18,8 @@ def _connect() -> sqlite3.Connection:
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -130,6 +132,16 @@ def init_db() -> None:
             )
             """
         )
+
+        # Deduplicate shop items before creating unique index
+        cur.execute("""
+            DELETE FROM economy_shop_items
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM economy_shop_items GROUP BY guild_id, name
+            )
+        """)
+        # Unique constraint on shop item names per guild (prevents duplicates)
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_items_guild_name ON economy_shop_items(guild_id, name)")
 
         # Dashboard / role info
         cur.execute(
@@ -553,27 +565,56 @@ def update_economy_balance(
     with _connect() as conn:
         cur = conn.cursor()
         cur.execute(
+            "INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank) VALUES (?, ?, 0, 0)",
+            (guild_id, user_id),
+        )
+        cur.execute(
             """
-            INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank)
-            VALUES (?, ?, 0, 0)
+            UPDATE economy_accounts
+            SET wallet = MAX(0, wallet + ?),
+                bank = MAX(0, bank + ?)
+            WHERE guild_id = ? AND user_id = ?
             """,
-            (guild_id, user_id),
-        )
-        cur.execute(
-            "SELECT wallet, bank FROM economy_accounts WHERE guild_id = ? AND user_id = ?",
-            (guild_id, user_id),
-        )
-        row = cur.fetchone()
-        wallet = int(row["wallet"]) if row else 0
-        bank = int(row["bank"]) if row else 0
-        wallet = max(0, wallet + int(delta_wallet))
-        bank = max(0, bank + int(delta_bank))
-        cur.execute(
-            "UPDATE economy_accounts SET wallet = ?, bank = ? WHERE guild_id = ? AND user_id = ?",
-            (wallet, bank, guild_id, user_id),
+            (delta_wallet, delta_bank, guild_id, user_id),
         )
         conn.commit()
-        return wallet, bank
+        row = cur.execute(
+            "SELECT wallet, bank FROM economy_accounts WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        ).fetchone()
+        return (int(row["wallet"]), int(row["bank"])) if row else (0, 0)
+
+
+def transfer_economy_balance(guild_id: int, from_user_id: int, to_user_id: int, amount: int) -> bool:
+    """
+    Atomic wallet-to-wallet transfer between two users.
+    Deducts from sender wallet (fails if insufficient), adds to recipient wallet.
+    Returns True if transfer succeeded.
+    """
+    _ensure_ready()
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank) VALUES (?, ?, 0, 0)",
+            (guild_id, from_user_id),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank) VALUES (?, ?, 0, 0)",
+            (guild_id, to_user_id),
+        )
+        cur.execute(
+            "UPDATE economy_accounts SET wallet = wallet - ? WHERE guild_id = ? AND user_id = ? AND wallet >= ?",
+            (amount, guild_id, from_user_id, amount),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return False
+        cur.execute(
+            "UPDATE economy_accounts SET wallet = wallet + ? WHERE guild_id = ? AND user_id = ?",
+            (amount, guild_id, to_user_id),
+        )
+        conn.commit()
+        return True
 
 
 def get_last_collect_at(guild_id: int, user_id: int) -> datetime | None:
@@ -645,10 +686,17 @@ def add_shop_item(
             """
             INSERT INTO economy_shop_items (guild_id, name, description, price, is_default)
             VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, name) DO NOTHING
             """,
             (guild_id, name, description, price, 1 if is_default else 0),
         )
         item_id = cur.lastrowid
+        if item_id is None:
+            row = cur.execute(
+                "SELECT id FROM economy_shop_items WHERE guild_id = ? AND name = ?",
+                (guild_id, name),
+            ).fetchone()
+            item_id = int(row["id"]) if row else 0
         conn.commit()
         return int(item_id)
 
@@ -692,38 +740,25 @@ def get_inventory(guild_id: int, user_id: int) -> list[dict]:
 
 def add_inventory_item(guild_id: int, user_id: int, item_id: int, delta_qty: int) -> int:
     """
-    Adjust quantity for a given item; returns new quantity.
+    Atomically adjust quantity for a given item; returns new quantity. Clamps to >= 0.
     """
     _ensure_ready()
     with _connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            """
-            INSERT OR IGNORE INTO economy_inventory (guild_id, user_id, item_id, quantity)
-            VALUES (?, ?, ?, 0)
-            """,
+            "INSERT OR IGNORE INTO economy_inventory (guild_id, user_id, item_id, quantity) VALUES (?, ?, ?, 0)",
             (guild_id, user_id, item_id),
         )
         cur.execute(
-            """
-            SELECT quantity FROM economy_inventory
-            WHERE guild_id = ? AND user_id = ? AND item_id = ?
-            """,
-            (guild_id, user_id, item_id),
-        )
-        row = cur.fetchone()
-        qty = int(row["quantity"]) if row else 0
-        qty = max(0, qty + int(delta_qty))
-        cur.execute(
-            """
-            UPDATE economy_inventory
-            SET quantity = ?
-            WHERE guild_id = ? AND user_id = ? AND item_id = ?
-            """,
-            (qty, guild_id, user_id, item_id),
+            "UPDATE economy_inventory SET quantity = MAX(0, quantity + ?) WHERE guild_id = ? AND user_id = ? AND item_id = ?",
+            (delta_qty, guild_id, user_id, item_id),
         )
         conn.commit()
-        return qty
+        row = cur.execute(
+            "SELECT quantity FROM economy_inventory WHERE guild_id = ? AND user_id = ? AND item_id = ?",
+            (guild_id, user_id, item_id),
+        ).fetchone()
+        return int(row["quantity"]) if row else 0
 
 
 # Channel-based economy (rolechat balance & inventory)
@@ -738,29 +773,44 @@ def get_economy_channel_balance(guild_id: int, channel_id: int) -> int:
 
 
 def update_economy_channel_balance(guild_id: int, channel_id: int, delta: int) -> int:
+    """Atomically adjust channel balance; clamps to >= 0. Returns new balance."""
     _ensure_ready()
     with _connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            """
-            INSERT OR IGNORE INTO economy_channel_balance (guild_id, channel_id, balance)
-            VALUES (?, ?, 0)
-            """,
+            "INSERT OR IGNORE INTO economy_channel_balance (guild_id, channel_id, balance) VALUES (?, ?, 0)",
             (guild_id, channel_id),
         )
         cur.execute(
-            "SELECT balance FROM economy_channel_balance WHERE guild_id = ? AND channel_id = ?",
-            (guild_id, channel_id),
-        )
-        row = cur.fetchone()
-        bal = int(row["balance"]) if row else 0
-        bal = max(0, bal + int(delta))
-        cur.execute(
-            "UPDATE economy_channel_balance SET balance = ? WHERE guild_id = ? AND channel_id = ?",
-            (bal, guild_id, channel_id),
+            "UPDATE economy_channel_balance SET balance = MAX(0, balance + ?) WHERE guild_id = ? AND channel_id = ?",
+            (delta, guild_id, channel_id),
         )
         conn.commit()
-        return bal
+        row = cur.execute(
+            "SELECT balance FROM economy_channel_balance WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        ).fetchone()
+        return int(row["balance"]) if row else 0
+
+
+def get_top_economy_channels(guild_id: int, limit: int = 10) -> list[dict]:
+    """Return top channels by balance, descending."""
+    _ensure_ready()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT channel_id, balance
+            FROM economy_channel_balance
+            WHERE guild_id = ? AND balance > 0
+            ORDER BY balance DESC
+            LIMIT ?
+            """,
+            (guild_id, limit),
+        ).fetchall()
+        return [
+            {"channel_id": int(r["channel_id"]), "balance": int(r["balance"])}
+            for r in rows
+        ]
 
 
 def get_inventory_channel(guild_id: int, channel_id: int) -> list[dict]:
@@ -788,32 +838,92 @@ def get_inventory_channel(guild_id: int, channel_id: int) -> list[dict]:
 
 
 def add_inventory_item_channel(guild_id: int, channel_id: int, item_id: int, delta_qty: int) -> int:
+    """Atomically adjust channel inventory quantity; clamps to >= 0. Returns new quantity."""
     _ensure_ready()
     with _connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            """
-            INSERT OR IGNORE INTO economy_channel_inventory (guild_id, channel_id, item_id, quantity)
-            VALUES (?, ?, ?, 0)
-            """,
+            "INSERT OR IGNORE INTO economy_channel_inventory (guild_id, channel_id, item_id, quantity) VALUES (?, ?, ?, 0)",
             (guild_id, channel_id, item_id),
         )
         cur.execute(
-            "SELECT quantity FROM economy_channel_inventory WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
-            (guild_id, channel_id, item_id),
-        )
-        row = cur.fetchone()
-        qty = int(row["quantity"]) if row else 0
-        qty = max(0, qty + int(delta_qty))
-        cur.execute(
-            """
-            UPDATE economy_channel_inventory SET quantity = ?
-            WHERE guild_id = ? AND channel_id = ? AND item_id = ?
-            """,
-            (qty, guild_id, channel_id, item_id),
+            "UPDATE economy_channel_inventory SET quantity = MAX(0, quantity + ?) WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
+            (delta_qty, guild_id, channel_id, item_id),
         )
         conn.commit()
-        return qty
+        row = cur.execute(
+            "SELECT quantity FROM economy_channel_inventory WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
+            (guild_id, channel_id, item_id),
+        ).fetchone()
+        return int(row["quantity"]) if row else 0
+
+
+def buy_shop_item(guild_id: int, channel_id: int, item_id: int, price: int, quantity: int = 1) -> tuple[bool, int]:
+    """
+    Atomic purchase: deduct balance and add inventory in one transaction.
+    Returns (success, new_quantity).
+    """
+    _ensure_ready()
+    total_cost = price * quantity
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_channel_balance (guild_id, channel_id, balance) VALUES (?, ?, 0)",
+            (guild_id, channel_id),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_channel_inventory (guild_id, channel_id, item_id, quantity) VALUES (?, ?, ?, 0)",
+            (guild_id, channel_id, item_id),
+        )
+        cur.execute(
+            "UPDATE economy_channel_balance SET balance = balance - ? WHERE guild_id = ? AND channel_id = ? AND balance >= ?",
+            (total_cost, guild_id, channel_id, total_cost),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return False, 0
+        cur.execute(
+            "UPDATE economy_channel_inventory SET quantity = quantity + ? WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
+            (quantity, guild_id, channel_id, item_id),
+        )
+        conn.commit()
+        row = cur.execute(
+            "SELECT quantity FROM economy_channel_inventory WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
+            (guild_id, channel_id, item_id),
+        ).fetchone()
+        return True, int(row["quantity"]) if row else 0
+
+
+def transfer_channel_balance(guild_id: int, from_channel_id: int, to_channel_id: int, amount: int) -> bool:
+    """
+    Atomic transfer between two channel balances.
+    Deducts from source (fails if insufficient), adds to destination.
+    Returns True if transfer succeeded.
+    """
+    _ensure_ready()
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_channel_balance (guild_id, channel_id, balance) VALUES (?, ?, 0)",
+            (guild_id, from_channel_id),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_channel_balance (guild_id, channel_id, balance) VALUES (?, ?, 0)",
+            (guild_id, to_channel_id),
+        )
+        cur.execute(
+            "UPDATE economy_channel_balance SET balance = balance - ? WHERE guild_id = ? AND channel_id = ? AND balance >= ?",
+            (amount, guild_id, from_channel_id, amount),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return False
+        cur.execute(
+            "UPDATE economy_channel_balance SET balance = balance + ? WHERE guild_id = ? AND channel_id = ?",
+            (amount, guild_id, to_channel_id),
+        )
+        conn.commit()
+        return True
 
 
 # Shop by name (partial match, strip emoji)
@@ -1252,5 +1362,3 @@ def get_actions_for_channel(
                 }
             )
         return out
-
-
