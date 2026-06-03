@@ -2215,7 +2215,7 @@ class GameLibrary(commands.Cog):
         )
 
     def get_game_info_from_channel(self, channel: discord.TextChannel) -> Optional[Tuple[int, str]]:
-        if not channel.category or channel.category.name != "📖 Library B":
+        if not channel.category or channel.category.name not in ("📖 Library A", "📖 Library B"):
             return None
         try:
             parts = channel.name.split("│", 1)
