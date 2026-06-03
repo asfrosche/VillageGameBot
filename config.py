@@ -23,6 +23,7 @@ DATA_DIRECTORY = os.getenv("DATA_DIRECTORY", "./data")
 # ---------------------------------------------------------------------------
 
 LOCATIONS_FILE = os.path.join(DATA_DIRECTORY, "locations.json")
+TIMEZONE_OVERRIDES_FILE = os.path.join(DATA_DIRECTORY, "timezone_overrides.json")
 GAMES_FILE = os.path.join(DATA_DIRECTORY, "games.json")
 AUX_BATTLE_FILE = os.path.join(DATA_DIRECTORY, "aux_battle_data.json")
 

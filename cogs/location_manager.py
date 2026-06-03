@@ -11,7 +11,7 @@ import functools
 
 from utils.data_manager import save_json, load_json
 from utils.map_generator import create_location_map, create_heatmap, map_to_bytes
-from config import LOCATIONS_FILE, GEOCODER_USER_AGENT
+from config import LOCATIONS_FILE, TIMEZONE_OVERRIDES_FILE, GEOCODER_USER_AGENT
 
 import math
 from datetime import datetime
@@ -24,6 +24,44 @@ logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
+
+CONTINENT_GROUP = {
+    "North America": "America",
+    "South America": "America",
+    "Europe": "Europe",
+    "Africa": "Africa",
+    "Asia": "Asia",
+    "Australia": "Australia",
+    "Oceania": "Australia",
+}
+
+TZ_OPTIONS: list[tuple[str, str, str]] = [
+    ("UTC-11 (Midway)",      "Pacific/Midway",          "America"),
+    ("UTC-8 (Los Angeles)",  "America/Los_Angeles",     "America"),
+    ("UTC-7 (Denver)",       "America/Denver",          "America"),
+    ("UTC-6 (Chicago)",      "America/Chicago",         "America"),
+    ("UTC-5 (New York)",     "America/New_York",        "America"),
+    ("UTC-4 (Santiago)",     "America/Santiago",        "America"),
+    ("UTC-3 (Buenos Aires)", "America/Argentina/Buenos_Aires", "America"),
+    ("UTC+0 (London)",       "Europe/London",           "Europe"),
+    ("UTC+1 (Rome/Paris)",   "Europe/Rome",             "Europe"),
+    ("UTC+2 (Athens)",       "Europe/Athens",           "Europe"),
+    ("UTC+3 (Moscow)",       "Europe/Moscow",           "Europe"),
+    ("UTC+3:30 (Tehran)",    "Asia/Tehran",             "Asia"),
+    ("UTC+4 (Dubai)",        "Asia/Dubai",              "Asia"),
+    ("UTC+4:30 (Kabul)",     "Asia/Kabul",              "Asia"),
+    ("UTC+5 (Karachi)",      "Asia/Karachi",            "Asia"),
+    ("UTC+5:30 (India)",     "Asia/Kolkata",            "Asia"),
+    ("UTC+6 (Dhaka)",        "Asia/Dhaka",              "Asia"),
+    ("UTC+7 (Bangkok)",      "Asia/Bangkok",            "Asia"),
+    ("UTC+8 (Beijing)",      "Asia/Shanghai",           "Asia"),
+    ("UTC+9 (Tokyo)",        "Asia/Tokyo",              "Asia"),
+    ("UTC+9:30 (Adelaide)",  "Australia/Adelaide",      "Australia"),
+    ("UTC+10 (Sydney)",      "Australia/Sydney",        "Australia"),
+    ("UTC+12 (Auckland)",    "Pacific/Auckland",        "Australia"),
+    ("UTC+2 (Cairo)",        "Africa/Cairo",            "Africa"),
+    ("UTC+2 (Johannesburg)","Africa/Johannesburg",      "Africa"),
+]
 
 LOCATION_HELP_COMMANDS = [
     ("📍 Location Management", [
@@ -754,6 +792,157 @@ class LocationManager(commands.Cog):
         save_json(LOCATIONS_FILE, data)
 
         await ctx.send(f"🗑️ Removed location for **{name}** (ID: {uid}).")
+
+    @staticmethod
+    def _continent_from_tz(tz_str: str) -> str | None:
+        mapping = {
+            "America": "America", "US": "America", "Canada": "America",
+            "Pacific": "Australia",
+            "Europe": "Europe",
+            "Africa": "Africa",
+            "Asia": "Asia",
+            "Australia": "Australia",
+            "Indian": "Asia",
+            "Atlantic": "America",
+        }
+        return mapping.get(tz_str.split("/")[0])
+
+    @commands.command(name="whentime")
+    @commands.has_permissions(administrator=True)
+    async def whentime(self, ctx, *members: discord.Member):
+        """Show current time for each member grouped by continent."""
+        if not members and ctx.message.reference:
+            try:
+                replied = await ctx.fetch_message(ctx.message.reference.message_id)
+                members = replied.mentions
+            except Exception:
+                pass
+        if not members:
+            return await ctx.send("Usage: `.whentime @user1 @user2 ...`")
+
+        locations = load_json(LOCATIONS_FILE)
+        overrides = load_json(TIMEZONE_OVERRIDES_FILE)
+
+        timezone_data: dict[str, tuple[str, datetime, str]] = {}
+        pending: list[discord.Member] = []
+
+        for member in members:
+            uid = str(member.id)
+            tz_str = None
+            continent = None
+
+            if uid in locations:
+                info = locations[uid]
+                tz_str = info.get("timezone")
+                continent = CONTINENT_GROUP.get(info.get("continent", ""))
+                if not continent and tz_str:
+                    continent = self._continent_from_tz(tz_str)
+
+            if not tz_str and uid in overrides:
+                info = overrides[uid]
+                tz_str = info.get("timezone")
+                continent = info.get("continent")
+
+            if tz_str and continent:
+                try:
+                    tz = pytz.timezone(tz_str)
+                    timezone_data[uid] = (tz_str, datetime.now(tz), continent)
+                except Exception:
+                    pending.append(member)
+            else:
+                pending.append(member)
+
+        if pending:
+            for member in pending:
+                uid = str(member.id)
+                if uid in timezone_data:
+                    continue
+
+                done = asyncio.Event()
+                view = discord.ui.View(timeout=120)
+                select = discord.ui.Select(
+                    placeholder=f"Pick timezone for {member.display_name}...",
+                    options=[
+                        discord.SelectOption(label=label, value=f"{tz}|{continent}")
+                        for label, tz, continent in TZ_OPTIONS
+                    ],
+                )
+
+                async def on_select(interaction: discord.Interaction, m=member, sel=select):
+                    if interaction.user.id != ctx.author.id:
+                        return await interaction.response.send_message("Not your menu.", ephemeral=True)
+                    raw = sel.values[0]
+                    tz_str, continent = raw.split("|", 1)
+                    uid = str(m.id)
+                    try:
+                        tz = pytz.timezone(tz_str)
+                        timezone_data[uid] = (tz_str, datetime.now(tz), continent)
+                        overrides[uid] = {"timezone": tz_str, "continent": continent}
+                        save_json(TIMEZONE_OVERRIDES_FILE, overrides)
+                    except Exception:
+                        await interaction.response.send_message("❌ Invalid timezone.", ephemeral=True)
+                        done.set()
+                        return
+                    for child in view.children:
+                        child.disabled = True
+                    await interaction.message.edit(content=f"✅ Set **{m.display_name}** → {continent} / `{tz_str}`", view=view)
+                    await interaction.response.send_message("✅ Saved!", ephemeral=True)
+                    done.set()
+
+                select.callback = on_select
+                view.add_item(select)
+                await ctx.send(f"**{member.display_name}** has no timezone set. Pick one:", view=view)
+
+                try:
+                    await asyncio.wait_for(done.wait(), timeout=120)
+                except asyncio.TimeoutError:
+                    pass
+
+        if not timezone_data:
+            return await ctx.send("No timezone data available.")
+
+        groups: dict[str, list] = {}
+        no_response: list[discord.Member] = []
+        for member in members:
+            uid = str(member.id)
+            if uid in timezone_data:
+                tz_str, now, continent = timezone_data[uid]
+                groups.setdefault(continent, []).append((member, tz_str, now))
+            else:
+                no_response.append(member)
+
+        for cont in groups:
+            groups[cont].sort(key=lambda x: x[0].display_name.lower())
+
+        order = ["America", "Europe", "Africa", "Asia", "Australia"]
+        embed = discord.Embed(title="🌎 Timezones by Continent", color=0x5865F2)
+        for cont in order:
+            if cont not in groups:
+                continue
+            lines = []
+            for m, tz_str, now in groups[cont]:
+                local = now.strftime("%I:%M %p").lstrip("0")
+                lines.append(f"{m.mention} • `{tz_str}` • {local}")
+            value = "\n".join(lines)
+            if len(value) > 1024:
+                value = value[:1021] + "..."
+            embed.add_field(name=f"{cont} ({len(lines)})", value=value, inline=False)
+
+        extras = [c for c in groups if c not in order]
+        for cont in extras:
+            lines = []
+            for m, tz_str, now in groups[cont]:
+                local = now.strftime("%I:%M %p").lstrip("0")
+                lines.append(f"{m.mention} • `{tz_str}` • {local}")
+            value = "\n".join(lines)
+            if len(value) > 1024:
+                value = value[:1021] + "..."
+            embed.add_field(name=f"{cont} ({len(lines)})", value=value, inline=False)
+
+        if no_response:
+            embed.set_footer(text=f"⚠️ No response from: {', '.join(m.display_name for m in no_response)}")
+
+        await ctx.send(embed=embed)
 
     @commands.command(name="lochelp", aliases=["hloc"])
     async def lochelp(self, ctx):
