@@ -425,107 +425,111 @@ class WhisperTargetSelectView(discord.ui.View):
         guild = origin_message.guild
         alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
 
-        options: list[discord.SelectOption] = []
+        members: list[discord.Member] = []
         if alive_role:
             for member in guild.members:
                 if alive_role in member.roles:
-                    label = member.display_name[:95]
-                    options.append(discord.SelectOption(label=label, value=str(member.id)))
-                    if len(options) >= 25:
-                        break
+                    members.append(member)
+        members.sort(key=lambda m: m.display_name.lower())
 
-        select = discord.ui.Select(
-            placeholder="Select the whisper recipient...",
-            min_values=1,
-            max_values=1,
-            options=options,
-        )
+        for chunk_start in range(0, len(members), 25):
+            chunk = members[chunk_start:chunk_start + 25]
+            options = [
+                discord.SelectOption(label=m.display_name[:95], value=str(m.id))
+                for m in chunk
+            ]
+            page = chunk_start // 25 + 1
+            total_pages = (len(members) + 24) // 25
+            placeholder = f"Select recipient... ({page}/{total_pages})"
 
-        async def on_select(interaction: discord.Interaction):
-            # ── Role/permission check ─────────────────────────────────────────
-            guild = interaction.guild
-            gd = self.guild_data
-            alive_role_obj   = discord.utils.get(guild.roles, name=gd.get("alive_role_name"))
-            sponsor_role_obj = discord.utils.get(guild.roles, name=gd.get("sponsor_role_name"))
-            dead_role_obj    = discord.utils.get(guild.roles, name=gd.get("dead_role_name"))
-            alt_role_obj     = discord.utils.get(guild.roles, name=gd.get("alt_role_name"))
-            user_roles = set(interaction.user.roles)
-            is_allowed = (
-                interaction.user.guild_permissions.administrator
-                or alive_role_obj   in user_roles
-                or sponsor_role_obj in user_roles
-                or dead_role_obj    in user_roles
-                or alt_role_obj     in user_roles
+            select = discord.ui.Select(
+                placeholder=placeholder,
+                min_values=1,
+                max_values=1,
+                options=options,
             )
-            if not is_allowed:
-                return await interaction.response.send_message(
-                    "You don't have permission to send whispers.",
-                    ephemeral=True,
+
+            async def on_select(interaction: discord.Interaction, sel=select):
+                guild = interaction.guild
+                gd = self.guild_data
+                alive_role_obj   = discord.utils.get(guild.roles, name=gd.get("alive_role_name"))
+                sponsor_role_obj = discord.utils.get(guild.roles, name=gd.get("sponsor_role_name"))
+                dead_role_obj    = discord.utils.get(guild.roles, name=gd.get("dead_role_name"))
+                alt_role_obj     = discord.utils.get(guild.roles, name=gd.get("alt_role_name"))
+                user_roles = set(interaction.user.roles)
+                is_allowed = (
+                    interaction.user.guild_permissions.administrator
+                    or alive_role_obj   in user_roles
+                    or sponsor_role_obj in user_roles
+                    or dead_role_obj    in user_roles
+                    or alt_role_obj     in user_roles
                 )
-
-            target_id = int(select.values[0])
-            target_member = guild.get_member(target_id) if guild else None
-            if not target_member:
-                return await interaction.response.send_message(
-                    "Selected user is no longer available.",
-                    ephemeral=True,
-                )
-
-            # ── Lock the menu immediately so no second selection is possible ──
-            select.disabled = True
-            try:
-                await interaction.message.edit(view=self)
-            except Exception:
-                pass
-
-            # Ask for the whisper message
-            prompt_embed = info_embed(
-                title="What message do you want to send?",
-                description=(
-                    f"Reply to this message with the whisper you want to send to {target_member.mention}.\n"
-                    "Remember not to exceed the maximum allowed words (there is a log channel)."
-                ),
-            )
-            # send_message returns None — fetch the real message object right after
-            await interaction.response.send_message(embed=prompt_embed)
-            prompt_msg = await interaction.original_response()
-
-            try:
-                def check(m: discord.Message):
-                    return (
-                        m.channel == self.origin_message.channel
-                        and m.reference is not None
-                        and m.reference.message_id == prompt_msg.id
-                        and m.author == interaction.user
+                if not is_allowed:
+                    return await interaction.response.send_message(
+                        "You don't have permission to send whispers.",
+                        ephemeral=True,
                     )
 
-                user_response = await bot.wait_for("message", check=check, timeout=300)
-                await whisper(
-                    self.origin_message,
-                    self.guild_data,
-                    target_id,
-                    user_response.content,
-                    user_response.author,
+                target_id = int(sel.values[0])
+                target_member = guild.get_member(target_id) if guild else None
+                if not target_member:
+                    return await interaction.response.send_message(
+                        "Selected user is no longer available.",
+                        ephemeral=True,
+                    )
+
+                for child in self.children:
+                    child.disabled = True
+                try:
+                    await interaction.message.edit(view=self)
+                except Exception:
+                    pass
+
+                prompt_embed = info_embed(
+                    title="What message do you want to send?",
+                    description=(
+                        f"Reply to this message with the whisper you want to send to {target_member.mention}.\n"
+                        "Remember not to exceed the maximum allowed words (there is a log channel)."
+                    ),
                 )
-                await self.origin_message.channel.send("Whisper sent.")
-            except asyncio.TimeoutError:
-                embedto = error_embed(
-                    title="Whisper canceled",
-                    description="You didn't send a message within the given time.",
-                )
-                await self.origin_message.channel.send(embed=embedto)
+                await interaction.response.send_message(embed=prompt_embed)
+                prompt_msg = await interaction.original_response()
 
-            # Fully remove the view once done
-            try:
-                if interaction.message:
-                    await interaction.message.edit(view=None)
-            except Exception:
-                pass
+                try:
+                    def check(m: discord.Message):
+                        return (
+                            m.channel == self.origin_message.channel
+                            and m.reference is not None
+                            and m.reference.message_id == prompt_msg.id
+                            and m.author == interaction.user
+                        )
 
-            self.stop()
+                    user_response = await bot.wait_for("message", check=check, timeout=300)
+                    await whisper(
+                        self.origin_message,
+                        self.guild_data,
+                        target_id,
+                        user_response.content,
+                        user_response.author,
+                    )
+                    await self.origin_message.channel.send("Whisper sent.")
+                except asyncio.TimeoutError:
+                    embedto = error_embed(
+                        title="Whisper canceled",
+                        description="You didn't send a message within the given time.",
+                    )
+                    await self.origin_message.channel.send(embed=embedto)
 
-        select.callback = on_select
-        self.add_item(select)
+                try:
+                    if interaction.message:
+                        await interaction.message.edit(view=None)
+                except Exception:
+                    pass
+
+                self.stop()
+
+            select.callback = on_select
+            self.add_item(select)
 
 
 async def send_first_embed(message, guild_data):

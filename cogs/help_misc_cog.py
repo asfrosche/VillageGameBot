@@ -317,6 +317,27 @@ class Other(commands.Cog):
         await ctx.send("Dong! ||MF||")
 
     @commands.command()
+    async def dice(self, ctx, *args):
+        if not args:
+            await ctx.send("Usage: `.dice <number>` to roll 1-N, or `.dice <option1> <option2> ...` to pick randomly.")
+            return
+        if len(args) == 1:
+            try:
+                n = int(args[0])
+            except ValueError:
+                await ctx.send(f"`{args[0]}` is not a valid number. Usage: `.dice <number>` or `.dice <opt1> <opt2> ...`")
+                return
+            if n < 1:
+                await ctx.send(f"Number must be 1 or higher. Usage: `.dice <number>`")
+                return
+            result = random.randint(1, n)
+            await ctx.send(f"🎲 You rolled a **{result}** (1–{n})!")
+        else:
+            choice = random.choice(args)
+            await ctx.send(f"🎲 I picked: **{choice}**")
+        await ctx.message.delete(delay=3)
+
+    @commands.command()
     async def goat(self, ctx):
         if ctx.author.id == 388776401668538368 or ctx.author.id == 450772749829537793:
             message = await ctx.send('# 🚨 ATTENTION EVERYONE 🚨\nPlease pause your regularly scheduled mediocrity.\nWe’re here to honor the one they tried to contain—but never could.\n\n💥🔥 THE UNDISPUTED LEGEND 🔥💥\n🎖️ MVP of MVPs\n🏆 Winner of Winners\n📜 So decorated, the awards had to be printed in landscape mode\n🥇 Made Heartside rewrite its policy to fit all his wins\n👑 The reason "balance" nerfs exist\n\n# GALAMT — THE ABSOLUTE GOAT\n\nToo powerful to play as a contestant—now only allowed as a sponsor. Because Some OS dont Like him \nWhy? Because every time he plays, the game breaks.\nOverseers are forced to nerf him constantly, or the meta collapses.\n\nHe won 2 times as the evil team with just a 1% chance of victory.\nStatistically impossible.\nGalamt just called it "a Tuesday."\n\n🕯️ Founder of ECG – Evil Cult Graveyard\nIt started as a meme cult during a social deduction match…\nAnd somehow, it’s still active.\nHe didn’t plan to make history—history followed him.\n\nThat look?\n✔️ “I didn’t ask for this power.”\n✔️ “I logged in for fun and broke the leaderboard.”\n✔️ “This isn’t a bug. It’s legacy.”\n\n**#Galamt**\n**#ECG**\n**#TooPowerful**\n**#SponsorOnly**\n**#LionOfTheMeta**')
@@ -345,7 +366,7 @@ class Other(commands.Cog):
         self._in_help2 = True
         embed = discord.Embed(title="📂 Extended Command Categories", color=0xff3fb9)
         embed.add_field(name="📊 - Meetings & Meetup Matrix", value="21 Commands\n`.help2 meetupmatrix`", inline=True)
-        embed.add_field(name="💰 - Economy", value="19 Commands\n`.help2 economy`", inline=True)
+        embed.add_field(name="💰 - Economy", value="18 Commands\n`.help2 economy`", inline=True)
         embed.add_field(name="📍 - Location", value="17 Commands\n`.help2 location`", inline=True)
         embed.add_field(name="🎮 - Dashboard & Info", value="17 Commands\n`.help2 dashboard`", inline=True)
         embed.add_field(name="🎲 - Game Manager", value="4 Commands\n`.help2 gamemanager`", inline=True)
@@ -538,7 +559,7 @@ class Other(commands.Cog):
     async def help_other(self, ctx):
         embedo = discord.Embed(title="👽 - Other", description="17 commands", color=0xff3fb9)
         embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**ghelp** • Show general Gentleman Help overview\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online", inline=False)
-        embedo.add_field(name="👽 - Other commands (Continue)", value="**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`", inline=False)
+        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`", inline=False)
         embedo.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedo, self.help_other)
 
@@ -551,7 +572,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedm, self.help_meetupmatrix)
 
     async def help_economy(self, ctx):
-        embede = discord.Embed(title="💰 - Economy commands", description="19 commands", color=0xff3fb9)
+        embede = discord.Embed(title="💰 - Economy commands", description="18 commands", color=0xff3fb9)
         embede.add_field(name="Player Commands", value=(
             "**`.bal` / `.balance`** • Show your rolechat's balance\n"
             "**`.shop`** • View the server shop with interactive buy/edit buttons\n"
@@ -572,8 +593,7 @@ class Other(commands.Cog):
             "**`.additemrole @role <item> <qty>, <item2> <qty2>`** • Give items to all members with a role\n"
             "**`.collect`** • Add the collect amount to every rolechat\n"
             "**`.setcollect <value>`** • Set the amount added by `.collect` (max 10,000)\n"
-            "**`.richlist [top]`** • Show top rolechats by balance\n"
-            "**`.leaderboard` / `.lb` / `.top` [top]** • Show richest users by wallet+bank\n"
+            "**`.leaderboard` / `.lb` / `.top` [top]** • Show richest rolechats by balance\n"
         ), inline=False)
         embede.add_field(name="Shop Items", value=(
             "🎆 **Fireworks** (100) — Reveal your position in announcements\n"
