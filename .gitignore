@@ -1,5 +1,28 @@
+# Byte-compiled / cache
 __pycache__/
 *.pyc
 *.pyo
+
+# Environment
+.env
+.env.*
+
+# Databases
 *.db
+*.sqlite
+*.sqlite3
+
+# Virtual environment
 .local/
+.venv/
+venv/
+
+# Data / PII
+data/
+
+# Discord guild config / IDs
+db/*.json
+
+# OS garbage
+nul
+Thumbs.db
