@@ -1,5 +1,7 @@
 import asyncio
+import os
 import random
+import tempfile
 from datetime import datetime, timezone
 
 import discord
@@ -350,11 +352,68 @@ class InventoryView(View):
 
     async def _do_broom(self, interaction: discord.Interaction) -> bool:
         try:
-            deleted = await interaction.channel.purge(limit=5, bulk=True)
-            await interaction.response.send_message(f"🧹 Broom swept away **{len(deleted)}** messages.", ephemeral=True)
+            guild_data = load_guild_data(interaction.guild_id)
+            await interaction.response.defer(ephemeral=True)
+            prompt = await interaction.channel.send(
+                embed=plain_embed(
+                    title="🧹 Broom",
+                    description=(
+                        "**How to use:**\n"
+                        "1. Find the message you want to start brooming **from**\n"
+                        "2. **Right-click → Reply** to that message (not this one)\n"
+                        "3. Type anything and send\n\n"
+                        "I'll delete everything after that message (skipping pinned)."
+                    ),
+                ),
+            )
+
+            def reply_check(m):
+                return (m.author == interaction.user
+                        and m.channel == interaction.channel
+                        and m.reference
+                        and m.reference.message_id != prompt.id)
+
+            try:
+                reply = await interaction.client.wait_for("message", check=reply_check, timeout=120)
+            except asyncio.TimeoutError:
+                await interaction.channel.send("Broom cancelled (timeout).")
+                return False
+
+            anchor = reply.reference.resolved
+            if not anchor:
+                await interaction.channel.send("Could not resolve the target message.")
+                return False
+
+            to_delete = []
+            async for msg in interaction.channel.history(after=anchor):
+                if not msg.pinned:
+                    to_delete.append(msg)
+
+            if not to_delete:
+                await interaction.channel.send("No unpinned messages to delete.")
+                return True
+
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
+                for msg in to_delete:
+                    ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    content = msg.content.replace('\n', ' ')[:1000]
+                    temp_log.write(f"{ts} - {msg.author}: {content}\n")
+                temp_log_name = temp_log.name
+
+            for i in range(0, len(to_delete), 100):
+                await interaction.channel.delete_messages(to_delete[i:i + 100])
+
+            broom_log_name = guild_data.get("edit_del_logs")
+            if broom_log_name:
+                broom_ch = discord.utils.get(interaction.guild.text_channels, name=broom_log_name)
+                if broom_ch:
+                    await broom_ch.send(f'🧹 **{interaction.user}** used a broom in {interaction.channel.mention}')
+                    await broom_ch.send(file=discord.File(temp_log_name))
+
+            os.remove(temp_log_name)
             return True
         except discord.Forbidden:
-            await interaction.response.send_message("I need Manage Messages permission to use the broom here.", ephemeral=True)
+            await interaction.followup.send("I need Manage Messages permission to use the broom here.", ephemeral=True)
             return False
 
     async def _do_extra_visit(self, interaction: discord.Interaction) -> bool:
@@ -1076,16 +1135,38 @@ class Economy(commands.Cog):
 
     @commands.command(name="use")
     async def use_item(self, ctx: commands.Context, *, item_name: str):
-        """Use an item from your rolechat's inventory."""
+        """Use an item from your channel's inventory."""
         guild_data = load_guild_data(ctx.guild.id)
-        if not _is_rolechat_category(ctx, guild_data=guild_data):
-            return await ctx.send("Use items only in a RoleChat channel. Usage: `.use <item_name>`.")
+        is_broom = "broom" in item_name.lower()
+        if is_broom:
+            if not _is_houses_category(ctx, guild_data=guild_data):
+                return await ctx.send("🧹 Broom can only be used in a House channel.")
+        else:
+            if not _is_rolechat_category(ctx, guild_data=guild_data):
+                return await ctx.send("Use items only in a RoleChat channel. Usage: `.use <item_name>`.")
 
         item = get_shop_item_by_name(ctx.guild.id, item_name)
         if not item:
             return await ctx.send("Item not found. Usage: `.use <item_name>`.")
 
-        inv = get_inventory_channel(ctx.guild.id, ctx.channel.id)
+        # Determine which channel's inventory to check and deduct from.
+        # Broom in houses: look up the user's rolechat instead of the house channel.
+        inv_channel_id = ctx.channel.id
+        if is_broom:
+            alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+            sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
+            if not (alive_role in ctx.author.roles or sponsor_role in ctx.author.roles):
+                return await ctx.send("You need the Alive or Sponsor role to use the broom.")
+            rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+            found = next(
+                (c for c in rc_cat.text_channels if ctx.author in c.members and c.permissions_for(ctx.author).send_messages),
+                None,
+            ) if rc_cat else None
+            if not found:
+                return await ctx.send("Could not find your rolechat to check inventory.")
+            inv_channel_id = found.id
+
+        inv = get_inventory_channel(ctx.guild.id, inv_channel_id)
         owned = next((i for i in inv if i["item_id"] == item["id"] and i["quantity"] > 0), None)
         if not owned:
             return await ctx.send("You don't have that item. Buy it first with `.buy` or get it from an Overseer.")
@@ -1108,7 +1189,7 @@ class Economy(commands.Cog):
             ok = True
 
         if ok:
-            add_inventory_item_channel(ctx.guild.id, ctx.channel.id, item["id"], -1)
+            add_inventory_item_channel(ctx.guild.id, inv_channel_id, item["id"], -1)
 
     async def _trigger_fireworks(self, ctx: commands.Context) -> bool:
         """Reveal the caller's position in announcements."""
@@ -1243,10 +1324,67 @@ class Economy(commands.Cog):
         return delivered
 
     async def _trigger_broom(self, ctx: commands.Context) -> bool:
-        """Clears messages in the current channel (last 5 messages)."""
+        """Clears messages after a user-specified anchor message. Logs to edit_del_logs."""
+        guild_data = load_guild_data(ctx.guild.id)
         try:
-            deleted = await ctx.channel.purge(limit=5, bulk=True)
-            await ctx.send(f"🧹 Broom swept away **{len(deleted)}** messages.", delete_after=5)
+            prompt = await ctx.send(
+                embed=plain_embed(
+                    title="🧹 Broom",
+                    description=(
+                        "**How to use:**\n"
+                        "1. Find the message you want to start brooming **from**\n"
+                        "2. **Right-click → Reply** to that message (not this one)\n"
+                        "3. Type anything and send\n\n"
+                        "I'll delete everything after that message (skipping pinned)."
+                    ),
+                ),
+            )
+
+            def reply_check(m):
+                return (m.author == ctx.author
+                        and m.channel == ctx.channel
+                        and m.reference
+                        and m.reference.message_id != prompt.id)
+
+            try:
+                reply = await ctx.bot.wait_for("message", check=reply_check, timeout=120)
+            except asyncio.TimeoutError:
+                await ctx.send("Broom cancelled (timeout).")
+                return False
+
+            anchor = reply.reference.resolved
+            if not anchor:
+                await ctx.send("Could not resolve the target message.")
+                return False
+
+            to_delete = []
+            async for msg in ctx.channel.history(after=anchor):
+                if not msg.pinned:
+                    to_delete.append(msg)
+
+            if not to_delete:
+                await ctx.send("No unpinned messages to delete.")
+                return True
+
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
+                for msg in to_delete:
+                    ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    content = msg.content.replace('\n', ' ')[:1000]
+                    temp_log.write(f"{ts} - {msg.author}: {content}\n")
+                temp_log_name = temp_log.name
+
+            for i in range(0, len(to_delete), 100):
+                await ctx.channel.delete_messages(to_delete[i:i + 100])
+
+            broom_log_name = guild_data.get("edit_del_logs")
+            if broom_log_name:
+                broom_ch = discord.utils.get(ctx.guild.text_channels, name=broom_log_name)
+                if broom_ch:
+                    await broom_ch.send(f'🧹 **{ctx.author}** used a broom in {ctx.channel.mention}')
+                    await broom_ch.send(file=discord.File(temp_log_name))
+
+            os.remove(temp_log_name)
+            await ctx.send(f"🧹 Broom swept away **{len(to_delete)}** messages.", delete_after=5)
             return True
         except discord.Forbidden:
             await ctx.send("I need Manage Messages permission to use the broom here.")
