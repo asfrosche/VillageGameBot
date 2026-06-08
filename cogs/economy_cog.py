@@ -15,6 +15,7 @@ from cogs.data_utils import (
 from utils.bot_db import (
     add_inventory_item_channel,
     add_shop_item,
+    clear_channel_inventory,
     get_economy_account,
     get_economy_channel_balance,
     get_inventory_channel,
@@ -22,6 +23,7 @@ from utils.bot_db import (
     get_shop_items,
     get_top_economy_channels,
     remove_shop_item_by_name,
+    set_economy_channel_balance,
     transfer_channel_balance,
     transfer_economy_balance,
     update_economy_balance,
@@ -971,6 +973,125 @@ class Economy(commands.Cog):
         if not ok:
             return await ctx.send("Item not found. Use a part of the name.")
         await ctx.send("Item removed from the shop.")
+
+    @commands.command(name="reseteconomy", aliases=["re"])
+    @commands.has_permissions(administrator=True)
+    async def reset_economy(self, ctx: commands.Context, amount: int = 0):
+        """Reset all alive players' rolechat balances to a fixed amount (default 0).
+        
+        Usage: `.reseteconomy [amount]`
+        Examples:
+          `.reseteconomy`      — sets all to 0
+          `.reseteconomy 500`  — sets all to 500
+        """
+        if amount < 0:
+            return await ctx.send("Amount must be >= 0. Usage: `.reseteconomy [amount]` — defaults to 0.")
+        if amount > 10_000:
+            return await ctx.send("Amount cannot exceed **10,000**. Usage: `.reseteconomy [amount]` — defaults to 0.")
+
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+
+        alive_role_name = guild_data.get("alive_role_name")
+        if not alive_role_name:
+            return await ctx.send("Alive role not configured. Run `.setup` first.")
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=alive_role_name)
+        if not alive_role:
+            return await ctx.send("Alive role not found.")
+
+        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
+        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        cats = [c for c in (rc_cat, alt_cat, dead_rc) if c]
+
+        def _find_rc(member: discord.Member) -> discord.TextChannel | None:
+            for cat in cats:
+                for c in cat.text_channels:
+                    if c.permissions_for(member).send_messages:
+                        return c
+            return None
+
+        count = 0
+        for member in alive_role.members:
+            if member.bot:
+                continue
+            rc = _find_rc(member)
+            if rc:
+                set_economy_channel_balance(ctx.guild.id, rc.id, amount)
+                count += 1
+
+        if count == 0:
+            return await ctx.send("No alive players with rolechats found. Usage: `.reseteconomy [amount]` — defaults to 0.")
+
+        await ctx.send(f"Reset **{count}** rolechat(s) to **{amount:,}** coins.")
+
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Reset Economy",
+            actor=ctx.author,
+            details=f"Reset **{count}** rolechat(s) to **{amount:,}** coins.",
+        )
+
+    @commands.command(name="clearinventory", aliases=["ci"])
+    @commands.has_permissions(administrator=True)
+    async def clear_inventory(self, ctx: commands.Context):
+        """Remove all items from all alive players' rolechat inventories.
+        
+        Usage: `.clearinventory`
+        """
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+
+        alive_role_name = guild_data.get("alive_role_name")
+        if not alive_role_name:
+            return await ctx.send("Alive role not configured. Run `.setup` first.")
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=alive_role_name)
+        if not alive_role:
+            return await ctx.send("Alive role not found.")
+
+        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
+        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        cats = [c for c in (rc_cat, alt_cat, dead_rc) if c]
+
+        def _find_rc(member: discord.Member) -> discord.TextChannel | None:
+            for cat in cats:
+                for c in cat.text_channels:
+                    if c.permissions_for(member).send_messages:
+                        return c
+            return None
+
+        total_deleted = 0
+        channels_cleared = 0
+        seen_channels = set()
+        for member in alive_role.members:
+            if member.bot:
+                continue
+            rc = _find_rc(member)
+            if rc and rc.id not in seen_channels:
+                seen_channels.add(rc.id)
+                deleted = clear_channel_inventory(ctx.guild.id, rc.id)
+                if deleted > 0:
+                    total_deleted += deleted
+                    channels_cleared += 1
+
+        if total_deleted == 0:
+            return await ctx.send("No inventory to clear. Usage: `.clearinventory` — removes all items from all alive rolechats.")
+
+        await ctx.send(f"Cleared **{total_deleted}** item(s) from **{channels_cleared}** rolechat(s).")
+
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Clear Inventory",
+            actor=ctx.author,
+            details=f"Cleared **{total_deleted}** item(s) from **{channels_cleared}** rolechat(s).",
+        )
 
     @commands.command(name="addmoney")
     @commands.has_permissions(administrator=True)
