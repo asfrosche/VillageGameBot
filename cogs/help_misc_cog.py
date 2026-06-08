@@ -342,7 +342,7 @@ class Other(commands.Cog):
         else:
             choice = random.choice(args)
             await ctx.send(f"🎲 I picked: **{choice}**")
-        await ctx.message.delete(delay=3)
+
 
     @commands.command()
     async def goat(self, ctx):

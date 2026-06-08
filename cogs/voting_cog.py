@@ -1,3 +1,4 @@
+import re
 import discord
 import datetime
 from datetime import datetime
@@ -304,7 +305,7 @@ class Voting(commands.Cog):
             await ctx.send("You don't have enough permissions to use this command")
 
     @commands.command(aliases=["vh"])
-    async def votehistory(self, ctx, mode: str = None):
+    async def votehistory(self, ctx, mode: str = None, end: str = None):
         if not ctx.message.reference:
             await ctx.send("Reply to a Day Start message to scan vote history from that point.")
             return
@@ -322,6 +323,19 @@ class Voting(commands.Cog):
             return
 
         is_grouped = mode and mode.lower() == "grouped"
+        end_message = None
+        if end:
+            end_match = re.search(r'(?:channels/\d+/\d+/)?(\d+)', end)
+            if end_match:
+                try:
+                    end_message = await ctx.channel.fetch_message(int(end_match.group(1)))
+                except Exception:
+                    await ctx.send("Could not resolve the end message. Provide a valid message ID or link.")
+                    return
+            else:
+                await ctx.send("Invalid end message. Provide a message ID or link.")
+                return
+
         prefix = self.bot.command_prefix
         if callable(prefix):
             prefix = "."
@@ -330,7 +344,10 @@ class Voting(commands.Cog):
         user_actions = {}
 
         async with ctx.typing():
-            async for message in ctx.channel.history(after=start_message, oldest_first=True):
+            kwargs = {"after": start_message, "oldest_first": True}
+            if end_message:
+                kwargs["before"] = end_message
+            async for message in ctx.channel.history(**kwargs):
                 if message.author.bot:
                     continue
                 content = message.content.strip()
@@ -339,9 +356,16 @@ class Voting(commands.Cog):
 
                 if lower.startswith(prefix + "abstain"):
                     user_actions.setdefault(uid, []).append({"type": "abstain"})
-                elif lower.startswith(prefix + "vote ") and message.mentions:
-                    target = message.mentions[0]
-                    user_actions.setdefault(uid, []).append({"type": "vote", "target_id": target.id})
+                elif lower.startswith(prefix + "vote "):
+                    if message.mentions:
+                        target = message.mentions[0]
+                        user_actions.setdefault(uid, []).append({"type": "vote", "target_id": target.id})
+                    else:
+                        name = content[len(prefix) + 5:].strip()
+                        if name:
+                            member = discord.utils.find(lambda m: m.name == name or m.display_name == name, ctx.guild.members)
+                            if member:
+                                user_actions.setdefault(uid, []).append({"type": "vote", "target_id": member.id})
 
         if not user_actions:
             await ctx.send("No votes found after the referenced message.")
