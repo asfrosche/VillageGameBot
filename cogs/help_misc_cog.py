@@ -374,7 +374,7 @@ class Other(commands.Cog):
         embed = discord.Embed(title="📂 Extended Command Categories", color=0xff3fb9)
         embed.add_field(name="📊 - Meetings & Meetup Matrix", value="21 Commands\n`.help2 meetupmatrix`", inline=True)
         embed.add_field(name="💰 - Economy", value="18 Commands\n`.help2 economy`", inline=True)
-        embed.add_field(name="📍 - Location", value="17 Commands\n`.help2 location`", inline=True)
+        embed.add_field(name="📍 - Location", value="18 Commands\n`.help2 location`", inline=True)
         embed.add_field(name="🎮 - Dashboard & Info", value="17 Commands\n`.help2 dashboard`", inline=True)
         embed.add_field(name="🎲 - Game Manager", value="4 Commands\n`.help2 gamemanager`", inline=True)
         embed.add_field(name="📚 - Library & Stats", value="19 Commands\n`.help2 library`", inline=True)
@@ -476,15 +476,15 @@ class Other(commands.Cog):
         embedh.add_field(name="🏗️ - Setup", value="19 Commands\n`.help setup`", inline=True)
         embedh.add_field(name="👟 - Moving", value="9 Commands\n`.help moving`", inline=True)
         embedh.add_field(name="🏡 - Home", value="12 Commands\n`.help home`", inline=True)
-        embedh.add_field(name="🔓 - Houses and PCs handling", value="14 Commands\n`.help handling`", inline=True)
+        embedh.add_field(name="🔓 - Houses and PCs handling", value="15 Commands\n`.help handling`", inline=True)
         embedh.add_field(name="📜 - Infos", value="4 Commands\n`.help infos`", inline=True)
         embedh.add_field(name="🎟️ - Presets", value="3 Commands\n`.help presets`", inline=True)
         embedh.add_field(name="🗳️ - Voting", value="7 Commands\n`.help voting`", inline=True)
         embedh.add_field(name="👉 - Nominations", value="10 Commands\n`.help nominations`", inline=True)
-        embedh.add_field(name="📄 - Lists", value="8 Commands\n`.help lists`", inline=True)
+        embedh.add_field(name="📄 - Lists", value="9 Commands\n`.help lists`", inline=True)
         embedh.add_field(name="↪ - Send Role", value="2 Commands\n`.help sendrole`", inline=True)
-        embedh.add_field(name="⚙️ - Utility", value="20 Commands\n`.help utility`", inline=True)
-        embedh.add_field(name="👽 - Other", value="17 Commands\n`.help other`", inline=True)
+        embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
+        embedh.add_field(name="👽 - Other", value="18 Commands\n`.help other`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -511,8 +511,8 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedh, self.help_home)
 
     async def help_handling(self, ctx):
-        embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="14 commands", color=0xff3fb9)
-        embedhan.add_field(name="Houses", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner", inline=False)
+        embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="15 commands", color=0xff3fb9)
+        embedhan.add_field(name="Houses", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**fdestroy {#HouseName}** • Force destroy a house, instantly removing all members and moving to inaccessible\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner", inline=False)
         embedhan.add_field(name="PCs & Maps", value="**newpc {Public/Private} {Name} {#RoleChannel}** • Generate a Chat in Public/Private Channels category. Players of the specified RoleChats will be added in there\n**close {#PCName}** • Move the Chat in Old PCS category, remove everyone from the chat\n**public {#Channel}** • Make the Channel public\n**private {#Channel}** • Make the Channel private\n**channels** • Generate a visual map of all Public and Private Channels\n**publicmap** • Generate a visual map of only Public Channels\n**privatemap** • Generate a visual map of only Private Channels\n**estatehelp** • Displays help for all Estate and Neighborhood map functions\n**estate {init} {#channel}** • Initialize the dynamic estate map in a channel, or force an update", inline=False)
         embedhan.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedhan, self.help_handling)
@@ -544,8 +544,8 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedn, self.help_nominations)
 
     async def help_lists(self, ctx):
-        embedu = discord.Embed(title="📄 - Lists", description="8 commands", color=0xff3fb9)
-        embedu.add_field(name=" ", value="**playerlist** • Get a list of Alive members\n**houselist** • Get a list of visitable houses\n**setuphouselist** • Setup the houselist with the current existing houses\n**houselistadd {#House}** • Add #House to the houselist\n**houselistremove {#House}** • Remove #House from the houselist\n**deadlist** • Get a list of dead Players and their roles\n**deadlist add {Player} {Team} {Role Name}** • Add Player to the deadlist with the specified team and role\n**deadlist remove {Player}** • Remove Player from the deadlist", inline=False)
+        embedu = discord.Embed(title="📄 - Lists", description="9 commands", color=0xff3fb9)
+        embedu.add_field(name=" ", value="**playerlist** • Get a list of Alive members\n**sponsorlist** • Get a list of Sponsor members\n**houselist** • Get a list of visitable houses\n**setuphouselist** • Setup the houselist with the current existing houses\n**houselistadd {#House}** • Add #House to the houselist\n**houselistremove {#House}** • Remove #House from the houselist\n**deadlist** • Get a list of dead Players and their roles\n**deadlist add {Player} {Team} {Role Name}** • Add Player to the deadlist with the specified team and role\n**deadlist remove {Player}** • Remove Player from the deadlist", inline=False)
         embedu.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedu, self.help_lists)
 
@@ -557,16 +557,16 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedsendrole, self.help_sendrole)
 
     async def help_utility(self, ctx):
-        embedu = discord.Embed(title="⚙️ - Utility", description="20 commands", color=0xff3fb9)
-        embedu.add_field(name=" ", value="**day** • Unlock all Day Channels\n**night** • Lock all Day Channels\n**broom** • Delete replied-to messages (except pinned), log to log channel and RCs\n**log** • Log message range. Use count/source/send-to options\n**whisper {#Receiver RC Mention} {Message}** • Send a whisper\n**dead** • Player leaves current channels, RC moves to Dead category\n**deadrole** • Mark player dead, remove house access, pin corpse in chosen house, prompt for deadlist details\n**addrole {@Role} {@User1/everyone} {@User2}...** • Give all mentioned members the specified Role\n**switch** • Switch between Player and Sponsor roles\n**deadc** • Move a RoleChat to dead category and remove house access (admin only)\n**removerole {role} {member}** • Remove a role from a member (admin only)\n**skipnight {min_votes}** • Start a vote to skip the night phase (OS/admin only)", inline=False)
+        embedu = discord.Embed(title="⚙️ - Utility", description="21 commands", color=0xff3fb9)
+        embedu.add_field(name=" ", value="**day** • Unlock all Day Channels\n**night** • Lock all Day Channels\n**broom** • Delete replied-to messages (except pinned), log to log channel and RCs\n**log** • Log message range. Use count/source/send-to options\n**housecheck [hours]** • List house channels with no messages in the last N hours (default 24). Shows time since last message.\n**whisper {#Receiver RC Mention} {Message}** • Send a whisper\n**dead** • Player leaves current channels, RC moves to Dead category\n**deadrole** • Mark player dead, remove house access, pin corpse in chosen house, prompt for deadlist details\n**addrole {@Role} {@User1/everyone} {@User2}...** • Give all mentioned members the specified Role\n**switch** • Switch between Player and Sponsor roles\n**deadc** • Move a RoleChat to dead category and remove house access (admin only)\n**removerole {role} {member}** • Remove a role from a member (admin only)\n**skipnight {min_votes}** • Start a vote to skip the night phase (OS/admin only)", inline=False)
         embedu.add_field(name="⚙️ - Utility commands (Continue)", value="**addcategoryperms {@Role} {CategoryName} {Permission}** • Add the specified perms to all channels in the specified category for the specified role.\n**addchannelperms {@Role} {#TextChannel} {Permission}** • Add the specified perms to the specified channel for the specified role.\n**R =** Read Messages\n**S =** Read and Send Messages\n**endgame** • Use it when the game ends. The bot will unlock all channls except OS channels for everyone to read and send messages inside them\n**statss** • Show message counts for the day discussion channel grouped by role priority\n**setmessagetracking {true/false}** • Enable or disable message tracking (admin only)\n**start_tracking** • Start message tracking (admin only)\n**stop_tracking** • Stop/pause message tracking (admin only)\n**reset_tracking** • Reset message counts for this server (admin only)")
         embedu.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="17 commands", color=0xff3fb9)
-        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**ghelp** • Show general Gentleman Help overview\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online", inline=False)
-        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`", inline=False)
+        embedo = discord.Embed(title="👽 - Other", description="18 commands", color=0xff3fb9)
+        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
+        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**goat** • Summon the GOAT (restricted)", inline=False)
         embedo.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedo, self.help_other)
 
@@ -615,8 +615,8 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embede, self.help_economy)
 
     async def help_location(self, ctx):
-        embed = discord.Embed(title="📍 Location commands", description="17 commands", color=0xff3fb9)
-        embed.add_field(name="User Commands", value="**`.mysetloc <location>`** • Set your own location\n**`.myremoveloc`** • Remove your own location\n**`.localtime` / `.lt` [@user]** • View a user's local time\n**`.near [@user]** • Find the 5 closest members to you or another user\n**`.locations`** • Browse all locations by continent\n**`.locstats`** • Show location statistics\n**`.lochelp` / `.hloc`** • Show all location commands", inline=False)
+        embed = discord.Embed(title="📍 Location commands", description="18 commands", color=0xff3fb9)
+        embed.add_field(name="User Commands", value="**`.mysetloc <location>`** • Set your own location\n**`.myremoveloc`** • Remove your own location\n**`.localtime` / `.lt` [@user]** • View a user's local time\n**`.near [@user]** • Find the 5 closest members to you or another user\n**`.locations`** • Browse all locations by continent\n**`.locstats`** • Show location statistics\n**`.lochelp` / `.hloc`** • Show all location commands\n**`.whentime @user1 @user2 ...`** • See what time it is for multiple users", inline=False)
         embed.add_field(name="Admin Commands", value="**`.setloc @user <location>`** • Set a user's location\n**`.remloc <@user/username>`** • Remove a user's location\n**`.setcontinent @user <continent>`** • Manually assign a continent\n**`.listunknown`** • List entries with Unknown continent\n**`.refreshtz`** • Refresh timezones for all saved users\n**`.forceremloc` / `.forceremoveloc <name/id>`** • Force remove a location entry\n**`.test_geocoder`** • Test geocoder connectivity", inline=False)
         embed.add_field(name="Maps", value="**`.mapp`** • View the world map of registered users\n**`.mapheat`** • View the heatmap of registered users\n**`.locsnotset`** • Show members who haven't set their location", inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")

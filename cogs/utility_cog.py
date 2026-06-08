@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import tempfile
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from discord.ext import commands
 from discord.ui import View, Button
 from cogs.data_utils import load_guild_data, save_guild_data, add_player
@@ -351,6 +351,43 @@ class Utility(commands.Cog):
                         #await rc_channel.send(f"Messages broomed in {ctx.channel.name}")
                         #await rc_channel.send(file=discord.File(temp_log_name))
         os.remove(temp_log_name)
+
+    @commands.command()
+    async def housecheck(self, ctx, hours: int = 24):
+        """List house channels with no messages in the given hours (default 24)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        if hours <= 0:
+            return await ctx.send("Hours must be greater than 0.")
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+        if not houses_category:
+            return await ctx.send("Houses category not found.")
+        now = discord.utils.utcnow()
+        cutoff = now - datetime.timedelta(hours=hours)
+        inactive = []
+        for channel in houses_category.text_channels:
+            last = None
+            async for message in channel.history(limit=1, oldest_first=False):
+                last = message.created_at
+                break
+            if last is None:
+                inactive.append(f"{channel.mention} -> No messages ever")
+                continue
+            if last < cutoff:
+                delta = now - last
+                total_secs = int(delta.total_seconds())
+                h, remainder = divmod(total_secs, 3600)
+                m = remainder // 60
+                inactive.append(f"{channel.mention} -> {h:02d}:{m:02d} hours")
+        if inactive:
+            embed = discord.Embed(title=f"🏠 Inactive Houses ({hours}h+)", description="\n".join(inactive), color=0xff3fb9, timestamp=datetime.now())
+            embed.set_footer(text="Village Game")
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(f"All house channels have had messages within the last {hours} hours.")
 
     @commands.command()
     async def log(self, ctx, arg1: str = None, arg2: str = None, arg3: str = None):
