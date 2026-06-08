@@ -198,6 +198,13 @@ class Other(commands.Cog):
         else:
             await ctx.send(f'{tag} is not a valid argument')
 
+    @roll.error
+    async def roll_error(self, ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.send("I think you want to use `.dice` instead.\nUsage: `.dice <number>` to roll 1-N, or `.dice <option1> <option2> ...` to pick randomly.")
+        else:
+            raise error
+
     @commands.command()
     async def narrate(self, ctx, *, message: str):
         if ctx.author.guild_permissions.administrator:
@@ -581,7 +588,7 @@ class Other(commands.Cog):
             "**`.inv` / `.inventory` [#channel]** • View rolechat inventory\n"
             "**`.give @user <amount>`** • Give coins from your rolechat to another player's rolechat (use in Houses)\n"
             "**`.give-money @user <amount>`** • Transfer coins from your personal wallet to another user\n"
-            "**`.use <item>`** • Use an item from your user inventory (Fireworks, Whisper, Broom, Extra Visit, Will)\n"
+            "**`.use <item>`** • Use an item from your user inventory (Fireworks, Whisper, Broom, Will)\n"
         ), inline=False)
         embede.add_field(name="Admin Commands", value=(
             "**`.additem <price> <name>`** • Add a new item to the shop\n"
@@ -591,17 +598,18 @@ class Other(commands.Cog):
             "**`.removemoney #channel <amount>`** • Remove coins from a rolechat's balance\n"
             "**`.add-money-role @role <amount>`** • Add coins to all members with a role (wallet)\n"
             "**`.additemrole @role <item> <qty>, <item2> <qty2>`** • Give items to all members with a role\n"
+            "**`.reseteconomy [amount]`** • Reset all alive players' money to a set amount (default 0)\n"
+            "**`.clearinventory`** • Clear all alive players' inventories\n"
             "**`.collect`** • Add the collect amount to every rolechat\n"
             "**`.setcollect <value>`** • Set the amount added by `.collect` (max 10,000)\n"
             "**`.leaderboard` / `.lb` / `.top` [top]** • Show richest rolechats by balance\n"
         ), inline=False)
         embede.add_field(name="Shop Items", value=(
-            "🎆 **Fireworks** (100) — Reveal your position in announcements\n"
-            "👟 **Shoes** (250) — Extra visit grant\n"
-            "✉ **Whisper** (200) — Send an anonymous private message\n"
-            "🧹 **Broom** (300) — Clear recent messages in a channel\n"
-            "📜 **Will** (150) — Notify Overseers to pin your last will\n"
-            "🚪 **Extra Visit** (200) — Announce an extra visit in your rolechat\n"
+            "🎆 **Fireworks** — Reveal your position in announcements\n"
+            "👟 **Shoes** — Extra visit grant\n"
+            "✉ **Whisper** — Send an anonymous private message\n"
+            "🧹 **Broom** — Clear recent messages in a channel\n"
+            "📜 **Will** — Notify Overseers to pin your last will\n"
         ), inline=False)
         embede.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embede, self.help_economy)
