@@ -793,6 +793,37 @@ def update_economy_channel_balance(guild_id: int, channel_id: int, delta: int) -
         return int(row["balance"]) if row else 0
 
 
+def set_economy_channel_balance(guild_id: int, channel_id: int, value: int) -> int:
+    """Set channel balance to an exact value (clamped >= 0). Returns new balance."""
+    _ensure_ready()
+    value = max(0, int(value))
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO economy_channel_balance (guild_id, channel_id, balance) VALUES (?, ?, 0)",
+            (guild_id, channel_id),
+        )
+        cur.execute(
+            "UPDATE economy_channel_balance SET balance = ? WHERE guild_id = ? AND channel_id = ?",
+            (value, guild_id, channel_id),
+        )
+        conn.commit()
+        return value
+
+
+def clear_channel_inventory(guild_id: int, channel_id: int) -> int:
+    """Delete all inventory rows for a channel. Returns number of rows deleted."""
+    _ensure_ready()
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM economy_channel_inventory WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
 def get_top_economy_channels(guild_id: int, limit: int = 10) -> list[dict]:
     """Return top channels by balance, descending."""
     _ensure_ready()
