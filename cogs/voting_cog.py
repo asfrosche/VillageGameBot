@@ -1,4 +1,5 @@
 import re
+import asyncio
 import discord
 import datetime
 from datetime import datetime
@@ -305,7 +306,7 @@ class Voting(commands.Cog):
             await ctx.send("You don't have enough permissions to use this command")
 
     @commands.command(aliases=["vh"])
-    async def votehistory(self, ctx, mode: str = None, end: str = None):
+    async def votehistory(self, ctx, mode: str = None):
         if not ctx.message.reference:
             await ctx.send("Reply to a Day Start message to scan vote history from that point.")
             return
@@ -322,18 +323,23 @@ class Voting(commands.Cog):
             await ctx.send("An error occurred while fetching the message.")
             return
 
+        is_range = mode and mode.lower() == "range"
         is_grouped = mode and mode.lower() == "grouped"
         end_message = None
-        if end:
-            end_match = re.search(r'(?:channels/\d+/\d+/)?(\d+)', end)
-            if end_match:
-                try:
-                    end_message = await ctx.channel.fetch_message(int(end_match.group(1)))
-                except Exception:
-                    await ctx.send("Could not resolve the end message. Provide a valid message ID or link.")
+
+        if is_range:
+            prompt = await ctx.send("Reply to this message with a reference to the **end message**.")
+            try:
+                def check(m):
+                    return m.author == ctx.author and m.channel == ctx.channel and m.reference and m.reference.message_id == prompt.id
+                reply = await self.bot.wait_for("message", check=check, timeout=60)
+                end_id = reply.reference.resolved.id if reply.reference.resolved else None
+                if not end_id:
+                    await ctx.send("Could not resolve the end message.")
                     return
-            else:
-                await ctx.send("Invalid end message. Provide a message ID or link.")
+                end_message = await ctx.channel.fetch_message(end_id)
+            except asyncio.TimeoutError:
+                await ctx.send("Timed out waiting for the end message reference.")
                 return
 
         prefix = self.bot.command_prefix
@@ -343,10 +349,14 @@ class Voting(commands.Cog):
             prefix = prefix[0]
         user_actions = {}
 
+        start_ts = int(start_message.created_at.timestamp())
+        range_label = f" (Start: <t:{start_ts}:T>)"
+
         async with ctx.typing():
             kwargs = {"after": start_message, "oldest_first": True}
             if end_message:
                 kwargs["before"] = end_message
+                range_label += f" — End: <t:{int(end_message.created_at.timestamp())}:T>"
             async for message in ctx.channel.history(**kwargs):
                 if message.author.bot:
                     continue
@@ -368,7 +378,7 @@ class Voting(commands.Cog):
                                 user_actions.setdefault(uid, []).append({"type": "vote", "target_id": member.id})
 
         if not user_actions:
-            await ctx.send("No votes found after the referenced message.")
+            await ctx.send(f"No votes found in the scanned range.{range_label}")
             return
 
         current_votes = {}
@@ -392,7 +402,7 @@ class Voting(commands.Cog):
 
         count_text = "\n".join(count_lines) if count_lines else "No active votes."
 
-        if is_grouped:
+        if is_grouped or is_range:
             target_history = {}
             for uid, actions in user_actions.items():
                 voter = ctx.guild.get_member(uid)
@@ -422,19 +432,19 @@ class Voting(commands.Cog):
 
         history_text = "\n\n".join(history_lines) if history_lines else "No vote history."
 
-        for embed in self._build_vh_embeds("Vote Count", count_text):
+        for embed in self._build_vh_embeds("Vote Count", count_text, range_label):
             await ctx.send(embed=embed)
-        for embed in self._build_vh_embeds("Vote History", history_text):
+        for embed in self._build_vh_embeds("Vote History", history_text, range_label):
             await ctx.send(embed=embed)
 
-    def _build_vh_embeds(self, title: str, text: str) -> list:
+    def _build_vh_embeds(self, title: str, text: str, suffix: str = "") -> list:
         MAX = 4096
         if not text:
-            e = discord.Embed(title=title, description="No data.", color=0xff3fb9)
+            e = discord.Embed(title=title + suffix, description="No data.", color=0xff3fb9)
             e.set_footer(text="Village Game")
             return [e]
         if len(text) <= MAX:
-            e = discord.Embed(title=title, description=text, color=0xff3fb9, timestamp=datetime.now())
+            e = discord.Embed(title=title + suffix, description=text, color=0xff3fb9, timestamp=datetime.now())
             e.set_footer(text="Village Game")
             return [e]
         chunks, buf = [], ""
@@ -449,7 +459,7 @@ class Voting(commands.Cog):
             chunks.append(buf)
         embeds = []
         for i, chunk in enumerate(chunks):
-            label = f"{title} ({i+1}/{len(chunks)})" if len(chunks) > 1 else title
+            label = f"{title} ({i+1}/{len(chunks)}){suffix}" if len(chunks) > 1 else f"{title}{suffix}"
             e = discord.Embed(title=label, description=chunk, color=0xff3fb9, timestamp=datetime.now())
             e.set_footer(text="Village Game")
             embeds.append(e)
