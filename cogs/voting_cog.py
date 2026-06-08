@@ -303,6 +303,134 @@ class Voting(commands.Cog):
         else:
             await ctx.send("You don't have enough permissions to use this command")
 
+    @commands.command(aliases=["vh"])
+    async def votehistory(self, ctx, mode: str = None):
+        if not ctx.message.reference:
+            await ctx.send("Reply to a Day Start message to scan vote history from that point.")
+            return
+
+        try:
+            start_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+        except discord.NotFound:
+            await ctx.send("The referenced message could not be found.")
+            return
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to read messages.")
+            return
+        except discord.HTTPException:
+            await ctx.send("An error occurred while fetching the message.")
+            return
+
+        is_grouped = mode and mode.lower() == "grouped"
+        prefix = self.bot.command_prefix
+        if callable(prefix):
+            prefix = "."
+        elif not isinstance(prefix, str):
+            prefix = prefix[0]
+        user_actions = {}
+
+        async with ctx.typing():
+            async for message in ctx.channel.history(after=start_message, oldest_first=True):
+                if message.author.bot:
+                    continue
+                content = message.content.strip()
+                uid = message.author.id
+                lower = content.lower()
+
+                if lower.startswith(prefix + "abstain"):
+                    user_actions.setdefault(uid, []).append({"type": "abstain"})
+                elif lower.startswith(prefix + "vote ") and message.mentions:
+                    target = message.mentions[0]
+                    user_actions.setdefault(uid, []).append({"type": "vote", "target_id": target.id})
+
+        if not user_actions:
+            await ctx.send("No votes found after the referenced message.")
+            return
+
+        current_votes = {}
+        for uid, actions in user_actions.items():
+            last = actions[-1]
+            if last["type"] == "vote":
+                current_votes.setdefault(last["target_id"], []).append(uid)
+
+        sorted_targets = sorted(current_votes.items(), key=lambda x: len(x[1]), reverse=True)
+
+        count_lines = []
+        for target_id, voter_ids in sorted_targets:
+            target = ctx.guild.get_member(target_id)
+            if not target:
+                continue
+            names = []
+            for vid in voter_ids:
+                m = ctx.guild.get_member(vid)
+                names.append(m.display_name if m else "Unknown")
+            count_lines.append(f"**{target.display_name}** ({len(voter_ids)}): {', '.join(names)}")
+
+        count_text = "\n".join(count_lines) if count_lines else "No active votes."
+
+        if is_grouped:
+            target_history = {}
+            for uid, actions in user_actions.items():
+                voter = ctx.guild.get_member(uid)
+                vname = voter.display_name if voter else "Unknown"
+                for a in actions:
+                    if a["type"] == "vote":
+                        target_history.setdefault(a["target_id"], []).append(vname)
+            history_lines = []
+            for tid, vnames in target_history.items():
+                target = ctx.guild.get_member(tid)
+                if not target:
+                    continue
+                history_lines.append(f"**{target.display_name}**:\n" + " \u2192 ".join(vnames))
+        else:
+            history_lines = []
+            for uid, actions in user_actions.items():
+                voter = ctx.guild.get_member(uid)
+                vname = voter.display_name if voter else "Unknown"
+                parts = []
+                for a in actions:
+                    if a["type"] == "vote":
+                        t = ctx.guild.get_member(a["target_id"])
+                        parts.append(t.display_name if t else "Unknown")
+                    else:
+                        parts.append("")
+                history_lines.append(f"**{vname}**:\n" + " \u2192 ".join(parts))
+
+        history_text = "\n\n".join(history_lines) if history_lines else "No vote history."
+
+        for embed in self._build_vh_embeds("Vote Count", count_text):
+            await ctx.send(embed=embed)
+        for embed in self._build_vh_embeds("Vote History", history_text):
+            await ctx.send(embed=embed)
+
+    def _build_vh_embeds(self, title: str, text: str) -> list:
+        MAX = 4096
+        if not text:
+            e = discord.Embed(title=title, description="No data.", color=0xff3fb9)
+            e.set_footer(text="Village Game")
+            return [e]
+        if len(text) <= MAX:
+            e = discord.Embed(title=title, description=text, color=0xff3fb9, timestamp=datetime.now())
+            e.set_footer(text="Village Game")
+            return [e]
+        chunks, buf = [], ""
+        for line in text.split("\n"):
+            candidate = buf + ("\n" + line if buf else line)
+            if len(candidate) > MAX:
+                chunks.append(buf)
+                buf = line
+            else:
+                buf = candidate
+        if buf:
+            chunks.append(buf)
+        embeds = []
+        for i, chunk in enumerate(chunks):
+            label = f"{title} ({i+1}/{len(chunks)})" if len(chunks) > 1 else title
+            e = discord.Embed(title=label, description=chunk, color=0xff3fb9, timestamp=datetime.now())
+            e.set_footer(text="Village Game")
+            embeds.append(e)
+        return embeds
+
     async def aggiorna_risultati(self, ctx, channel: discord.TextChannel = None):
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
