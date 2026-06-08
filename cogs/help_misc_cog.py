@@ -530,8 +530,8 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedpres, self.help_presets)
 
     async def help_voting(self, ctx):
-        embedv = discord.Embed(title="🗳️ - Voting commands", description="7 commands", color=0xff3fb9)
-        embedv.add_field(name=" ", value="**vote {@Player}** • Vote or change your vote\n**abstain** • Abstain from the votation\n**manipulate {@Player to manipulate} {@Player to vote}** • Manipulate a Player into voting another Player\n**removevote {@Player}** • Remove a Player vote\n**votelist** • Show all the votes\n**resetvotes** • Reset all votes", inline=False)
+        embedv = discord.Embed(title="🗳️ - Voting commands", description="8 commands", color=0xff3fb9)
+        embedv.add_field(name=" ", value="**vote {@Player}** • Vote or change your vote\n**abstain** • Abstain from the votation\n**manipulate {@Player to manipulate} {@Player to vote}** • Manipulate a Player into voting another Player\n**removevote {@Player}** • Remove a Player vote\n**votelist** • Show all the votes\n**resetvotes** • Reset all votes\n**votehistory/vh [mode]** • Reply to a start message to scan votes. `mode`: `grouped` (group by target) / `range` (prompts for end message)", inline=False)
         embedv.add_field(name="🗳️ - Voting commands (Continue)", value="**voteinrc true/false** • Set voting in RoleChats on true or false\nEnabling this option, players will be able to vote only in their RoleChats. Don't delete voting channels, players need them to specify what type of vote they are casting by putting the channel mention (ex. #lynch-session-1) at the end of the vote command (#lynch-session-1 is on default if no channel is specified). Same thing applies for every other command. If you don't want vote count to be displayed, delete the voe count channel. You will be able to check votes with .votelist and if you also don't want players to be able to use .votelist command, contact Bidet, he will enable the command only of OS.")
         embedv.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedv, self.help_voting)
