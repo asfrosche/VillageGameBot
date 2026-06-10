@@ -1445,8 +1445,7 @@ class Economy(commands.Cog):
         return delivered
 
     async def _trigger_broom(self, ctx: commands.Context) -> bool:
-        """Clears messages after a user-specified anchor message. Logs to edit_del_logs."""
-        guild_data = load_guild_data(ctx.guild.id)
+        """Clears messages after a user-specified anchor message. Delegates to Utility.broom_delete."""
         try:
             prompt = await ctx.send(
                 embed=plain_embed(
@@ -1467,12 +1466,7 @@ class Economy(commands.Cog):
                         and m.reference
                         and m.reference.message_id != prompt.id)
 
-            try:
-                reply = await ctx.bot.wait_for("message", check=reply_check, timeout=120)
-            except asyncio.TimeoutError:
-                await ctx.send("Broom cancelled (timeout).")
-                return False
-
+            reply = await ctx.bot.wait_for("message", check=reply_check, timeout=120)
             anchor = reply.reference.resolved
             if not anchor:
                 await ctx.send("Could not resolve the target message.")
@@ -1487,26 +1481,13 @@ class Economy(commands.Cog):
                 await ctx.send("No unpinned messages to delete.")
                 return True
 
-            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
-                for msg in to_delete:
-                    ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                    content = msg.content.replace('\n', ' ')[:1000]
-                    temp_log.write(f"{ts} - {msg.author}: {content}\n")
-                temp_log_name = temp_log.name
-
-            for i in range(0, len(to_delete), 100):
-                await ctx.channel.delete_messages(to_delete[i:i + 100])
-
-            broom_log_name = guild_data.get("edit_del_logs")
-            if broom_log_name:
-                broom_ch = discord.utils.get(ctx.guild.text_channels, name=broom_log_name)
-                if broom_ch:
-                    await broom_ch.send(f'🧹 **{ctx.author}** used a broom in {ctx.channel.mention}')
-                    await broom_ch.send(file=discord.File(temp_log_name))
-
-            os.remove(temp_log_name)
-            await ctx.send(f"🧹 Broom swept away **{len(to_delete)}** messages.", delete_after=5)
+            utility = ctx.bot.get_cog("Utility")
+            if utility:
+                await utility.broom_delete(ctx, to_delete)
             return True
+        except asyncio.TimeoutError:
+            await ctx.send("Broom cancelled (timeout).")
+            return False
         except discord.Forbidden:
             await ctx.send("I need Manage Messages permission to use the broom here.")
             return False
