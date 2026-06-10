@@ -677,7 +677,7 @@ class Other(commands.Cog):
         embedh.add_field(name="📄 - Lists", value="9 Commands\n`.help lists`", inline=True)
         embedh.add_field(name="↪ - Send Role", value="2 Commands\n`.help sendrole`", inline=True)
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
-        embedh.add_field(name="👽 - Other", value="23 Commands\n`.help other`", inline=True)
+        embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -757,9 +757,9 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="23 commands", color=0xff3fb9)
+        embedo = discord.Embed(title="👽 - Other", description="22 commands", color=0xff3fb9)
         embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**narration/n {<text>}** • Send a storybook-style narration embed with role ping (admin only)\n**anarration/na {<text>}** • Same but without pinging roles (admin only)\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
-        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**goat** • Summon the GOAT (restricted)\n**narrationcolor** • Pick the narration embed color from presets (admin only)\n**revive** • Revive dead players with interactive dropdowns (admin only)", inline=False)
+        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**narrationcolor** • Pick the narration embed color from presets (admin only)\n**revive** • Revive dead players with interactive dropdowns (admin only)", inline=False)
         embedo.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedo, self.help_other)
 
