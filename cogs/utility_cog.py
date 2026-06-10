@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import tempfile
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from discord.ui import View, Button
 from cogs.data_utils import load_guild_data, save_guild_data, add_player
@@ -301,8 +301,6 @@ class Utility(commands.Cog):
         broom_channel = discord.utils.get(ctx.guild.text_channels, name=broom_channel_name)
         if not broom_channel:
             return await ctx.send("Broom log channel not found.")
-        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
-        rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
         messages_to_delete = []
         if from_id and to_id:
             try:
@@ -332,6 +330,13 @@ class Utility(commands.Cog):
             return await ctx.send("Please reply to a message or provide `from_id` and `to_id`.")
         if not messages_to_delete:
             return await ctx.send("No messages to delete in the specified range.")
+        await self.broom_delete(ctx, messages_to_delete)
+
+    async def broom_delete(self, ctx, messages_to_delete):
+        """Delete messages and log to broom channel (shared by .broom and shop broom)."""
+        guild_data = load_guild_data(ctx.guild.id)
+        broom_channel_name = guild_data.get("edit_del_logs")
+        broom_channel = discord.utils.get(ctx.guild.text_channels, name=broom_channel_name)
         with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
             for message in messages_to_delete:
                 timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -340,17 +345,11 @@ class Utility(commands.Cog):
             temp_log_name = temp_log.name
         for i in range(0, len(messages_to_delete), 100):
             await ctx.channel.delete_messages(messages_to_delete[i:i + 100])
-        await broom_channel.send(f'Messages broomed in {ctx.channel.mention}')
-        await broom_channel.send(file=discord.File(temp_log_name))
-        #alive_members = [member for member in ctx.channel.members if alive_role in member.roles]
-        #if rc_category:
-            #for member in alive_members:
-                #for rc_channel in rc_category.channels:
-                    #permissions = rc_channel.permissions_for(member)
-                    #if permissions.read_messages:
-                        #await rc_channel.send(f"Messages broomed in {ctx.channel.name}")
-                        #await rc_channel.send(file=discord.File(temp_log_name))
+        if broom_channel:
+            await broom_channel.send(f'🧹 **{ctx.author}** used a broom in {ctx.channel.mention}')
+            await broom_channel.send(file=discord.File(temp_log_name))
         os.remove(temp_log_name)
+        await ctx.send(f"🧹 Broom swept away **{len(messages_to_delete)}** messages.", delete_after=5)
 
     @commands.command()
     async def housecheck(self, ctx, hours: int = 24):
@@ -366,7 +365,7 @@ class Utility(commands.Cog):
         if not houses_category:
             return await ctx.send("Houses category not found.")
         now = discord.utils.utcnow()
-        cutoff = now - datetime.timedelta(hours=hours)
+        cutoff = now - timedelta(hours=hours)
         inactive = []
         for channel in houses_category.text_channels:
             last = None
