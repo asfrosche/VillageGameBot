@@ -251,47 +251,47 @@ class Other(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
-    @commands.command(aliases=["n"])
-    async def narration(self, ctx, *, text: str = None):
-        """Send a storybook-style narration embed (admin only)."""
-        if not ctx.author.guild_permissions.administrator:
-            return await ctx.send("You don't have enough perms to use this command")
-        if text is None:
-            embed = discord.Embed(
-                title="📖 Narration",
-                description="Usage: `.narration <text>`\nSend a storybook-style narration embed (admin only).\nAlias: `.n`\n\nAdmins can pick the embed color with `.narrationcolor`",
-                color=0xff3fb9
-            )
-            embed.add_field(name="Example", value="`.narration The detective quietly watched from the shadows.`", inline=False)
-            return await ctx.send(embed=embed)
+    def _get_referenced_houses(self, guild_data, ctx, text):
+        houses = []
+        houselist = guild_data.get("houselist") or []
+        if not isinstance(houselist, list):
+            houselist = []
+        if ctx.channel and ctx.channel.name in houselist:
+            houses.append(ctx.channel.name)
+        for cid in re.findall(r"<#(\d+)>", text):
+            ch = ctx.guild.get_channel(int(cid))
+            if ch and ch.name in houselist:
+                houses.append(ch.name)
+        text_lower = text.lower()
+        for h in houselist:
+            if h.lower() in text_lower:
+                if h not in houses:
+                    houses.append(h)
+        return houses
 
+    async def _send_narration(self, ctx, text, ping_roles=True):
         text = re.sub(r'@(everyone|here)', '@\u200b\\1', text)
         text = re.sub(r'<@&(\d+)>', lambda m: f'@\u200b{ctx.guild.get_role(int(m.group(1))).name if ctx.guild.get_role(int(m.group(1))) else "deleted-role"}', text)
 
         guild_data = load_guild_data(ctx.guild.id)
         color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
 
-        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"]) if guild_data else None
-        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"]) if guild_data else None
         ping_parts = []
-        if alive_role:
-            ping_parts.append(alive_role.mention)
-        if sponsor_role:
-            ping_parts.append(sponsor_role.mention)
+        if ping_roles and guild_data:
+            alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+            sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+            if alive_role:
+                ping_parts.append(alive_role.mention)
+            if sponsor_role:
+                ping_parts.append(sponsor_role.mention)
 
         embeds = []
         max_desc = 4096
         while text:
             chunk = text[:max_desc]
             text = text[max_desc:]
-            embed = discord.Embed(
-                description=chunk,
-                color=color
-            )
-            embed.set_author(
-                name=ctx.author.display_name,
-                icon_url=ctx.author.display_avatar.url
-            )
+            embed = discord.Embed(description=chunk, color=color)
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
             embeds.append(embed)
 
         try:
@@ -300,9 +300,12 @@ class Other(commands.Cog):
                 await ctx.send(content=content, embed=e)
         except discord.Forbidden:
             await ctx.send("I don't have permission to send embeds here.")
+            return
         except Exception as e:
             print(f"[Narration] Error sending embed: {e}")
             await ctx.send("An error occurred while sending the narration.")
+            return
+
         try:
             await ctx.message.delete(delay=3)
         except (discord.Forbidden, discord.HTTPException):
@@ -313,7 +316,8 @@ class Other(commands.Cog):
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, f"{ctx.guild.id}.log")
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            original_text = ctx.message.content[len(ctx.prefix) + len(ctx.invoked_with):].strip()
+            prefix = ctx.prefix if isinstance(ctx.prefix, str) else (ctx.clean_prefix if hasattr(ctx, 'clean_prefix') else '.')
+            original_text = ctx.message.content[len(prefix) + len(ctx.invoked_with or ""):].strip()
             location = f"#{ctx.channel.name}" if ctx.channel else "unknown"
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"[{ts}] {ctx.author.display_name} ({ctx.author.id}) in {location}: {original_text}\n")
@@ -321,67 +325,58 @@ class Other(commands.Cog):
             print(f"[Narration] Failed to write log: {e}")
 
         if guild_data:
-            log_ch_name = guild_data.get("narration_log_channel_name")
-            if log_ch_name:
-                log_ch = discord.utils.get(ctx.guild.channels, name=log_ch_name)
-                if log_ch:
-                    try:
-                        header = f"**{ctx.author.display_name}** in {ctx.channel.mention}"
-                        for e in embeds:
-                            await log_ch.send(content=header, embed=e)
-                            header = None
-                    except (discord.Forbidden, discord.HTTPException):
-                        pass
+            houses = self._get_referenced_houses(guild_data, ctx, original_text)
+            house_str = ", ".join(f"`{h}`" for h in houses) if houses else None
+            msg_link = f"https://discord.com/channels/{ctx.guild.id}/{ctx.channel.id}/{ctx.message.id}"
 
+            log_ch_name = guild_data.get("narration_log_channel_name") or "✍️│commentary"
+            log_ch = discord.utils.get(ctx.guild.channels, name=log_ch_name)
+            if not log_ch:
+                import unicodedata
+                norm = unicodedata.normalize("NFC", log_ch_name)
+                log_ch = next((c for c in ctx.guild.channels if unicodedata.normalize("NFC", c.name) == norm), None)
+            if log_ch:
+                try:
+                    parts = [f"**{ctx.author.display_name}** in {ctx.channel.mention}"]
+                    if house_str:
+                        parts.append(f"📪 {house_str}")
+                    parts.append(f"[Jump]({msg_link})")
+                    header = " — ".join(parts)
+                    for e in embeds:
+                        await log_ch.send(content=header, embed=e)
+                        header = None
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
 
-class NarrationColorView(discord.ui.View):
-    COLOR_OPTIONS = [
-        ("Crimson", 0xDC143C),
-        ("Dark Red", 0x8B0000),
-        ("Orange", 0xFF8C00),
-        ("Gold", 0xDAA520),
-        ("Forest Green", 0x228B22),
-        ("Teal", 0x008080),
-        ("Steel Blue", 0x4682B4),
-        ("Royal Blue", 0x4169E1),
-        ("Purple", 0x800080),
-        ("Magenta", 0xC71585),
-    ]
+    @commands.command(aliases=["n"])
+    async def narration(self, ctx, *, text: str = None):
+        """Send a storybook-style narration embed (admin only). Pings @Alive and @Sponsor."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        if text is None:
+            embed = discord.Embed(
+                title="📖 Narration",
+                description="Usage: `.narration <text>`\nSend a storybook-style narration embed (admin only).\nAlias: `.n`\n\nAdmins can pick the embed color with `.narrationcolor`",
+                color=0xff3fb9
+            )
+            embed.add_field(name="Example", value="`.narration The detective quietly watched from the shadows.`", inline=False)
+            return await ctx.send(embed=embed)
+        await self._send_narration(ctx, text, ping_roles=True)
 
-    def __init__(self, ctx: commands.Context):
-        super().__init__(timeout=60)
-        self.ctx = ctx
-        for i, (name, val) in enumerate(self.COLOR_OPTIONS):
-            btn = Button(label=name, style=discord.ButtonStyle.primary, row=i // 5)
-            btn.callback = lambda i, v=val: self._on_pick(i, v)
-            self.add_item(btn)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message("This isn't for you.", ephemeral=True)
-            return False
-        return True
-
-    async def _on_pick(self, interaction: discord.Interaction, color: int):
-        self.stop()
-        guild_data = load_guild_data(self.ctx.guild.id)
-        if guild_data:
-            guild_data["narration_color"] = color
-            save_guild_data(self.ctx.guild.id, guild_data)
-        embed = discord.Embed(
-            description=f"Narration color set to **#{color:06X}**",
-            color=color,
-        )
-        await interaction.response.edit_message(embed=embed, view=None)
-
-    async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
-        try:
-            await self.message.edit(content="Colour picker timed out.", embed=None, view=None)
-        except Exception:
-            pass
-
+    @commands.command(aliases=["na"])
+    async def anarration(self, ctx, *, text: str = None):
+        """Send a narration embed without pinging roles (admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        if text is None:
+            embed = discord.Embed(
+                title="📖 Narration (silent)",
+                description="Usage: `.anarration <text>`\nSend a narration embed without pinging anyone.\nAlias: `.na`\n\nSame as `.narration` but no role ping.",
+                color=0xff3fb9
+            )
+            embed.add_field(name="Example", value="`.anarration The wind howled through the empty streets.`", inline=False)
+            return await ctx.send(embed=embed)
+        await self._send_narration(ctx, text, ping_roles=False)
 
     @commands.command(name="narrationcolor")
     async def narrationcolor(self, ctx):
@@ -397,6 +392,30 @@ class NarrationColorView(discord.ui.View):
         )
         embed.set_footer(text="Current color shown above")
         view = NarrationColorView(ctx)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+
+    @commands.command()
+    async def revive(self, ctx):
+        """Revive dead players in this RC channel (admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
+        dead_rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["dead_rc_category_name"])
+        if ctx.channel.category not in [rc_category, dead_rc_category]:
+            return await ctx.send("This command only works in RoleChat (RC) channels.")
+        dead_role = discord.utils.get(ctx.guild.roles, name=guild_data["dead_role_name"])
+        if not dead_role:
+            return await ctx.send("Dead role not found on this server.")
+        dead_members = [m for m in ctx.channel.members if dead_role in m.roles]
+        if not dead_members:
+            return await ctx.send("No players with the Dead role in this channel.")
+        view = ReviveView(ctx, guild_data, dead_members)
+        embed = discord.Embed(description="Select players to revive:", color=0xDC143C)
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
         await view.wait()
@@ -650,7 +669,7 @@ class NarrationColorView(discord.ui.View):
         embedh.add_field(name="🏗️ - Setup", value="19 Commands\n`.help setup`", inline=True)
         embedh.add_field(name="👟 - Moving", value="9 Commands\n`.help moving`", inline=True)
         embedh.add_field(name="🏡 - Home", value="12 Commands\n`.help home`", inline=True)
-        embedh.add_field(name="🔓 - Houses and PCs handling", value="15 Commands\n`.help handling`", inline=True)
+        embedh.add_field(name="🔓 - Houses and PCs handling", value="16 Commands\n`.help handling`", inline=True)
         embedh.add_field(name="📜 - Infos", value="4 Commands\n`.help infos`", inline=True)
         embedh.add_field(name="🎟️ - Presets", value="3 Commands\n`.help presets`", inline=True)
         embedh.add_field(name="🗳️ - Voting", value="7 Commands\n`.help voting`", inline=True)
@@ -658,7 +677,7 @@ class NarrationColorView(discord.ui.View):
         embedh.add_field(name="📄 - Lists", value="9 Commands\n`.help lists`", inline=True)
         embedh.add_field(name="↪ - Send Role", value="2 Commands\n`.help sendrole`", inline=True)
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
-        embedh.add_field(name="👽 - Other", value="20 Commands\n`.help other`", inline=True)
+        embedh.add_field(name="👽 - Other", value="23 Commands\n`.help other`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -685,8 +704,8 @@ class NarrationColorView(discord.ui.View):
         await self.send_help_page(ctx, embedh, self.help_home)
 
     async def help_handling(self, ctx):
-        embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="15 commands", color=0xff3fb9)
-        embedhan.add_field(name="Houses", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**fdestroy {#HouseName}** • Force destroy a house, instantly removing all members and moving to inaccessible\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner", inline=False)
+        embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="16 commands", color=0xff3fb9)
+        embedhan.add_field(name="Houses", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**fdestroy {#HouseName}** • Force destroy a house, instantly removing all members and moving to inaccessible\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**decayinactive** • List and decay all houses with no activity in 24h (admin only)\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner", inline=False)
         embedhan.add_field(name="PCs & Maps", value="**newpc {Public/Private} {Name} {#RoleChannel}** • Generate a Chat in Public/Private Channels category. Players of the specified RoleChats will be added in there\n**close {#PCName}** • Move the Chat in Old PCS category, remove everyone from the chat\n**public {#Channel}** • Make the Channel public\n**private {#Channel}** • Make the Channel private\n**channels** • Generate a visual map of all Public and Private Channels\n**publicmap** • Generate a visual map of only Public Channels\n**privatemap** • Generate a visual map of only Private Channels\n**estatehelp** • Displays help for all Estate and Neighborhood map functions\n**estate {init} {#channel}** • Initialize the dynamic estate map in a channel, or force an update", inline=False)
         embedhan.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedhan, self.help_handling)
@@ -738,9 +757,9 @@ class NarrationColorView(discord.ui.View):
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="20 commands", color=0xff3fb9)
-        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**narration/n {<text>}** • Send a storybook-style narration embed. Reply to a message to include context. Use `.narrationcolor` to change the embed color.\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
-        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**goat** • Summon the GOAT (restricted)\n**narrationcolor** • Pick the narration embed color from presets (admin only)", inline=False)
+        embedo = discord.Embed(title="👽 - Other", description="23 commands", color=0xff3fb9)
+        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**narration/n {<text>}** • Send a storybook-style narration embed with role ping (admin only)\n**anarration/na {<text>}** • Same but without pinging roles (admin only)\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
+        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**goat** • Summon the GOAT (restricted)\n**narrationcolor** • Pick the narration embed color from presets (admin only)\n**revive** • Revive dead players with interactive dropdowns (admin only)", inline=False)
         embedo.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedo, self.help_other)
 
@@ -834,3 +853,204 @@ class NarrationColorView(discord.ui.View):
         embed.add_field(name="Commands", value="**`.calendar`** • Show the English Village Games calendar/schedule\n**`.calendario`** • Show the Italian Village Games calendar/schedule\n**`.vgintro` / `.vgi`** • Show the Village Games introduction\n**`.vgintro_it` / `.vgii`** • Show the Village Games introduction (Italian)", inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_calendar)
+
+
+class NarrationColorView(discord.ui.View):
+    COLOR_OPTIONS = [
+        ("Crimson", 0xDC143C),
+        ("Dark Red", 0x8B0000),
+        ("Orange", 0xFF8C00),
+        ("Gold", 0xDAA520),
+        ("Forest Green", 0x228B22),
+        ("Teal", 0x008080),
+        ("Steel Blue", 0x4682B4),
+        ("Royal Blue", 0x4169E1),
+        ("Purple", 0x800080),
+        ("Magenta", 0xC71585),
+    ]
+
+    def __init__(self, ctx: commands.Context):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        for i, (name, val) in enumerate(self.COLOR_OPTIONS):
+            btn = Button(label=name, style=discord.ButtonStyle.primary, row=i // 5)
+            btn.callback = self._make_pick_callback(val)
+            self.add_item(btn)
+
+    def _make_pick_callback(self, color: int):
+        async def callback(interaction: discord.Interaction):
+            await self._on_pick(interaction, color)
+        return callback
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("This isn't for you.", ephemeral=True)
+            return False
+        return True
+
+    async def _on_pick(self, interaction: discord.Interaction, color: int):
+        self.stop()
+        guild_data = load_guild_data(self.ctx.guild.id)
+        if guild_data:
+            guild_data["narration_color"] = color
+            save_guild_data(self.ctx.guild.id, guild_data)
+        embed = discord.Embed(
+            description=f"Narration color set to **#{color:06X}**",
+            color=color,
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            await self.message.edit(content="Colour picker timed out.", embed=None, view=None)
+        except Exception:
+            pass
+
+
+class ReviveView(discord.ui.View):
+    def __init__(self, ctx, guild_data, dead_members):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+        self.guild_data = guild_data
+        self.dead_members = dead_members
+        self.selected_players = []
+        self.alive_player = None
+        self.house_choice = None
+        self.house_channel = None
+        self.message = None
+        self._build_stage1()
+
+    def _build_stage1(self):
+        self.clear_items()
+        options = [discord.SelectOption(label=m.display_name, value=str(m.id)) for m in self.dead_members]
+        select = discord.ui.Select(placeholder="Select players to revive...", min_values=1, max_values=len(options), options=options)
+        select.callback = self._on_stage1
+        self.add_item(select)
+
+    async def _on_stage1(self, interaction):
+        if interaction.user.id != self.ctx.author.id:
+            return await interaction.response.send_message("This isn't for you.", ephemeral=True)
+        self.selected_players = [self.ctx.guild.get_member(int(v)) for v in interaction.data["values"]]
+        self.selected_players = [m for m in self.selected_players if m]
+        if not self.selected_players:
+            return await interaction.response.send_message("Select at least one player.", ephemeral=True)
+        self._build_stage2()
+        embed = discord.Embed(
+            description=f"**{len(self.selected_players)} players selected.**\nNow pick who gets the **Alive** role:",
+            color=0x00DAE9
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    def _build_stage2(self):
+        self.clear_items()
+        options = [discord.SelectOption(label=m.display_name, value=str(m.id)) for m in self.selected_players]
+        select = discord.ui.Select(placeholder="Pick the Alive player...", min_values=1, max_values=1, options=options)
+        select.callback = self._on_stage2
+        self.add_item(select)
+
+    async def _on_stage2(self, interaction):
+        if interaction.user.id != self.ctx.author.id:
+            return await interaction.response.send_message("This isn't for you.", ephemeral=True)
+        member_id = int(interaction.data["values"][0])
+        self.alive_player = self.ctx.guild.get_member(member_id)
+        if not self.alive_player:
+            return await interaction.response.send_message("Player not found.", ephemeral=True)
+        self._build_stage3()
+        embed = discord.Embed(
+            description=f"**{self.alive_player.display_name}** will be revived as **Alive**.\n"
+                        f"{len(self.selected_players) - 1} other(s) will become **Sponsor**.\n\nNow choose the house:",
+            color=0xDC143C
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    def _build_stage3(self):
+        self.clear_items()
+        options = [
+            discord.SelectOption(label="Restore previous house", value="restore", description="Use the house they lived in before death"),
+            discord.SelectOption(label="Assign random house", value="random", description="Pick a random available house"),
+            discord.SelectOption(label="Let me specify", value="specify", description="I'll type the channel"),
+        ]
+        select = discord.ui.Select(placeholder="Choose house assignment...", min_values=1, max_values=1, options=options)
+        select.callback = self._on_stage3
+        self.add_item(select)
+
+    async def _on_stage3(self, interaction):
+        if interaction.user.id != self.ctx.author.id:
+            return await interaction.response.send_message("This isn't for you.", ephemeral=True)
+        self.house_choice = interaction.data["values"][0]
+
+        if self.house_choice == "specify":
+            await interaction.response.edit_message(content="Mention the house channel now (e.g. #house-1):", embed=None, view=None)
+            def check(m):
+                return m.author == self.ctx.author and m.channel == self.ctx.channel and m.mentions
+            try:
+                reply = await self.ctx.bot.wait_for("message", timeout=60, check=check)
+                self.house_channel = reply.mentions[0]
+                await reply.delete()
+            except asyncio.TimeoutError:
+                await self.ctx.send("Timed out. Revive cancelled.")
+                return
+            await self._execute()
+            return
+
+        if self.house_choice == "restore":
+            stored = self.guild_data.get("current_houses", {}).get(str(self.alive_player.id), [])
+            if stored:
+                ch = self.ctx.guild.get_channel(stored[0])
+                if ch and ch.category and ch.category.name == self.guild_data.get("houses_category_name"):
+                    self.house_channel = ch
+
+        if not self.house_channel:
+            houselist = self.guild_data.get("houselist") or []
+            if not isinstance(houselist, list):
+                houselist = []
+            houses_category = discord.utils.get(self.ctx.guild.categories, name=self.guild_data["houses_category_name"])
+            if houses_category and houselist:
+                occupied = set(self.guild_data.get("member_homes", {}).values())
+                valid = [ch for ch in houses_category.channels if ch.name in houselist and ch.id not in occupied]
+                if valid:
+                    self.house_channel = random.choice(valid)
+
+        await interaction.response.edit_message(view=None)
+        await self._execute()
+
+    async def _execute(self):
+        guild = self.ctx.guild
+        guild_data = self.guild_data
+        alive_role = discord.utils.get(guild.roles, name=guild_data["alive_role_name"])
+        sponsor_role = discord.utils.get(guild.roles, name=guild_data["sponsor_role_name"])
+        dead_role = discord.utils.get(guild.roles, name=guild_data["dead_role_name"])
+        rc_category = discord.utils.get(guild.categories, name=guild_data["rc_category_name"])
+        dead_rc_category = discord.utils.get(guild.categories, name=guild_data["dead_rc_category_name"])
+
+        sponsors = [m for m in self.selected_players if m.id != self.alive_player.id]
+
+        for member in self.selected_players:
+            if dead_role:
+                await member.remove_roles(dead_role)
+
+        if alive_role and self.alive_player:
+            await self.alive_player.add_roles(alive_role)
+
+        if sponsor_role:
+            for sp in sponsors:
+                await sp.add_roles(sponsor_role)
+
+        if dead_rc_category and self.ctx.channel.category == dead_rc_category and rc_category:
+            await self.ctx.channel.edit(category=rc_category)
+
+        if self.house_channel:
+            guild_data["member_homes"][str(self.alive_player.id)] = self.house_channel.id
+            save_guild_data(guild.id, guild_data)
+
+        embed = discord.Embed(
+            title="Revival Complete",
+            description=f"**Alive:** {self.alive_player.mention}\n"
+                        f"**Sponsors:** {' '.join(s.mention for s in sponsors) if sponsors else 'None'}\n"
+                        f"**House:** {self.house_channel.mention if self.house_channel else 'Not assigned'}",
+            color=0x00DAE9
+        )
+        await self.ctx.send(embed=embed)
+        self.stop()
