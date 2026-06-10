@@ -79,6 +79,8 @@ base_variables = {
     # Message tracking (per-guild; channel = day discussion by default)
     "message_tracking_enabled": False,
     "tracked_message_counts": {},
+    "narration_color": 0xdc143c,
+    "narration_log_channel_name": "✍️│commentary",
 }
 
 def load_guild_data(guild_id):

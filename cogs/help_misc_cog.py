@@ -1,3 +1,4 @@
+import os
 import re
 import random
 import discord
@@ -6,8 +7,8 @@ import datetime
 from datetime import datetime
 from discord.ext import commands
 from discord import AllowedMentions
-from discord.ui import Select, View
-from cogs.data_utils import load_guild_data
+from discord.ui import Select, View, Button
+from cogs.data_utils import load_guild_data, save_guild_data
 
 
 class Other(commands.Cog):
@@ -210,6 +211,29 @@ class Other(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             cleaned_message = re.sub(r'<#\d+>', '', message)
             text_channels = ctx.message.channel_mentions
+            target_desc = ""
+            if not text_channels:
+                guild_data = load_guild_data(ctx.guild.id)
+                rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
+                alt_category = discord.utils.get(ctx.guild.categories, name=guild_data["alt_category_name"])
+                count = len(rc_category.text_channels) if rc_category else 0
+                count += len(alt_category.text_channels) if alt_category else 0
+                target_desc = f"all **{count}** RoleChats"
+            else:
+                target_desc = f"{len(text_channels)} channel(s): " + ", ".join(ch.mention for ch in text_channels)
+            await ctx.send(
+                f"This will send the narration to {target_desc}.\n"
+                f"Reply with **yes** to confirm, anything else to cancel.\n"
+                f"*(If you meant to narrate an ability, use `.narration` instead)*"
+            )
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+            try:
+                response = await self.bot.wait_for("message", timeout=30, check=check)
+            except asyncio.TimeoutError:
+                return await ctx.send("Action cancelled (timeout).")
+            if response.content.lower() != "yes":
+                return await ctx.send("Action cancelled.")
             if not text_channels:
                 guild_data = load_guild_data(ctx.guild.id)
                 rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
@@ -226,6 +250,156 @@ class Other(commands.Cog):
             await ctx.send('Done')
         else:
             await ctx.send("You don't have enough perms to use this command")
+
+    @commands.command(aliases=["n"])
+    async def narration(self, ctx, *, text: str = None):
+        """Send a storybook-style narration embed (admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        if text is None:
+            embed = discord.Embed(
+                title="📖 Narration",
+                description="Usage: `.narration <text>`\nSend a storybook-style narration embed (admin only).\nAlias: `.n`\n\nAdmins can pick the embed color with `.narrationcolor`",
+                color=0xff3fb9
+            )
+            embed.add_field(name="Example", value="`.narration The detective quietly watched from the shadows.`", inline=False)
+            return await ctx.send(embed=embed)
+
+        text = re.sub(r'@(everyone|here)', '@\u200b\\1', text)
+        text = re.sub(r'<@&(\d+)>', lambda m: f'@\u200b{ctx.guild.get_role(int(m.group(1))).name if ctx.guild.get_role(int(m.group(1))) else "deleted-role"}', text)
+
+        guild_data = load_guild_data(ctx.guild.id)
+        color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"]) if guild_data else None
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"]) if guild_data else None
+        ping_parts = []
+        if alive_role:
+            ping_parts.append(alive_role.mention)
+        if sponsor_role:
+            ping_parts.append(sponsor_role.mention)
+
+        embeds = []
+        max_desc = 4096
+        while text:
+            chunk = text[:max_desc]
+            text = text[max_desc:]
+            embed = discord.Embed(
+                description=chunk,
+                color=color
+            )
+            embed.set_author(
+                name=ctx.author.display_name,
+                icon_url=ctx.author.display_avatar.url
+            )
+            embeds.append(embed)
+
+        try:
+            for i, e in enumerate(embeds):
+                content = " ".join(ping_parts) if ping_parts and i == 0 else None
+                await ctx.send(content=content, embed=e)
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to send embeds here.")
+        except Exception as e:
+            print(f"[Narration] Error sending embed: {e}")
+            await ctx.send("An error occurred while sending the narration.")
+        try:
+            await ctx.message.delete(delay=3)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        try:
+            log_dir = os.path.join("data", "narration_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, f"{ctx.guild.id}.log")
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            original_text = ctx.message.content[len(ctx.prefix) + len(ctx.invoked_with):].strip()
+            location = f"#{ctx.channel.name}" if ctx.channel else "unknown"
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {ctx.author.display_name} ({ctx.author.id}) in {location}: {original_text}\n")
+        except Exception as e:
+            print(f"[Narration] Failed to write log: {e}")
+
+        if guild_data:
+            log_ch_name = guild_data.get("narration_log_channel_name")
+            if log_ch_name:
+                log_ch = discord.utils.get(ctx.guild.channels, name=log_ch_name)
+                if log_ch:
+                    try:
+                        header = f"**{ctx.author.display_name}** in {ctx.channel.mention}"
+                        for e in embeds:
+                            await log_ch.send(content=header, embed=e)
+                            header = None
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+
+
+class NarrationColorView(discord.ui.View):
+    COLOR_OPTIONS = [
+        ("Crimson", 0xDC143C),
+        ("Dark Red", 0x8B0000),
+        ("Orange", 0xFF8C00),
+        ("Gold", 0xDAA520),
+        ("Forest Green", 0x228B22),
+        ("Teal", 0x008080),
+        ("Steel Blue", 0x4682B4),
+        ("Royal Blue", 0x4169E1),
+        ("Purple", 0x800080),
+        ("Magenta", 0xC71585),
+    ]
+
+    def __init__(self, ctx: commands.Context):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        for i, (name, val) in enumerate(self.COLOR_OPTIONS):
+            btn = Button(label=name, style=discord.ButtonStyle.primary, row=i // 5)
+            btn.callback = lambda i, v=val: self._on_pick(i, v)
+            self.add_item(btn)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("This isn't for you.", ephemeral=True)
+            return False
+        return True
+
+    async def _on_pick(self, interaction: discord.Interaction, color: int):
+        self.stop()
+        guild_data = load_guild_data(self.ctx.guild.id)
+        if guild_data:
+            guild_data["narration_color"] = color
+            save_guild_data(self.ctx.guild.id, guild_data)
+        embed = discord.Embed(
+            description=f"Narration color set to **#{color:06X}**",
+            color=color,
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            await self.message.edit(content="Colour picker timed out.", embed=None, view=None)
+        except Exception:
+            pass
+
+
+    @commands.command(name="narrationcolor")
+    async def narrationcolor(self, ctx):
+        """Pick a narration embed color from presets (admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        guild_data = load_guild_data(ctx.guild.id)
+        current = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+        embed = discord.Embed(
+            title="🎨 Narration Color",
+            description="Choose a color below:",
+            color=current,
+        )
+        embed.set_footer(text="Current color shown above")
+        view = NarrationColorView(ctx)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
 
     @commands.command()
     async def deletechannel(self, ctx):
@@ -484,7 +658,7 @@ class Other(commands.Cog):
         embedh.add_field(name="📄 - Lists", value="9 Commands\n`.help lists`", inline=True)
         embedh.add_field(name="↪ - Send Role", value="2 Commands\n`.help sendrole`", inline=True)
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
-        embedh.add_field(name="👽 - Other", value="18 Commands\n`.help other`", inline=True)
+        embedh.add_field(name="👽 - Other", value="20 Commands\n`.help other`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -564,9 +738,9 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="18 commands", color=0xff3fb9)
-        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
-        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**goat** • Summon the GOAT (restricted)", inline=False)
+        embedo = discord.Embed(title="👽 - Other", description="20 commands", color=0xff3fb9)
+        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**narration/n {<text>}** • Send a storybook-style narration embed. Reply to a message to include context. Use `.narrationcolor` to change the embed color.\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
+        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**goat** • Summon the GOAT (restricted)\n**narrationcolor** • Pick the narration embed color from presets (admin only)", inline=False)
         embedo.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedo, self.help_other)
 
