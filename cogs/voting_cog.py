@@ -427,7 +427,7 @@ class Voting(commands.Cog):
                         t = ctx.guild.get_member(a["target_id"])
                         parts.append(t.display_name if t else "Unknown")
                     else:
-                        parts.append("")
+                        parts.append("Ø")
                 history_lines.append(f"**{vname}**:\n" + " \u2192 ".join(parts))
 
         history_text = "\n\n".join(history_lines) if history_lines else "No vote history."
