@@ -1,7 +1,7 @@
 import random
 import discord
 import datetime
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from discord.ext import commands
 from cogs.data_utils import load_guild_data, save_guild_data
 
@@ -373,3 +373,112 @@ class Handling(commands.Cog):
                         await ctx.send(f"{target.mention} leaves")
         if not removed_anyone:
             await ctx.send("No non-owner permissions found.")
+
+    @commands.command()
+    async def decayinactive(self, ctx):
+        """Show houses inactive >24h and prompt to decay them."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+        if not houses_category:
+            return await ctx.send("Houses category not found.")
+        now = discord.utils.utcnow()
+        cutoff = now - timedelta(hours=24)
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        inactive = []
+        skipped = []
+        for channel in houses_category.text_channels:
+            if any(alive_role in m.roles for m in channel.members):
+                skipped.append(channel)
+                continue
+            last = None
+            async for message in channel.history(limit=1, oldest_first=False):
+                last = message.created_at
+                break
+            if last is None:
+                inactive.append((channel, None))
+            elif last < cutoff:
+                inactive.append((channel, last))
+        if not inactive:
+            return await ctx.send("All house channels have had messages within the last 24 hours.")
+        lines = []
+        for ch, ts in sorted(inactive, key=lambda x: x[1] or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
+            if ts is None:
+                lines.append(f"{ch.mention} → no messages ever")
+            else:
+                diff = now - ts
+                total_secs = int(diff.total_seconds())
+                h, rem = divmod(total_secs, 3600)
+                m = rem // 60
+                lines.append(f"{ch.mention} → {h:02d}:{m:02d} hours")
+        if skipped:
+            lines.append("")
+            lines.append("⏭️ Skipped (players inside):")
+            for ch in skipped:
+                lines.append(f"  {ch.mention}")
+        embed = discord.Embed(
+            title="🏠 Inactive Houses (24h+)",
+            description="\n".join(lines),
+            color=0xff3fb9,
+            timestamp=datetime.now()
+        )
+        embed.set_footer(text="Village Game")
+        await ctx.send(embed=embed)
+        await ctx.send(f"Decay these {len(inactive)} houses? Reply with **yes** to confirm, anything else to cancel.")
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
+        try:
+            response = await self.bot.wait_for("message", timeout=30, check=check)
+        except asyncio.TimeoutError:
+            return await ctx.send("Action cancelled (timeout).")
+        if response.content.lower() != "yes":
+            return await ctx.send("Action cancelled.")
+        inaccessible_category = discord.utils.get(ctx.guild.categories, name=guild_data["inaccessible_houses_category_name"])
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+        alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
+        dead_role = discord.utils.get(ctx.guild.roles, name=guild_data["dead_role_name"])
+        map_channel = discord.utils.get(ctx.guild.channels, name=guild_data["map_channel_name"])
+        announcements_channel = discord.utils.get(ctx.guild.channels, name=guild_data["announcements_channel_name"])
+        decayed_names = []
+        for house, _ in inactive:
+            for member in house.members:
+                perms = house.permissions_for(member)
+                if perms.send_messages:
+                    if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
+                        await house.send(f"{member.mention} leaves")
+                        await house.set_permissions(member, overwrite=None)
+                    elif sponsor_role in member.roles:
+                        await house.set_permissions(member, overwrite=None)
+            homeless = [m_id for m_id, c_id in guild_data["member_homes"].items() if c_id == str(house.id)]
+            for m_id in homeless:
+                del guild_data["member_homes"][m_id]
+                try:
+                    member_obj = await ctx.guild.fetch_member(int(m_id))
+                    msg = await house.send(f"{member_obj.mention} doesn't live here anymore")
+                    await msg.pin()
+                except discord.NotFound:
+                    pass
+            if inaccessible_category and house.category is not inaccessible_category:
+                await house.edit(category=inaccessible_category)
+            if map_channel:
+                await map_channel.send(f"{house.name} is inaccessible")
+            if house.name in guild_data["houselist"]:
+                guild_data["houselist"].remove(house.name)
+            decayed_names.append(house.name)
+        save_guild_data(ctx.guild.id, guild_data)
+        if announcements_channel:
+            embed = discord.Embed(
+                title="🏚️ Houses Decayed",
+                description="The following houses decayed after 24h+ of inactivity:\n" + "\n".join(f"• {name}" for name in decayed_names),
+                color=0xff3fb9,
+                timestamp=datetime.now()
+            )
+            embed.set_footer(text="Village Game")
+            await announcements_channel.send(embed=embed)
+        estate_cog = self.bot.get_cog('Estate')
+        if estate_cog:
+            await estate_cog.update_estate_map(ctx.guild)
+        await ctx.send(f"Decayed {len(inactive)} houses.")
