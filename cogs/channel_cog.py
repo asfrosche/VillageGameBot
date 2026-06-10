@@ -128,7 +128,7 @@ class ChannelMap(commands.Cog):
 
     # ── Channel data gathering ───────────────────────────────────────────────
 
-    async def _gather_channels(self, guild, category_name, alive_role=None, alt_role=None):
+    async def _gather_channels(self, guild, category_name, alive_role=None, alt_role=None, dead_role=None):
         category = discord.utils.get(guild.categories, name=category_name)
         if not category:
             return []
@@ -143,11 +143,16 @@ class ChannelMap(commands.Cog):
             for member in ch.members:
                 if member.bot:
                     continue
-                if not ch.permissions_for(member).send_messages:
-                    continue
+                has_send = ch.permissions_for(member).send_messages
                 has_alive = alive_role is not None and alive_role in member.roles
                 has_alt = alt_role is not None and alt_role in member.roles
-                if not (has_alive or has_alt):
+                has_dead = dead_role is not None and dead_role in member.roles
+                if has_alive or has_alt:
+                    if not has_send:
+                        continue
+                elif not has_dead:
+                    continue
+                if member.id in all_members:
                     continue
                 member_ids.append(member.id)
                 all_members[member.id] = member
@@ -606,15 +611,16 @@ class ChannelMap(commands.Cog):
             return await ctx.send("Guild data not loaded.")
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have enough perms to use this command")
-        alive_role = discord.utils.get(ctx.guild.roles, name="Alive")
-        alt_role = discord.utils.get(ctx.guild.roles, name="Alt")
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name", "Alive"))
+        alt_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alt_role_name", "Alt"))
+        dead_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("dead_role_name", "Dead"))
 
         if alive_role is None and alt_role is None:
             return await ctx.send("Could not find Alive or Alt roles.")
 
         if map_type in ("public", "both"):
             pub_channels = await self._gather_channels(
-                ctx.guild, guild_data.get("publc_category_name", "PUBLIC CHANNELS"), alive_role, alt_role
+                ctx.guild, guild_data.get("publc_category_name", "PUBLIC CHANNELS"), alive_role, alt_role, dead_role
             )
             pub_count = len(pub_channels)
             pub_title = "PUBLIC CHANNEL MAP"
@@ -629,7 +635,7 @@ class ChannelMap(commands.Cog):
 
         if map_type in ("private", "both"):
             priv_channels = await self._gather_channels(
-                ctx.guild, guild_data.get("privc_category_name", "PRIVATE CHANNELS"), alive_role, alt_role
+                ctx.guild, guild_data.get("privc_category_name", "PRIVATE CHANNELS"), alive_role, alt_role, dead_role
             )
             priv_count = len(priv_channels)
             priv_title = "PRIVATE CHANNEL MAP"
