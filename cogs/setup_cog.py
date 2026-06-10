@@ -207,7 +207,7 @@ class Setup(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
-                valid_channels = ['daydiscussion', 'megaphone', 'lynchsession1', 'lynchsession2', 'leaderelection', 'votecount', 'logchannel', 'actionslogchannel', 'announcements', 'map', 'whisperlogs', 'editdellogs', 'joinleavelogs']
+                valid_channels = ['daydiscussion', 'megaphone', 'lynchsession1', 'lynchsession2', 'leaderelection', 'votecount', 'logchannel', 'actionslogchannel', 'announcements', 'map', 'whisperlogs', 'editdellogs', 'joinleavelogs', 'narrationlog']
                 if new_channel is None:
                     new_channel = ctx.channel
                 new_channel_name = new_channel.name
@@ -238,10 +238,12 @@ class Setup(commands.Cog):
                         guild_data['edit_del_logs'] = new_channel_name
                     elif channel.lower() == 'joinleavelogs':
                         guild_data['join_and_leave_logs'] = new_channel_name
+                    elif channel.lower() == 'narrationlog':
+                        guild_data['narration_log_channel_name'] = new_channel_name
                     save_guild_data(ctx.guild.id, guild_data)
                     await ctx.send(f"{channel.capitalize()} channel set to {new_channel_name}")
                 else:
-                    await ctx.send('Invalid type of channel. Try using the following arguments:\n- Announcements\n- Map\n- DayDiscussion\n- Megaphone\n- LynchSession1\n- LynchSession2\n- LeaderElection\n- VoteCount\n- LogChannel\n- ActionsLogChannel\n- WhisperLogs\n- EditDelLogs\n- JoinLeaveLogs')
+                    await ctx.send('Invalid type of channel. Try using the following arguments:\n- Announcements\n- Map\n- DayDiscussion\n- Megaphone\n- LynchSession1\n- LynchSession2\n- LeaderElection\n- VoteCount\n- LogChannel\n- ActionsLogChannel\n- WhisperLogs\n- EditDelLogs\n- JoinLeaveLogs\n- NarrationLog')
             else:
                 await ctx.send("Guild data not loaded.")
         else:
