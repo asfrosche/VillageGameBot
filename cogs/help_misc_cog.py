@@ -208,17 +208,48 @@ class Other(commands.Cog):
             return
 
         random_users = random.sample(members_in_role, num_users_val)
-        user_names = [user.display_name for user in random_users]
-        user_tags = [user.mention for user in random_users]
-        if tag is None:
-            await ctx.send(f'Roll results:\n' + '\n'.join(user_names))
-        elif tag.lower() == 'tag':
-            if ctx.author.guild_permissions.administrator:
-                await ctx.send(f'Roll results:\n' + '\n'.join(user_tags))
-            else:
-                await ctx.send("You don't have enough perms to use this command")
-        else:
+
+        use_mention = tag and tag.lower() == 'tag'
+        if use_mention and not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        if tag and tag.lower() != 'tag':
             await ctx.send(f'{tag} is not a valid argument')
+            return
+
+        if use_mention:
+            desc = "\n".join(f"`{i}.` {user.mention}" for i, user in enumerate(random_users, 1))
+            if len(desc) > 4000:
+                desc = desc[:3997] + "..."
+        else:
+            num_width = len(str(len(random_users))) + 1
+            entries = [f"{f'{i}.':>{num_width}} {user.display_name}" for i, user in enumerate(random_users, 1)]
+            col = 1
+            if len(entries) > 10:
+                col = 2
+            if len(entries) > 20:
+                col = 3
+            if len(entries) > 30:
+                col = 4
+
+            width = max(len(e) for e in entries) + 2
+            rows = []
+            for i in range(0, len(entries), col):
+                row = "".join(f"{e:<{width}}" for e in entries[i:i + col])
+                rows.append(row)
+
+            grid = "\n".join(rows)
+            if len(grid) > 4086:
+                grid = grid[:4083] + "..."
+            desc = "```\n" + grid + "\n```"
+
+        embed = discord.Embed(
+            title=f"🎲 {role.name}",
+            description=desc,
+            color=role.color if role.color.value else 0xff3fb9,
+        )
+        embed.set_footer(text=f"Rolled {num_users_val} / {len(members_in_role)} members")
+        await ctx.send(embed=embed)
 
     @commands.command()
     async def narrate(self, ctx, *, message: str):
@@ -697,174 +728,510 @@ class Other(commands.Cog):
 
     async def help_setup(self, ctx):
         embeds = discord.Embed(title="🏗️ - Setup commands", description="19 Commands", color=0xff3fb9)
-        embeds.add_field(name=" ", value="**setup {Number Of Players}** • Setup Roles, Channels and Categories\n**roleset {Role To Set} {@Role}** • Set Roles in order to make the bot work\n**channelset {Channel To Set} {#Channel}** • Set Channels in order to make the bot work\n**categoryset {Category To Set} {Category Name}** • Set Categories in order to make the bot work\n**houseprefix {Prefix}** • Set Houses Prefix in order to make the bot work\n**knockduration {Time In Seconds}** • Set the duration of the knock", inline=False)
-        embeds.add_field(name="🏗️ - Setup commands (Continue1)", value="**showwhispersender True/False** • Show/Hide whisper sender\n**ajifempty True/False** • AutoJoin on knock if the House is empty\n**ajknockexpire True/False** • AutoJoin when knock expires\n**maxpinh {Number}** • Max Players inside a house (high number for no limits)\n**refuseresponse 1/2/3** • Response when knock gets refused, 1=Reveal all players inside the house, 2=Reveal number of players inside the house, 3=No info\n**settings** • See current settings\n**resetdb** • Reset all Setup settings", inline=False)
-        embeds.add_field(name="🏗️ - Setup commands (Continue2)", value="**deadcount True/False** • Deads count inside the house for AutoJoin and MaxPlayers conditions\n**altcount True/False** • Alts count inside the house for AutoJoin and MaxPlayers conditions\n**showdeadsonrefuse True/False** • Show deads between players/the number of players inside the house on knock refuse\n**showaltsonrefuse True/False** • Show alts between players/the number of players on knock refuse\n**candeadsinteract True/False** • Can deads open/refuse a knock\n**canaltsinteract True/False** • Can alts open/refuse a knock.")
-        embeds.add_field(name="🏗️ - Setup commands (Continue3)", value="If you want the bot to auto manage Fireworks, Whispers and Moving in, set the following replies when items get used on UnbelievaBot with the command !edititem reply (item) (reply)\nFireworks reply = fireworks\nWhisper reply = whisper\nMove in reply = move in", inline=False)
+        embeds.add_field(name="Core Setup", value=(
+            "**`.setup <num>`** ─ Setup roles, channels & categories\n"
+            "**`.roleset <key> @role`** ─ Assign a role for the bot\n"
+            "**`.channelset <key> #ch`** ─ Assign a channel for the bot\n"
+            "**`.categoryset <key> <name>`** ─ Assign a category\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.houseprefix <pfx>`** ─ Set house name prefix\n"
+            "**`.knockduration <sec>`** ─ Set knock timeout duration\n"
+            "**`.maxpinh <num>`** ─ Max players per house\n"
+            "**`.refuseresponse 1/2/3`** ─ Knock refuse behavior\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.settings`** ─ View current settings\n"
+            "**`.resetdb`** ─ Reset all setup"
+        ), inline=False)
+        embeds.add_field(name="Toggles & Flags", value=(
+            "**`.showwhispersender`** ─ Show/hide whisper sender\n"
+            "**`.ajifempty`** ─ Auto-join if house is empty\n"
+            "**`.ajknockexpire`** ─ Auto-join when knock expires\n"
+            "**`.deadcount`** ─ Deads count for AJ/MaxPlayers\n"
+            "**`.altcount`** ─ Alts count for AJ/MaxPlayers\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.showdeadsonrefuse`** ─ Show deads on knock refuse\n"
+            "**`.showaltsonrefuse`** ─ Show alts on knock refuse\n"
+            "**`.candeadsinteract`** ─ Deads can open/refuse\n"
+            "**`.canaltsinteract`** ─ Alts can open/refuse\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "Set UnbelievaBot replies with `!edititem reply`:\n"
+            "Fireworks → `fireworks` / Whisper → `whisper` / Move in → `move in`"
+        ), inline=False)
         embeds.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embeds, self.help_setup)
 
     async def help_moving(self, ctx):
-        embedm = discord.Embed(title="👟 - Moving commands", description='All commands can be executed in Stealth by adding "stealth" after the command. There wont be Joining and Leaving narrations. Additionally add, pcadd, move, renmove commands can be executed so that they give Read Only permisions by adding "read" after the command', color=0xff3fb9)
-        embedm.add_field(name=" ", value="**move {House Number}** • Use it in RoleChats, move the player in the specified house removing them from any other house they're currently in\n**renmove {#HouseName}** • 'move' command but for renamed houses\n**knock {House Number}** • Use it in RoleChats, it will knock inside the specified house and gives 3 options to users inside the house:\n- If they type 'open' replying to the knock message, the knocking player will join the house leaving any other house they're currently in\n- If they type 'refuse' replying to the knock message, the knocking player will receive the name of all players and alts inside the house\n- If noone opens the door before the knock expires, it will be cancelled and a message notifying OverSeers will be sent inside the knocking player's RoleChat\n**renknock {#HouseName}** • 'knock' command for renamed houses", inline=False)
-        embedm.add_field(name="👟 - Moving commands (Continue)", value="**add {House Number}** • Use it in RoleChats, add the player to the house you specify\n**remove {House Number}** • Use it in RoleChats, remove the player from the house you specify\n**pcadd {#PCName}** • 'add' command but for renamed houses or private channels\n**pcremove {#PCName}** • 'remove' command but for renamed houses or private channels\n**addhere #RoleChat** • Add the player of the specified Rolechat inside the channel you send the command to", inline=False)
+        embedm = discord.Embed(title="👟 - Moving commands", description='Add "stealth" after any command to suppress join/leave narrations. Add "read" after add/move/renmove/pcadd for read-only access.', color=0xff3fb9)
+        embedm.add_field(name="Move & Knock", value=(
+            "**`.move <#>`** ─ Move player to house (leaves current)\n"
+            "**`.renmove #House`** ─ Move to renamed house\n"
+            "**`.add <#>`** ─ Add player to house (keeps current)\n"
+            "**`.remove <#>`** ─ Remove player from house\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.knock <#>`** ─ Knock on a house door\n"
+            "  *Open* ─ Knocker joins (leaves current)\n"
+            "  *Refuse* ─ Knocker sees occupants\n"
+            "  *Expires* ─ OS notified in RC\n"
+            "**`.renknock #House`** ─ Knock on renamed house"
+        ), inline=False)
+        embedm.add_field(name="PC & Misc", value=(
+            "**`.pcadd #PC`** ─ Add player to PC/renamed house\n"
+            "**`.pcremove #PC`** ─ Remove from PC/renamed house\n"
+            "**`.addhere #RC`** ─ Add RC's player to this channel"
+        ), inline=False)
         embedm.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedm, self.help_moving)
 
     async def help_home(self, ctx):
         embedh = discord.Embed(title="🏡 - Home commands", description="12 commands", color=0xff3fb9)
-        embedh.add_field(name=" ", value="**home** • Bring the player home\n**home initialize** • Assign a random RoleChat and House to all players(only alive)\n**home setup** • Once all Sponsors are in RoleChat with their player (Alive) and all players have a home, use this command to put all Sponsors in the same House where their player is and set that house as their home\n**home set {@Player} {#HomeName}** • Set a player home\n**home mset** • Automatically set every player current location as their home\n**home list** • Get a list of players homes\n**home delete {@Player}** • Make a Player homeless\n**home return** • Bring all Players home\n**rolechat initialize** • Same as home initialize but doesn't assign houses, only RoleChats\n**rolechat check** • Get a list of all current rolechats and their player\n**owner** • Get a house owners' list", inline=False)
+        embedh.add_field(name="Player Commands", value=(
+            "**`.home`** ─ Bring the player home\n"
+            "**`.home return`** ─ Bring all players home\n"
+            "**`.owner`** ─ List house owners"
+        ), inline=False)
+        embedh.add_field(name="Admin Commands", value=(
+            "**`.home initialize`** ─ Assign RC + house to alive players\n"
+            "**`.home setup`** ─ Move sponsors to their player's house\n"
+            "**`.home set @player #house`** ─ Set a player's home\n"
+            "**`.home mset`** ─ Auto-set all current locations as home\n"
+            "**`.home list`** ─ List all players' homes\n"
+            "**`.home delete @player`** ─ Make a player homeless\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.rolechat initialize`** ─ Assign RCs only (no houses)\n"
+            "**`.rolechat check`** ─ List all RCs and their players"
+        ), inline=False)
         embedh.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedh, self.help_home)
 
     async def help_handling(self, ctx):
         embedhan = discord.Embed(title="🔓 - Houses and PCs handling", description="16 commands", color=0xff3fb9)
-        embedhan.add_field(name="Houses", value="**destroy {#HouseName}** • Move the House in inaccessible houses category, remove everyone from the house, send narration in announcements with explosion gif and narration in map channel\n**fdestroy {#HouseName}** • Force destroy a house, instantly removing all members and moving to inaccessible\n**decay {#HouseName}** • Move the House in inaccessible houses category and send narration in map\n**rebuild {#HouseName}** • Rebuild the House sending narration in announcements and map\n**decayinactive** • List and decay all houses with no activity in 24h (admin only)\n**setowner {#PC} {#RC}** • Can also send it in RC. Set a Player the onwer of a PC (read next command)\n**end {#PC}** • Make everybody leave the channel except the setted owner", inline=False)
-        embedhan.add_field(name="PCs & Maps", value="**newpc {Public/Private} {Name} {#RoleChannel}** • Generate a Chat in Public/Private Channels category. Players of the specified RoleChats will be added in there\n**close {#PCName}** • Move the Chat in Old PCS category, remove everyone from the chat\n**public {#Channel}** • Make the Channel public\n**private {#Channel}** • Make the Channel private\n**channels** • Generate a visual map of all Public and Private Channels\n**publicmap** • Generate a visual map of only Public Channels\n**privatemap** • Generate a visual map of only Private Channels\n**estatehelp** • Displays help for all Estate and Neighborhood map functions\n**estate {init} {#channel}** • Initialize the dynamic estate map in a channel, or force an update", inline=False)
+        embedhan.add_field(name="Houses", value=(
+            "**`.destroy #house`** ─ Move to inaccessible, remove members, announce\n"
+            "**`.fdestroy #house`** ─ Force destroy instantly\n"
+            "**`.decay #house`** ─ Move to inaccessible, narrate in map\n"
+            "**`.rebuild #house`** ─ Rebuild a destroyed house\n"
+            "**`.decayinactive`** ─ List/decay houses with 24h inactivity\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.setowner #PC #RC`** ─ Set a player as PC owner\n"
+            "**`.end #PC`** ─ Remove all but the owner from a PC"
+        ), inline=False)
+        embedhan.add_field(name="PCs & Maps", value=(
+            "**`.newpc Public/Private <name> #RC`** ─ Create a PC\n"
+            "**`.close #PC`** ─ Move PC to Old PCs, remove members\n"
+            "**`.public #ch`** ─ Make channel public\n"
+            "**`.private #ch`** ─ Make channel private\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.channels`** ─ Visual map of all PCs\n"
+            "**`.publicmap`** ─ Map of public channels only\n"
+            "**`.privatemap`** ─ Map of private channels only\n"
+            "**`.estatehelp`** ─ Estate map functions help\n"
+            "**`.estate init #ch`** ─ Init/update estate map"
+        ), inline=False)
         embedhan.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedhan, self.help_handling)
 
     async def help_infos(self, ctx):
         embedinf = discord.Embed(title="📜 - Infos", description="4 commands", color=0xff3fb9)
-        embedinf.add_field(name=" ", value="**info {#Channel}** • Show the Channel infos\n**info add {#Channel} {info}** • Add an info to a Channel\n**info remove {#Channel} {info number}** • Remove an info from a Channel\n**info reset** • Reset all infos", inline=False)
-        embedinf.set_footer(text="Village Game • All listed commands need the prefix . to work")
+        embedinf.add_field(name="Commands", value=(
+            "**`.info #ch`** ─ Show channel info\n"
+            "**`.info add #ch <text>`** ─ Add info to a channel\n"
+            "**`.info remove #ch <n>`** ─ Remove info by number\n"
+            "**`.info reset`** ─ Reset all infos"
+        ), inline=False)
+        embedinf.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedinf, self.help_infos)
 
     async def help_presets(self, ctx):
         embedpres = discord.Embed(title="🎟️ - Presets", description="3 commands", color=0xff3fb9)
-        embedpres.add_field(name=" ", value="**preset** • For players and their Sponsors, it gives a menu with buttons to add, remove or edit a preset\n**ospreset** • For Administrators (OS), it gives a menu with buttons to edit the presets order so during the start of the phase you can read the presets in chronological order, remove a preset or reset all presets\n**prioritylist** • Shows the priority list for day/night phases", inline=False)
+        embedpres.add_field(name="Player Commands", value=(
+            "**`.preset`** ─ Add/remove/edit presets with optional ability category\n"
+            "  Categories: Lethal, Curing, Manipulation (Control, Redirect), Manipulation (Other), Blocking, Transportation and Comms, Information, Other"
+        ), inline=False)
+        embedpres.add_field(name="Admin Commands", value=(
+            "**`.ospreset`** ─ View/reorder/remove all presets\n"
+            "**`.ospresetsort`** ─ Reorder preset display categories"
+        ), inline=False)
         embedpres.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedpres, self.help_presets)
 
     async def help_voting(self, ctx):
         embedv = discord.Embed(title="🗳️ - Voting commands", description="8 commands", color=0xff3fb9)
-        embedv.add_field(name=" ", value="**vote {@Player}** • Vote or change your vote\n**abstain** • Abstain from the votation\n**manipulate {@Player to manipulate} {@Player to vote}** • Manipulate a Player into voting another Player\n**removevote {@Player}** • Remove a Player vote\n**votelist** • Show all the votes\n**resetvotes** • Reset all votes\n**votehistory/vh [mode]** • Reply to a start message to scan votes. `mode`: `grouped` (group by target) / `range` (prompts for end message)", inline=False)
-        embedv.add_field(name="🗳️ - Voting commands (Continue)", value="**voteinrc true/false** • Set voting in RoleChats on true or false\nEnabling this option, players will be able to vote only in their RoleChats. Don't delete voting channels, players need them to specify what type of vote they are casting by putting the channel mention (ex. #lynch-session-1) at the end of the vote command (#lynch-session-1 is on default if no channel is specified). Same thing applies for every other command. If you don't want vote count to be displayed, delete the voe count channel. You will be able to check votes with .votelist and if you also don't want players to be able to use .votelist command, contact Bidet, he will enable the command only of OS.")
+        embedv.add_field(name="Voting", value=(
+            "**`.vote @player`** ─ Vote or change your vote\n"
+            "**`.abstain`** ─ Abstain from voting\n"
+            "**`.manipulate @target @vote`** ─ Manipulate a player's vote\n"
+            "**`.removevote @player`** ─ Remove a player's vote\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.votelist`** ─ Show all current votes\n"
+            "**`.resetvotes`** ─ Reset all votes\n"
+            "**`.votehistory/vh [mode]`** ─ Scan vote history\n"
+            "  ─ `grouped` ─ Group by target\n"
+            "  ─ `range` ─ Prompts for end message"
+        ), inline=False)
+        embedv.add_field(name="Voting in RCs", value=(
+            "**`.voteinrc true/false`** ─ Enable voting in RoleChats\n\n"
+            "When enabled, players vote in their RC. Append the session channel "
+            "(e.g. `#lynch-session-1`) to specify vote type; defaults to "
+            "#lynch-session-1 if omitted."
+        ), inline=False)
         embedv.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedv, self.help_voting)
 
     async def help_nominations(self, ctx):
         embedn = discord.Embed(title="👉 - Nominations commands", description="10 commands", color=0xff3fb9)
-        embedn.add_field(name="How to setup:", value="Create a new category (for Nominations) and name it as you wish.\nUse the command\n.categoryset Nominations {name of the category you created}\nThat's all! Your server is ready to use nominations!")
-        embedn.add_field(name="List of commands:", value="**accuse {@AccusedMention} {#AccuserRC}** • Can be used in RoleChats, Players can use it too. It will remove 2 tokens from the tokens bal and create a TextChannel for the nomination\n**intervene {#NominationChannel}** • Pay one token to send a message inside a #NominationChannel\n**voten {#NominationChannel} yes/no** • Vote guilty (yes) or not guilty (no) for an ongoing Nomination\n**tokens** • Get your tokens bal\n**addtokens {everyone/@Player} {Quantity}** • Add tokens to someone balance\n**removetokens {everyone/@Player} {Quantity}** • Remove tokens from someone balance\n**showvotesn {#NominationChannel}** • Get the list of votes for the specified Nomination\n**stopvotes {#NominationChannel}** • Stop a nomination. Accuser and Accused will also not be able to talk anymore inside the NominationChannel\n**resumevotes {NominationChannel}** • Resume a nomination\n**clearvotes** • Clear all nomination votes", inline=False)
+        embedn.add_field(name="Setup", value=(
+            "Create a nominations category, then:\n"
+            "**`.categoryset Nominations <name>`** ─ Register the category"
+        ), inline=False)
+        embedn.add_field(name="Player Commands", value=(
+            "**`.accuse @player #RC`** ─ Accuse (costs 2 tokens, creates channel)\n"
+            "**`.intervene #nom-ch`** ─ Pay 1 token to speak in nomination\n"
+            "**`.voten #nom-ch yes/no`** ─ Vote guilty or not guilty\n"
+            "**`.tokens`** ─ Check your token balance"
+        ), inline=False)
+        embedn.add_field(name="Admin Commands", value=(
+            "**`.addtokens @user <qty>`** ─ Add tokens\n"
+            "**`.removetokens @user <qty>`** ─ Remove tokens\n"
+            "**`.showvotesn #nom-ch`** ─ View nomination votes\n"
+            "**`.stopvotes #nom-ch`** ─ Stop nomination (locks channel)\n"
+            "**`.resumevotes #nom-ch`** ─ Resume nomination\n"
+            "**`.clearvotes`** ─ Clear all nomination votes"
+        ), inline=False)
         embedn.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedn, self.help_nominations)
 
     async def help_lists(self, ctx):
         embedu = discord.Embed(title="📄 - Lists", description="9 commands", color=0xff3fb9)
-        embedu.add_field(name=" ", value="**playerlist** • Get a list of Alive members\n**sponsorlist** • Get a list of Sponsor members\n**houselist** • Get a list of visitable houses\n**setuphouselist** • Setup the houselist with the current existing houses\n**houselistadd {#House}** • Add #House to the houselist\n**houselistremove {#House}** • Remove #House from the houselist\n**deadlist** • Get a list of dead Players and their roles\n**deadlist add {Player} {Team} {Role Name}** • Add Player to the deadlist with the specified team and role\n**deadlist remove {Player}** • Remove Player from the deadlist", inline=False)
+        embedu.add_field(name="Player Lists", value=(
+            "**`.playerlist`** ─ List alive members\n"
+            "**`.sponsorlist`** ─ List sponsor members\n"
+            "**`.houselist`** ─ List visitable houses\n"
+            "**`.deadlist`** ─ List dead players and their roles"
+        ), inline=False)
+        embedu.add_field(name="Admin Commands", value=(
+            "**`.setuphouselist`** ─ Init houselist from existing houses\n"
+            "**`.houselistadd #house`** ─ Add a house to the list\n"
+            "**`.houselistremove #house`** ─ Remove a house from list\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.deadlist add @player <team> <role>`** ─ Add to deadlist\n"
+            "**`.deadlist remove @player`** ─ Remove from deadlist"
+        ), inline=False)
         embedu.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedu, self.help_lists)
 
     async def help_sendrole(self, ctx):
         embedsendrole = discord.Embed(title="↪ - Send Role", description="3 commands", color=0xff3fb9)
-        embedsendrole.add_field(name=" ", value="**settarget <target_channel_id>** • Set the channel where you want the role to be sent to by sending its ID (not its mention).\n**sendrole/sr <Player/s>** • Reply to a message, the bot will send it inside the setted channel with the previous command. If <Player/s> is specified, the bot will send the text 'Played by <Player/s>' at the end of the role message.", inline=False)
-        embedsendrole.add_field(name="🎲 - Team Roll", value="**teamroll <n1> \"msg1\" <n2> \"msg2\" ...** • Admin only. Randomly assigns one of the quoted messages to each of `n` role channels (total must match existing channels in the RC category; missing channels are auto-created up to 50). Example: `.teamroll 3 \"Evil team\" 3 \"Village team\"`", inline=False)
+        embedsendrole.add_field(name="Send Role", value=(
+            "**`.settarget <channel_id>`** ─ Set target channel (ID, not mention)\n"
+            "**`.sendrole/sr <players>`** ─ Reply to a msg, sends role to target\n"
+            "  Optionally append player names: `Played by <players>`"
+        ), inline=False)
+        embedsendrole.add_field(name="Team Roll", value=(
+            "**`.teamroll <n1> \"msg1\" <n2> \"msg2\" ...`** ─ (Admin)\n"
+            "Randomly assigns quoted roles to `n` RC channels. "
+            "Missing channels auto-created (max 50).\n"
+            "Example: `.teamroll 3 \"Evil team\" 3 \"Village team\"`"
+        ), inline=False)
         embedsendrole.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedsendrole, self.help_sendrole)
 
     async def help_utility(self, ctx):
         embedu = discord.Embed(title="⚙️ - Utility", description="21 commands", color=0xff3fb9)
-        embedu.add_field(name=" ", value="**day** • Unlock all Day Channels\n**night** • Lock all Day Channels\n**broom** • Delete replied-to messages (except pinned), log to log channel and RCs\n**log** • Log message range. Use count/source/send-to options\n**housecheck [hours]** • List house channels with no messages in the last N hours (default 24). Shows time since last message.\n**whisper {#Receiver RC Mention} {Message}** • Send a whisper\n**dead** • Player leaves current channels, RC moves to Dead category\n**deadrole** • Mark player dead, remove house access, pin corpse in chosen house, prompt for deadlist details\n**addrole {@Role} {@User1/everyone} {@User2}...** • Give all mentioned members the specified Role\n**switch** • Switch between Player and Sponsor roles\n**deadc** • Move a RoleChat to dead category and remove house access (admin only)\n**removerole {role} {member}** • Remove a role from a member (admin only)\n**skipnight {min_votes}** • Start a vote to skip the night phase (OS/admin only)", inline=False)
-        embedu.add_field(name="⚙️ - Utility commands (Continue)", value="**addcategoryperms {@Role} {CategoryName} {Permission}** • Add the specified perms to all channels in the specified category for the specified role.\n**addchannelperms {@Role} {#TextChannel} {Permission}** • Add the specified perms to the specified channel for the specified role.\n**R =** Read Messages\n**S =** Read and Send Messages\n**endgame** • Use it when the game ends. The bot will unlock all channls except OS channels for everyone to read and send messages inside them\n**statss** • Show message counts for the day discussion channel grouped by role priority\n**setmessagetracking {true/false}** • Enable or disable message tracking (admin only)\n**start_tracking** • Start message tracking (admin only)\n**stop_tracking** • Stop/pause message tracking (admin only)\n**reset_tracking** • Reset message counts for this server (admin only)")
+        embedu.add_field(name="General", value=(
+            "**`.day`** ─ Unlock all day channels\n"
+            "**`.night`** ─ Lock all day channels\n"
+            "**`.broom`** ─ Delete replied-to messages (logs kept)\n"
+            "**`.log`** ─ Log message range (count/source/send)\n"
+            "**`.housecheck [hours]`** ─ List quiet houses\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.whisper #RC <msg>`** ─ Send anonymous whisper\n"
+            "**`.switch`** ─ Toggle Player/Sponsor role"
+        ), inline=False)
+        embedu.add_field(name="Player Status", value=(
+            "**`.dead`** ─ Move RC to Dead category\n"
+            "**`.deadrole`** ─ Mark dead, remove house, pin corpse\n"
+            "**`.deadc`** ─ Move RC to Dead (admin)"
+        ), inline=False)
+        embedu.add_field(name="Admin — Roles & Perms", value=(
+            "**`.addrole @role @users...`** ─ Give role to members\n"
+            "**`.removerole <role> <member>`** ─ Remove role (admin)\n"
+            "**`.skipnight <min_votes>`** ─ Start skip-night vote\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.addcategoryperms @role <cat> <perm>`** ─ R=Read, S=Send\n"
+            "**`.addchannelperms @role #ch <perm>`** ─ R=Read, S=Send"
+        ), inline=False)
+        embedu.add_field(name="Admin — Game & Tracking", value=(
+            "**`.endgame`** ─ Unlock all channels post-game\n"
+            "**`.statss`** ─ Message counts by role priority\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.setmessagetracking`** ─ Enable/disable tracking\n"
+            "**`.start_tracking`** ─ Start message tracking\n"
+            "**`.stop_tracking`** ─ Stop/pause tracking\n"
+            "**`.reset_tracking`** ─ Reset message counts"
+        ), inline=False)
         embedu.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
         embedo = discord.Embed(title="👽 - Other", description="22 commands", color=0xff3fb9)
-        embedo.add_field(name=" ", value="**help** • Get a list of all aviable commands\n**who {#Channel}** • Get a list of players inside the channel\n**where #RoleChat** • Get a list of where the player is\n**map** • Get the map pic (It has to be the first pinned message in map channel)\n**role/firstpinned** • Make your role the first pinned message in your RC to have easy access to it through this command\n**roll {@Role} {Number}** • Get a list of random players with the specified Role\n**narrate {#Channels} {Message}** • Send the narration in specified Channels, if None specified it will be sent in all RoleChats. Watch out, the narration will be sent into any Channel mention inside the command\n**narration/n {<text>}** • Send a storybook-style narration embed with role ping (admin only)\n**anarration/na {<text>}** • Same but without pinging roles (admin only)\n**deletechannel** • Delete the text channel\n**deletecategory** • Delete the category\n**timestamp {YYYY-MM-DD HH:MM:SS}** • Generate a timestamp\n**time** • Reply to a message, get the exact time it was sent\n**ping** • Check if the bot is online\n**ding** • Dong!", inline=False)
-        embedo.add_field(name="👽 - Other commands (Continue)", value=            "**dice {N}** • Roll 1–N\n**dice {option1} {option2} ...** • Pick one randomly\n**loc** • Get a list of all houses and current players inside of them\n**gettag {Message Link}** • Can also be used replying to a message, it sends the list of mentioned users inside the specified message\n**timer {time} <tag> {#channel}** • Set a timer in hhmmss format (1h2m10s). Type 'tag' if you want it to mention you when the time is up.\n**dropitem** • Drop an interactive item with count and expiration. Use: `.dropitem #house #logs \"Name\" \"Desc\" <count> <showpickups t/f> [duration]`\n**narrationcolor** • Pick the narration embed color from presets (admin only)\n**revive** • Revive dead players with interactive dropdowns (admin only)", inline=False)
+        embedo.add_field(name="General", value=(
+            "**`.help`** ─ Show this menu\n"
+            "**`.who #ch`** ─ List players in a channel\n"
+            "**`.where #RC`** ─ Show a player's current location\n"
+            "**`.map`** ─ Show the game map\n"
+            "**`.role`/`.firstpinned`** ─ Show first pinned in RC\n"
+            "**`.roll @role <n>`** ─ Random players from a role\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.ping`** ─ Bot online check\n"
+            "**`.ding`** ─ Dong!"
+        ), inline=False)
+        embedo.add_field(name="Narration", value=(
+            "**`.narrate #ch <msg>`** ─ Send narration to channels\n"
+            "**`.narration`/`.n <text>`** ─ Storybook embed (admin, pings)\n"
+            "**`.anarration`/`.na <text>`** ─ Silent narration (admin)\n"
+            "**`.narrationcolor`** ─ Pick embed color (admin)"
+        ), inline=False)
+        embedo.add_field(name="Fun & Utilities", value=(
+            "**`.dice <n>`** ─ Roll 1–N\n"
+            "**`.dice <opt1> <opt2> ...`** ─ Random pick\n"
+            "**`.loc`** ─ Show all houses and occupants\n"
+            "**`.gettag <link>`** ─ Get mentioned users from a message\n"
+            "**`.timer <time> [tag] [#ch]`** ─ Set a timer (1h2m10s)\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.deletechannel`** ─ Delete this channel (admin)\n"
+            "**`.deletecategory`** ─ Delete this category (admin)\n"
+            "**`.timestamp <DD-MM-YYYY> <HH:MM:SS>`** ─ Gen timestamp\n"
+            "**`.time`** ─ Get sent time of replied-to message\n"
+            "**`.dropitem`** ─ Drop interactive item (see docs)\n"
+            "**`.revive`** ─ Revive dead players (admin)"
+        ), inline=False)
         embedo.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedo, self.help_other)
 
     async def help_meetupmatrix(self, ctx):
         embedm = discord.Embed(title="📊 - Meetings & Meetup Matrix", description="21 commands", color=0xff3fb9)
-        embedm.add_field(name="📊 - Meetup Matrix", value="**setupmeetupmatrix** • Admin only. Toggle automated meetup tracking for this server. Requires confirmation.\n**setphase {day/night}** • Admin only. Manually trigger a phase change and bootstrap meetups.\n**forcemeet {@Player1} {@Player2}** • Admin only. Force a meetup recording between two players.\n**allmeets {@Player}** • Show all players the specified member has met during the current phase. Grouped by role.\n**meetupmatrix** • Show the full meetup matrix for the current phase, listing everyone who has met.", inline=False)
-        embedm.add_field(name="🤝 - Meeting Commands (1/2)", value="**meeting** • Request a meeting with other players (max 5)\n**endmeeting** • End your active meeting\n**meetingenable** • Enable or disable the meeting system (admin only)\n**setmeetingchannel {#channel}** • Set channel for `.meeting` requests (admin only)\n**setmeetingtargetguild {guild_id}** • Set server where meeting channels are created (admin only)\n**setmeetingcategory {category}** • Set category for new meeting channels (admin only)\n**meetingconfig** • Show current meeting configuration (admin only)\n**blockmeeting {@user}** • Block a user from using meeting commands (admin only)", inline=False)
-        embedm.add_field(name="🤝 - Meeting Commands (2/2)", value="**unblockmeeting {@user}** • Unblock a user from using meeting commands (admin only)\n**removecooldown {@user}** • Remove meeting cooldown from a user (admin only)\n**checkcooldown {@user}** • Check meeting cooldown for yourself or another user\n**forcemeeting {@user1} {@user2} ...** • Create a forced meeting without voting (admin only)\n**listblocked** • Show the list of blocked users (admin only)\n**listcooldowns** • Show all users currently on meeting cooldown (admin only)\n**cancelmeeting** • Cancel a pending meeting (admin only)\n**meetingstats** • Show meeting statistics (admin only)", inline=False)
+        embedm.add_field(name="Meetup Matrix", value=(
+            "**`.setupmeetupmatrix`** ─ Toggle automated meetup tracking\n"
+            "**`.setphase day/night`** ─ Trigger phase change (admin)\n"
+            "**`.forcemeet @p1 @p2`** ─ Force a meetup record (admin)\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.allmeets @player`** ─ Show who they've met this phase\n"
+            "**`.meetupmatrix`** ─ Show full meetup matrix"
+        ), inline=False)
+        embedm.add_field(name="Meeting — Player", value=(
+            "**`.meeting`** ─ Request a meeting (max 5 players)\n"
+            "**`.endmeeting`** ─ End your active meeting\n"
+            "**`.checkcooldown [@user]`** ─ Check meeting cooldown"
+        ), inline=False)
+        embedm.add_field(name="Meeting — Admin", value=(
+            "**`.meetingenable`** ─ Enable/disable the meeting system\n"
+            "**`.setmeetingchannel #ch`** ─ Set request channel\n"
+            "**`.setmeetingtargetguild <id>`** ─ Set meeting server\n"
+            "**`.setmeetingcategory <cat>`** ─ Set meeting category\n"
+            "**`.meetingconfig`** ─ Show current config\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.blockmeeting @user`** ─ Block user from meetings\n"
+            "**`.unblockmeeting @user`** ─ Unblock user\n"
+            "**`.removecooldown @user`** ─ Remove cooldown\n"
+            "**`.forcemeeting @u1 @u2 ...`** ─ Create forced meeting\n"
+            "**`.listblocked`** ─ List blocked users\n"
+            "**`.listcooldowns`** ─ List users on cooldown\n"
+            "**`.cancelmeeting`** ─ Cancel pending meeting\n"
+            "**`.meetingstats`** ─ Show meeting statistics"
+        ), inline=False)
         embedm.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedm, self.help_meetupmatrix)
 
     async def help_economy(self, ctx):
         embede = discord.Embed(title="💰 - Economy commands", description="18 commands", color=0xff3fb9)
         embede.add_field(name="Player Commands", value=(
-            "**`.bal` / `.balance`** • Show your rolechat's balance\n"
-            "**`.shop`** • View the server shop with interactive buy/edit buttons\n"
-            "**`.buy <item> [qty]`** • Buy an item from the shop (adds to rolechat inventory)\n"
-            "**`.sell-item` / `.sell` <item>** • Sell an item from your user inventory for 50% refund\n"
-            "**`.inv` / `.inventory` [#channel]** • View rolechat inventory\n"
-            "**`.give @user <amount>`** • Give coins from your rolechat to another player's rolechat (use in Houses)\n"
-            "**`.give-money @user <amount>`** • Transfer coins from your personal wallet to another user\n"
-            "**`.use <item>`** • Use an item from your user inventory (Fireworks, Whisper, Broom, Will)\n"
+            "**`.bal`/`.balance`** ─ Show RC balance\n"
+            "**`.shop`** ─ View shop with interactive buttons\n"
+            "**`.buy <item> [qty]`** ─ Buy from shop (to RC inventory)\n"
+            "**`.sell`/`.sell-item <item>`** ─ Sell for 50% refund\n"
+            "**`.inv`/`.inventory [#ch]`** ─ View RC inventory\n"
+            "**`.give @user <amt>`** ─ Give RC coins (in houses)\n"
+            "**`.give-money @user <amt>`** ─ Transfer from wallet\n"
+            "**`.use <item>`** ─ Use an item from inventory"
         ), inline=False)
         embede.add_field(name="Admin Commands", value=(
-            "**`.additem <price> <name>`** • Add a new item to the shop\n"
-            "**`.edititem <field> <name> <value>`** • Edit an item's price/name/description\n"
-            "**`.delitem <name>`** • Remove an item from the shop\n"
-            "**`.addmoney #channel <amount>`** • Add coins to a rolechat's balance\n"
-            "**`.removemoney #channel <amount>`** • Remove coins from a rolechat's balance\n"
-            "**`.add-money-role @role <amount>`** • Add coins to all members with a role (wallet)\n"
-            "**`.additemrole @role <item> <qty>, <item2> <qty2>`** • Give items to all members with a role\n"
-            "**`.reseteconomy [amount]`** • Reset all alive players' money to a set amount (default 0)\n"
-            "**`.clearinventory`** • Clear all alive players' inventories\n"
-            "**`.collect`** • Add the collect amount to every rolechat\n"
-            "**`.setcollect <value>`** • Set the amount added by `.collect` (max 10,000)\n"
-            "**`.leaderboard` / `.lb` / `.top` [top]** • Show richest rolechats by balance\n"
+            "**`.additem <price> <name>`** ─ Add new shop item\n"
+            "**`.removeitem`/`.rmitem #ch <item> [qty]`** ─ Remove from RC\n"
+            "**`.edititem <field> <name> <val>`** ─ Edit shop item\n"
+            "**`.delitem <name>`** ─ Delete item from shop\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.addmoney #ch <amt>`** ─ Add coins to RC\n"
+            "**`.removemoney #ch <amt>`** ─ Remove coins from RC\n"
+            "**`.add-money-role @role <amt>`** ─ Add wallet coins by role\n"
+            "**`.additemrole @role <item> <qty>`** ─ Give items by role\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.reseteconomy [amt]`** ─ Reset all balances\n"
+            "**`.clearinventory`** ─ Clear all inventories\n"
+            "**`.collect`** ─ Add collect amt to every RC\n"
+            "**`.setcollect <val>`** ─ Set collect amount (max 10k)\n"
+            "**`.leaderboard`/`.lb`/`.top [n]`** ─ Richiest RCs"
         ), inline=False)
         embede.add_field(name="Shop Items", value=(
-            "🎆 **Fireworks** — Reveal your position in announcements\n"
-            "👟 **Shoes** — Extra visit grant\n"
-            "✉ **Whisper** — Send an anonymous private message\n"
-            "🧹 **Broom** — Clear recent messages in a channel\n"
-            "📜 **Will** — Notify Overseers to pin your last will\n"
+            "🎆 **Fireworks** ─ Reveal your position in announcements\n"
+            "👟 **Shoes** ─ Extra visit grant\n"
+            "✉ **Whisper** ─ Send anonymous private message\n"
+            "🧹 **Broom** ─ Clear recent messages in a channel\n"
+            "📜 **Will** ─ Notify OS to pin your last will\n"
+            "🔭 **Peep Hole** ─ See who knocks on your target house"
         ), inline=False)
         embede.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embede, self.help_economy)
 
     async def help_location(self, ctx):
         embed = discord.Embed(title="📍 Location commands", description="18 commands", color=0xff3fb9)
-        embed.add_field(name="User Commands", value="**`.mysetloc <location>`** • Set your own location\n**`.myremoveloc`** • Remove your own location\n**`.localtime` / `.lt` [@user]** • View a user's local time\n**`.near [@user]** • Find the 5 closest members to you or another user\n**`.locations`** • Browse all locations by continent\n**`.locstats`** • Show location statistics\n**`.lochelp` / `.hloc`** • Show all location commands\n**`.whentime @user1 @user2 ...`** • See what time it is for multiple users", inline=False)
-        embed.add_field(name="Admin Commands", value="**`.setloc @user <location>`** • Set a user's location\n**`.remloc <@user/username>`** • Remove a user's location\n**`.setcontinent @user <continent>`** • Manually assign a continent\n**`.listunknown`** • List entries with Unknown continent\n**`.refreshtz`** • Refresh timezones for all saved users\n**`.forceremloc` / `.forceremoveloc <name/id>`** • Force remove a location entry\n**`.test_geocoder`** • Test geocoder connectivity", inline=False)
-        embed.add_field(name="Maps", value="**`.mapp`** • View the world map of registered users\n**`.mapheat`** • View the heatmap of registered users\n**`.locsnotset`** • Show members who haven't set their location", inline=False)
+        embed.add_field(name="User Commands", value=(
+            "**`.mysetloc <location>`** ─ Set your location\n"
+            "**`.myremoveloc`** ─ Remove your location\n"
+            "**`.localtime`/`.lt [@user]`** ─ View local time\n"
+            "**`.near [@user]`** ─ Find 5 closest members\n"
+            "**`.locations`** ─ Browse all locations by continent\n"
+            "**`.locstats`** ─ Location statistics\n"
+            "**`.lochelp`/`.hloc`** ─ Detailed location help\n"
+            "**`.whentime @u1 @u2 ...`** ─ See time for multiple users"
+        ), inline=False)
+        embed.add_field(name="Admin Commands", value=(
+            "**`.setloc @user <location>`** ─ Set a user's location\n"
+            "**`.remloc @user`** ─ Remove a user's location\n"
+            "**`.setcontinent @user <cont>`** ─ Assign continent\n"
+            "**`.listunknown`** ─ List users with unknown continent\n"
+            "**`.refreshtz`** ─ Refresh all timezones\n"
+            "**`.forceremloc`/`.forceremoveloc <name/id>`** ─ Force remove\n"
+            "**`.test_geocoder`** ─ Test geocoder connectivity"
+        ), inline=False)
+        embed.add_field(name="Maps", value=(
+            "**`.mapp`** ─ World map of registered users\n"
+            "**`.mapheat`** ─ Heatmap of registered users\n"
+            "**`.locsnotset`** ─ Members who haven't set location"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_location)
 
     async def help_dashboard(self, ctx):
         embed = discord.Embed(title="🎮 Dashboard & OS Info commands", description="17 commands", color=0xff3fb9)
-        embed.add_field(name="Dashboard", value="**`.dashboard`** • Open the role dashboard\n**`.dashboardtoggle`** • Enable/disable the dashboard\n**`.setrole @role`** • Set the role for the dashboard\n**`.addpassiveability <name> <desc>`** • Add a passive ability\n**`.removepassiveability <name>`** • Remove a passive ability\n**`.addactiveability <name> <desc> <uses>`** • Add an active ability\n**`.removeactiveability <name>`** • Remove an active ability\n**`.vb`** • View your vote balance\n**`.checkvb [@user]`** • Check vote balance for yourself or another\n**`.setvisits @user <amount>`** • Set a user's visit count\n**`.addvisits @user <amount>`** • Add visits to a user\n**`.removevisits @user <amount>`** • Remove visits from a user\n**`.actionlog [@user]`** • View action log for a user", inline=False)
-        embed.add_field(name="OS Info", value="**`.setboard`** • Set up the OS info board\n**`.setinfophase <phase>`** • Set the current phase info\n**`.addcard`** • Add an info card\n**`.refreshcards`** • Refresh all info cards", inline=False)
+        embed.add_field(name="Dashboard", value=(
+            "**`.dashboard`** ─ Open the role dashboard\n"
+            "**`.dashboardtoggle`** ─ Enable/disable dashboard\n"
+            "**`.setrole @role`** ─ Set dashboard role\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.addpassiveability <name> <desc>`** ─ Add passive ability\n"
+            "**`.removepassiveability <name>`** ─ Remove passive\n"
+            "**`.addactiveability <name> <desc> <uses>`** ─ Add active ability\n"
+            "**`.removeactiveability <name>`** ─ Remove active\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.vb`** ─ View your vote balance\n"
+            "**`.checkvb [@user]`** ─ Check vote balance\n"
+            "**`.setvisits @user <amt>`** ─ Set visit count\n"
+            "**`.addvisits @user <amt>`** ─ Add visits\n"
+            "**`.removevisits @user <amt>`** ─ Remove visits\n"
+            "**`.actionlog [@user]`** ─ View action log"
+        ), inline=False)
+        embed.add_field(name="OS Info", value=(
+            "**`.setboard`** ─ Set up the OS info board\n"
+            "**`.setinfophase <phase>`** ─ Set current phase info\n"
+            "**`.addcard`** ─ Add an info card\n"
+            "**`.refreshcards`** ─ Refresh all info cards"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_dashboard)
 
     async def help_gamemanager(self, ctx):
         embed = discord.Embed(title="🎲 Game Manager commands", description="4 commands", color=0xff3fb9)
-        embed.add_field(name="Commands", value="**`.startgame` / `.sg` <slots> @host [-role <name>] <name>** • Start a new game lobby\n**`.addplayer` / `.ap` <slot> @player [name]** • Add a player to an empty slot\n**`.removeplayer` / `.rp` <slot> [name]** • Remove a player from a slot\n**`.closegame` / `.cg` [name]** • Close and archive the current game", inline=False)
+        embed.add_field(name="Commands", value=(
+            "**`.startgame`/`.sg <slots> @host <name>`** ─ Start a lobby\n"
+            "**`.addplayer`/`.ap <slot> @player [name]`** ─ Fill a slot\n"
+            "**`.removeplayer`/`.rp <slot> [name]`** ─ Remove from slot\n"
+            "**`.closegame`/`.cg [name]`** ─ Close & archive game"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_gamemanager)
 
     async def help_library(self, ctx):
         embed = discord.Embed(title="📚 Library & Stats commands", description="19 commands", color=0xff3fb9)
-        embed.add_field(name="Stats", value="**`.stats` / `.stats @player`** • View player statistics\n**`.winrate`** • Show winrate stats by team\n**`.relations`** [@user] • Show allies and nemeses", inline=False)
-        embed.add_field(name="Library", value="**`.lib`** • Browse the game library\n**`.lib add`** • Add a new game to the library\n**`.lib summary`** • Show a summary of all games\n**`.lib edit <game#> <field> <value>`** • Edit a game's field\n**`.lib delete <game#>`** • Delete a game\n**`.lib deletegame <game#>`** • Delete a game\n**`.lib setwin <game#> <team>`** • Manually set the winning team\n**`.lib search <term>`** • Search games by name or player\n**`.lib idsearch <id>`** • Search game by ID\n**`.lib migrateaccount`** • Move stats to a new account\n**`.lib mergeaccount`** • Merge two accounts' stats\n**`.lib syncname`** • Sync display name for stats\n**`.lib bulksyncnames`** • Bulk sync all display names\n**`.lib help`** • Show library help\n**`.libit help`** • Show Italian library help\n**`.missingids`** • List games with missing player IDs", inline=False)
+        embed.add_field(name="Stats", value=(
+            "**`.stats [@player]`** ─ View player statistics\n"
+            "**`.winrate`** ─ Winrate stats by team\n"
+            "**`.relations [@user]`** ─ Allies and nemeses"
+        ), inline=False)
+        embed.add_field(name="Library — Browse & Manage", value=(
+            "**`.lib`** ─ Browse the game library\n"
+            "**`.lib add`** ─ Add a new game\n"
+            "**`.lib summary`** ─ Summary of all games\n"
+            "**`.lib edit <#> <field> <val>`** ─ Edit a game field\n"
+            "**`.lib delete <#>`** ─ Delete a game\n"
+            "**`.lib deletegame <#>`** ─ Delete a game\n"
+            "**`.lib setwin <#> <team>`** ─ Set winning team\n"
+            "**`.lib search <term>`** ─ Search by name or player\n"
+            "**`.lib idsearch <id>`** ─ Search by game ID"
+        ), inline=False)
+        embed.add_field(name="Library — Account & Help", value=(
+            "**`.lib migrateaccount`** ─ Move stats to new account\n"
+            "**`.lib mergeaccount`** ─ Merge two accounts' stats\n"
+            "**`.lib syncname`** ─ Sync display name\n"
+            "**`.lib bulksyncnames`** ─ Bulk sync all names\n"
+            "**`.lib help`** ─ Show library help\n"
+            "**`.libit help`** ─ Italian library help\n"
+            "**`.missingids`** ─ Games with missing player IDs"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_library)
 
     async def help_games(self, ctx):
         embed = discord.Embed(title="⚔️ Games (Aux Battle & Senet)", description="18 commands", color=0xff3fb9)
-        embed.add_field(name="🎯 Aux Battle", value="**`.auxbattle` / `.aux`** • Main aux battle command\n**`.help_aux`** • Show detailed aux battle help\n**`.auxbattle signup`** • Sign up for the battle\n**`.auxbattle opensignup`** • Open signups (admin)\n**`.auxbattle closesignup`** • Close signups (admin)\n**`.auxbattle bracket`** • View the bracket\n**`.auxbattle reset`** • Reset the tournament (admin)\n**`.auxbattle start`** • Start the tournament (admin)\n**`.auxbattle submit`** • Submit your battle entry", inline=False)
-        embed.add_field(name="🎲 Senet", value="**`.senet help`** • Show Senet help\n**`.senet challenge` / `.senet sfida @user`** • Challenge someone\n**`.senet accept` / `.senet accetta @user`** • Accept a challenge\n**`.senet roll` / `.senet lancia`** • Roll the dice\n**`.senet move` / `.senet muovi <piece>`** • Move a piece\n**`.senet skip` / `.senet passo`** • Skip your turn\n**`.senet status` / `.senet board`** • View the board\n**`.senet forfeit` / `.senet abbandona`** • Forfeit the game\n**`.senet rules` / `.senet regole`** • Show the rules", inline=False)
+        embed.add_field(name="🎯 Aux Battle", value=(
+            "**`.auxbattle`/`.aux`** ─ Main command\n"
+            "**`.help_aux`** ─ Detailed aux battle help\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.auxbattle signup`** ─ Sign up\n"
+            "**`.auxbattle opensignup`** ─ Open signups (admin)\n"
+            "**`.auxbattle closesignup`** ─ Close signups (admin)\n"
+            "**`.auxbattle bracket`** ─ View bracket\n"
+            "**`.auxbattle reset`** ─ Reset tournament (admin)\n"
+            "**`.auxbattle start`** ─ Start tournament (admin)\n"
+            "**`.auxbattle submit`** ─ Submit battle entry"
+        ), inline=False)
+        embed.add_field(name="🎲 Senet", value=(
+            "**`.senet help`** ─ Show rules\n"
+            "**`.senet challenge`/`sfida @user`** ─ Challenge someone\n"
+            "**`.senet accept`/`accetta @user`** ─ Accept a challenge\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.senet roll`/`lancia`** ─ Roll the dice\n"
+            "**`.senet move`/`muovi <piece>`** ─ Move a piece\n"
+            "**`.senet skip`/`passo`** ─ Skip your turn\n"
+            "**`.senet status`/`board`** ─ View the board\n"
+            "**`.senet forfeit`/`abbandona`** ─ Forfeit the game\n"
+            "**`.senet rules`/`regole`** ─ Show the rules"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_games)
 
     async def help_birthdays(self, ctx):
         embed = discord.Embed(title="🎂 Birthday commands", description="6 commands", color=0xff3fb9)
-        embed.add_field(name="Commands", value="**`.birthday <DD-MM>`** • Set your birthday\n**`.bdaystatus`** • Check your birthday status\n**`.testbday`** • Test birthday announcement (admin)\n**`.nextbirthdays`** • Show upcoming birthdays\n**`.birthdays`** • List all registered birthdays\n**`.helpbday`** • Show birthday help", inline=False)
+        embed.add_field(name="Player Commands", value=(
+            "**`.birthday <DD-MM>`** ─ Set your birthday\n"
+            "**`.bdaystatus`** ─ Check your birthday status\n"
+            "**`.nextbirthdays`** ─ Upcoming birthdays\n"
+            "**`.birthdays`** ─ List all registered birthdays\n"
+            "**`.helpbday`** ─ Birthday help"
+        ), inline=False)
+        embed.add_field(name="Admin Commands", value=(
+            "**`.testbday`** ─ Test birthday announcement"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_birthdays)
 
     async def help_calendar(self, ctx):
         embed = discord.Embed(title="📅 Calendar & Intro commands", description="4 commands", color=0xff3fb9)
-        embed.add_field(name="Commands", value="**`.calendar`** • Show the English Village Games calendar/schedule\n**`.calendario`** • Show the Italian Village Games calendar/schedule\n**`.vgintro` / `.vgi`** • Show the Village Games introduction\n**`.vgintro_it` / `.vgii`** • Show the Village Games introduction (Italian)", inline=False)
+        embed.add_field(name="Commands", value=(
+            "**`.calendar`** ─ English Village Games schedule\n"
+            "**`.calendario`** ─ Italian Village Games schedule\n"
+            "**`.vgintro`/`.vgi`** ─ Village Games intro (EN)\n"
+            "**`.vgintro_it`/`.vgii`** ─ Village Games intro (IT)"
+        ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_calendar)
 
