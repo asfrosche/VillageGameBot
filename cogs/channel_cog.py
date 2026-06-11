@@ -144,13 +144,12 @@ class ChannelMap(commands.Cog):
                 if member.bot:
                     continue
                 has_send = ch.permissions_for(member).send_messages
+                if not has_send:
+                    continue
                 has_alive = alive_role is not None and alive_role in member.roles
                 has_alt = alt_role is not None and alt_role in member.roles
                 has_dead = dead_role is not None and dead_role in member.roles
-                if has_alive or has_alt:
-                    if not has_send:
-                        continue
-                elif not has_dead:
+                if not (has_alive or has_alt or has_dead):
                     continue
                 if member.id in all_members:
                     continue
