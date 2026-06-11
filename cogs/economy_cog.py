@@ -289,17 +289,16 @@ class InventoryView(View):
                     if wi.user != interaction.user:
                         return await wi.response.send_message("Not your menu.", ephemeral=True)
 
-                    for child in view.children:
-                        child.disabled = True
-                    await wi.message.edit(view=view)
-
                     target_id = int(sel.values[0])
                     target = wi.guild.get_member(target_id)
                     if not target:
                         await wi.response.send_message("User not found.", ephemeral=True)
                         done.set()
                         return
-                    await wi.response.defer()
+
+                    for child in view.children:
+                        child.disabled = True
+                    await wi.response.edit_message(view=view)
 
                     prompt = await interaction.channel.send(
                         embed=plain_embed(title="✉ Whisper", description=f"Reply to this message with your whisper to {target.mention}."),
