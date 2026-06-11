@@ -170,8 +170,17 @@ class Other(commands.Cog):
         await channel.send(message)
 
     @commands.command()
-    async def roll(self, ctx, role: discord.Role, num_users: int = 1, tag: str = None):
+    async def roll(self, ctx, role_name: str, num_users: str = "1", tag: str = None):
         guild_data = load_guild_data(ctx.guild.id)
+
+        role = discord.utils.get(ctx.guild.roles, name=role_name)
+        if not role:
+            role = discord.utils.find(lambda r: r.name.lower() == role_name.lower(), ctx.guild.roles)
+        if not role:
+            role = discord.utils.find(lambda r: role_name.lower() in r.name.lower(), ctx.guild.roles)
+        if not role:
+            raise commands.BadArgument(f"Role '{role_name}' not found.")
+
         alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
         if role == alt_role and not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to roll for alts.")
@@ -179,14 +188,26 @@ class Other(commands.Cog):
         if role.id == ctx.guild.id and not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to roll for everyone.")
             return
-        if num_users <= 0:
+
+        members_in_role = [member for member in ctx.guild.members if role in member.roles]
+
+        if num_users.lower() == "all":
+            num_users_val = len(members_in_role)
+        else:
+            try:
+                num_users_val = int(num_users)
+            except ValueError:
+                await ctx.send("Insert a valid number or `all`.")
+                return
+
+        if num_users_val <= 0:
             await ctx.send('Insert a valid number')
             return
-        members_in_role = [member for member in ctx.guild.members if role in member.roles]
-        if len(members_in_role) < num_users:
+        if len(members_in_role) < num_users_val:
             await ctx.send(f"Not enough members with {role.mention} role", allowed_mentions=discord.AllowedMentions.none())
             return
-        random_users = random.sample(members_in_role, num_users)
+
+        random_users = random.sample(members_in_role, num_users_val)
         user_names = [user.display_name for user in random_users]
         user_tags = [user.mention for user in random_users]
         if tag is None:
@@ -198,13 +219,6 @@ class Other(commands.Cog):
                 await ctx.send("You don't have enough perms to use this command")
         else:
             await ctx.send(f'{tag} is not a valid argument')
-
-    @roll.error
-    async def roll_error(self, ctx, error):
-        if isinstance(error, commands.BadArgument):
-            await ctx.send("I think you want to use `.dice` instead.\nUsage: `.dice <number>` to roll 1-N, or `.dice <option1> <option2> ...` to pick randomly.")
-        else:
-            raise error
 
     @commands.command()
     async def narrate(self, ctx, *, message: str):

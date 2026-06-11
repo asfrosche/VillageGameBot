@@ -469,6 +469,10 @@ class Utility(commands.Cog):
     async def day(self, ctx):
         self.bot.dispatch("phase_change", "day") # added for meetupmatrix.py
         await self._manage_channels(ctx, True)
+        guild_data = load_guild_data(ctx.guild.id)
+        if guild_data and "peep_holes" in guild_data:
+            del guild_data["peep_holes"]
+            save_guild_data(ctx.guild.id, guild_data)
 
     @commands.command()
     async def night(self, ctx):

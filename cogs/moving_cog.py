@@ -608,6 +608,19 @@ class Moving(commands.Cog):
                 await messages.delete()
                 break
 
+        # ── Peep Hole reveal ─────────────────────────────────────────────────
+        peep_holes = guild_data.get("peep_holes") or {}
+        expiry = peep_holes.get(str(new_channel.id))
+        if expiry and datetime.now().timestamp() < expiry:
+            knocker_names = []
+            for m in members:
+                if alive_role in m.roles or sponsor_role in m.roles:
+                    if channel.permissions_for(m).send_messages:
+                        knocker_names.append(m.mention)
+            if knocker_names:
+                verb = "is" if len(knocker_names) == 1 else "are"
+                await new_channel.send(f"🔭 **Peep Hole** reveals: {' & '.join(knocker_names)} {verb} knocking!")
+
         # Wait for a button press or timeout
         await view.wait()
 

@@ -39,6 +39,7 @@ DEFAULT_SHOP_ITEMS = [
     {"name": "✉ Whisper", "description": "Send a private message to someone", "price": 200},
     {"name": "🧹 Broom", "description": "Clears messages in a house channel", "price": 300},
     {"name": "📜 Will", "description": "Notify Overseers to pin your last will", "price": 150},
+    {"name": "🔭 Peep Hole", "description": "See who knocks on this house for 24h", "price": 150},
 ]
 
 # Maximum value accepted by .setcollect to prevent accidental huge payouts.
@@ -177,6 +178,8 @@ class InventoryView(View):
             ok = await self._do_extra_visit(interaction)
         elif "will" in name_lower:
             ok = await self._do_will(interaction)
+        elif "peep" in name_lower:
+            ok = await self._do_peephole(interaction)
         else:
             ok = True
             await interaction.response.send_message(f"Used **{owned['name']}**.", ephemeral=True)
@@ -392,7 +395,7 @@ class InventoryView(View):
 
             if not to_delete:
                 await interaction.channel.send("No unpinned messages to delete.")
-                return True
+                return False
 
             with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
                 for msg in to_delete:
@@ -459,6 +462,27 @@ class InventoryView(View):
             await interaction.channel.send("Will cancelled (timeout).")
             return False
         await interaction.channel.send(f"{overseer_role.mention} {reply.jump_url} — please pin this will.")
+        return True
+
+    async def _do_peephole(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        houses_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("houses_category_name"))
+        if interaction.channel.category != houses_cat:
+            await interaction.response.send_message("🔭 Peep Hole can only be used in a House channel. Use `.use peephole` from the house you want to activate it in.", ephemeral=True)
+            return False
+
+        alive_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("alive_role_name"))
+        sponsor_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("sponsor_role_name"))
+        if not (alive_role in interaction.user.roles or sponsor_role in interaction.user.roles):
+            await interaction.response.send_message("You need the Alive or Sponsor role to use the Peep Hole.", ephemeral=True)
+            return False
+
+        peep_holes = guild_data.get("peep_holes") or {}
+        peep_holes[str(interaction.channel.id)] = datetime.now(timezone.utc).timestamp() + 86400
+        guild_data["peep_holes"] = peep_holes
+        save_guild_data(interaction.guild_id, guild_data)
+
+        await interaction.response.send_message(f"🔭 Peep Hole activated in {interaction.channel.mention} for 24 hours.", ephemeral=True)
         return True
 
 
@@ -1258,9 +1282,10 @@ class Economy(commands.Cog):
         """Use an item from your channel's inventory."""
         guild_data = load_guild_data(ctx.guild.id)
         is_broom = "broom" in item_name.lower()
-        if is_broom:
+        is_peep = "peep" in item_name.lower()
+        if is_broom or is_peep:
             if not _is_houses_category(ctx, guild_data=guild_data):
-                return await ctx.send("🧹 Broom can only be used in a House channel.")
+                return await ctx.send(f"{'🧹 Broom' if is_broom else '🔭 Peep Hole'} can only be used in a House channel.")
         else:
             if not _is_rolechat_category(ctx, guild_data=guild_data):
                 return await ctx.send("Use items only in a RoleChat channel. Usage: `.use <item_name>`.")
@@ -1270,13 +1295,14 @@ class Economy(commands.Cog):
             return await ctx.send("Item not found. Usage: `.use <item_name>`.")
 
         # Determine which channel's inventory to check and deduct from.
-        # Broom in houses: look up the user's rolechat instead of the house channel.
+        # Broom/Peep Hole in houses: look up the user's rolechat instead of the house channel.
         inv_channel_id = ctx.channel.id
-        if is_broom:
+        if is_broom or is_peep:
             alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
             sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
             if not (alive_role in ctx.author.roles or sponsor_role in ctx.author.roles):
-                return await ctx.send("You need the Alive or Sponsor role to use the broom.")
+                label = "Peep Hole" if is_peep else "broom"
+                return await ctx.send(f"You need the Alive or Sponsor role to use the {label}.")
             rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
             found = next(
                 (c for c in rc_cat.text_channels if ctx.author in c.members and c.permissions_for(ctx.author).send_messages),
@@ -1304,6 +1330,8 @@ class Economy(commands.Cog):
             ok = await self._trigger_extra_visit(ctx)
         elif "will" in name_lower:
             ok = await self._trigger_will(ctx)
+        elif "peep" in name_lower:
+            ok = await self._trigger_peephole(ctx)
         else:
             await ctx.send(f"Used **{item['name']}**.")
             ok = True
@@ -1478,11 +1506,13 @@ class Economy(commands.Cog):
 
             if not to_delete:
                 await ctx.send("No unpinned messages to delete.")
-                return True
+                return False
 
             utility = ctx.bot.get_cog("Utility")
-            if utility:
-                await utility.broom_delete(ctx, to_delete)
+            if not utility:
+                await ctx.send("Utility cog is not loaded. Cannot broom.")
+                return False
+            await utility.broom_delete(ctx, to_delete)
             return True
         except asyncio.TimeoutError:
             await ctx.send("Broom cancelled (timeout).")
@@ -1534,6 +1564,26 @@ class Economy(commands.Cog):
             await ctx.send("Will cancelled (timeout).")
             return False
         await ctx.send(f"{overseer_role.mention} {reply.jump_url} — please pin this will.")
+        return True
+
+    async def _trigger_peephole(self, ctx: commands.Context) -> bool:
+        guild_data = load_guild_data(ctx.guild.id)
+        if not _is_houses_category(ctx, guild_data=guild_data):
+            await ctx.send("🔭 Peep Hole can only be used in a House channel.")
+            return False
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
+        if not (alive_role in ctx.author.roles or sponsor_role in ctx.author.roles):
+            await ctx.send("You need the Alive or Sponsor role to use the Peep Hole.")
+            return False
+
+        peep_holes = guild_data.get("peep_holes") or {}
+        peep_holes[str(ctx.channel.id)] = datetime.now(timezone.utc).timestamp() + 86400
+        guild_data["peep_holes"] = peep_holes
+        save_guild_data(ctx.guild.id, guild_data)
+
+        await ctx.send(f"🔭 Peep Hole activated in {ctx.channel.mention} for 24 hours.")
         return True
 
     @commands.command(name="additemrole")
@@ -1588,6 +1638,25 @@ class Economy(commands.Cog):
 
         summary = ", ".join(f"{qty}× {name}" for _, name, qty in items_to_add)
         await ctx.send(f"Added {summary} to **{count}** rolechats of members with {role.mention}.")
+
+    @commands.command(name="removeitem", aliases=["rmitem"])
+    @commands.has_permissions(administrator=True)
+    async def removeitem(self, ctx: commands.Context, channel: discord.TextChannel, item_name: str, quantity: int = 1):
+        """Remove items from a rolechat's inventory. Usage: .removeitem #rolechannel <item> [qty]"""
+        item = get_shop_item_by_name(ctx.guild.id, item_name)
+        if not item:
+            return await ctx.send(f"Item `{item_name}` not found.")
+
+        if quantity <= 0:
+            return await ctx.send("Quantity must be positive.")
+
+        old_qty = add_inventory_item_channel(ctx.guild.id, channel.id, item["id"], 0)
+        if old_qty == 0:
+            return await ctx.send(f"{channel.mention} has no **{item['name']}** to remove.")
+
+        new_qty = add_inventory_item_channel(ctx.guild.id, channel.id, item["id"], -quantity)
+        removed = old_qty - new_qty
+        await ctx.send(f"Removed **{removed}× {item['name']}** from {channel.mention}.")
 
 
 async def setup(bot: commands.Bot):
