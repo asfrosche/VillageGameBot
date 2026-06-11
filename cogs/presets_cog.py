@@ -7,7 +7,6 @@ from discord.ext import commands
 from discord.ui import View, Button, Select, Modal, TextInput
 from typing import Dict, List, Any, Optional
 import os
-import contextlib
 
 from cogs.data_utils import load_guild_data, save_guild_data
 
@@ -18,6 +17,40 @@ MIN_PRESET_LENGTH = 1
 EMBED_COLOR = 0xff3fb9
 FOOTER_TEXT = "Village Game"
 DB_PATH = "db/presets.db"
+
+ABILITY_CATEGORIES = ["Lethal", "Curing", "Manipulation (Control, Redirect)", "Manipulation (Other)", "Blocking", "Transportation and Comms", "Information", "Other"]
+
+CATEGORY_DISPLAY = {
+    "Lethal": "Lethal",
+    "Curing": "Curing",
+    "Manipulation (Control, Redirect)": "Manipulation (Control, Redirect)",
+    "Manipulation (Other)": "Manipulation (Other)",
+    "Blocking": "Blocking",
+    "Transportation and Comms": "Transportation and Comms",
+    "Information": "Information",
+    "Other": "Other",
+    "Manip": "Manipulation (Other)",
+    "Pcs": "Transportation and Comms",
+    "Transportation": "Transportation and Comms",
+    "Info": "Information",
+    "Economy": "Other",
+    None: "Uncategorized",
+}
+
+DEFAULT_CATEGORY_ORDER = [
+    "Manipulation (Control, Redirect)",
+    "Blocking",
+    "Manipulation (Other)",
+    "Lethal",
+    "Curing",
+    "Transportation and Comms",
+    "Information",
+    "Other",
+]
+
+
+def resolve_category_display(stored_cat):
+    return CATEGORY_DISPLAY.get(stored_cat, "Other")
 
 # Ensure DB dir exists
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -60,25 +93,18 @@ class Presets(commands.Cog):
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
-    # ------------- Priority list (guild_data) helpers -------------
-    def _get_priority_list_enabled(self, guild_id: str) -> bool:
+    # ------------- Category order (guild_data) helpers -------------
+    def _get_category_order(self, guild_id: str) -> List[str]:
         gid = int(guild_id)
         data = load_guild_data(gid)
         if not data:
-            return False
-        return bool(data.get("priority_list_enabled", False))
+            return list(DEFAULT_CATEGORY_ORDER)
+        return list(data.get("preset_category_order") or DEFAULT_CATEGORY_ORDER)
 
-    def _get_priority_list_categories(self, guild_id: str) -> List[str]:
-        gid = int(guild_id)
-        data = load_guild_data(gid)
-        if not data:
-            return []
-        return list(data.get("priority_list_categories") or [])
-
-    def _set_priority_list_categories(self, guild_id: str, categories: List[str]) -> None:
+    def _set_category_order(self, guild_id: str, order: List[str]) -> None:
         gid = int(guild_id)
         data = load_guild_data(gid) or {}
-        data["priority_list_categories"] = categories
+        data["preset_category_order"] = order
         save_guild_data(gid, data)
 
     # ------------- DB helpers -------------
@@ -101,21 +127,6 @@ class Presets(commands.Cog):
             }
             for r in rows
         ]
-
-    def _load_presets_sorted_by_priority(self, guild_id: str) -> List[Dict[str, Any]]:
-        """Load presets ordered by admin-defined category order (for ospreset when priority list is on)."""
-        presets = self._load_presets(guild_id)
-        order = self._get_priority_list_categories(guild_id)
-        if not order:
-            return presets
-        order_idx = {c: i for i, c in enumerate(order)}
-
-        def sort_key(p: Dict[str, Any]) -> tuple:
-            cat = p.get("category") or ""
-            idx = order_idx.get(cat, len(order))
-            return (idx, p.get("position", 0))
-
-        return sorted(presets, key=sort_key)
 
     async def _save_preset(
         self,
@@ -204,7 +215,12 @@ class Presets(commands.Cog):
         pages: List[str] = []
         for i in range(0, len(filtered), ITEMS_PER_PAGE):
             chunk = filtered[i:i + ITEMS_PER_PAGE]
-            lines = [f"**{i + j + 1}.** {p['preset_info'][:297] + '...' if len(p['preset_info']) > 300 else p['preset_info']}" for j, p in enumerate(chunk)]
+            lines = []
+            for j, p in enumerate(chunk):
+                text = p['preset_info'][:297] + '...' if len(p['preset_info']) > 300 else p['preset_info']
+                display = resolve_category_display(p.get("category"))
+                cat_badge = f" `[{display}]`" if display != "Uncategorized" else ""
+                lines.append(f"**{i + j + 1}.**{cat_badge} {text}")
             pages.append("\n".join(lines) if lines else "No presets on this channel.")
         if not pages:
             pages = ["No presets on this channel."]
@@ -222,10 +238,15 @@ class Presets(commands.Cog):
 
     def _build_guild_pages(self, presets: List[Dict[str, Any]]) -> List[str]:
         pages: List[str] = []
+        prev_display: Optional[str] = None
         for i in range(0, len(presets), ITEMS_PER_PAGE):
             chunk = presets[i:i + ITEMS_PER_PAGE]
             lines: List[str] = []
             for j, p in enumerate(chunk):
+                display = resolve_category_display(p.get("category"))
+                if display != prev_display:
+                    lines.append(f"**__{display}__**")
+                    prev_display = display
                 preview = p['preset_info'] if len(p['preset_info']) <= 300 else p['preset_info'][:297] + '...'
                 lines.append(f"**{i + j + 1}.** <#{p['channel_id']}> — {preview}")
             pages.append("\n".join(lines) if lines else "No presets.")
@@ -397,55 +418,39 @@ class Presets(commands.Cog):
 
         # ---- Callbacks ----
         async def add_cb(i: discord.Interaction):
-            priority_enabled = self._get_priority_list_enabled(guild_id)
-            categories = self._get_priority_list_categories(guild_id) if priority_enabled else []
+            options = [
+                discord.SelectOption(label="❓ Not Sure / Uncategorized", value="__none__"),
+            ]
+            for cat in ABILITY_CATEGORIES:
+                options.append(discord.SelectOption(label=cat, value=cat))
 
-            if priority_enabled:
-                if not categories:
-                    await i.response.send_message(
-                        "No categories configured. Ask an admin to add categories via `.ospreset` → Priority List.",
-                        ephemeral=True,
-                    )
+            select = Select(placeholder="Choose an ability category (optional)", options=options, min_values=1, max_values=1)
+
+            async def sel_cb(sel_i: discord.Interaction):
+                if not sel_i.data or "values" not in sel_i.data or not sel_i.data["values"]:
+                    await sel_i.response.send_message("No option selected.", ephemeral=True)
                     return
-                # Show category select (alphabetical A–Z so users don't see admin order)
-                options = [
-                    discord.SelectOption(label=cat, value=cat)
-                    for cat in sorted(categories, key=str.lower)
-                ]
-                select = Select(placeholder="Select category for this preset", options=options, min_values=1, max_values=1)
-
-                async def sel_cb(sel_i: discord.Interaction):
-                    if not sel_i.data or "values" not in sel_i.data or not sel_i.data["values"]:
-                        await sel_i.response.send_message("No category selected.", ephemeral=True)
-                        return
-                    chosen = sel_i.data["values"][0]
-                    restore = await self._temp_disable_then_restore(message, view, add_btn)
-                    try:
-                        modal = AddPresetModal(category=chosen, restore=restore)
-                        await sel_i.response.send_modal(modal)
-                    except Exception:
-                        await restore()
-                        try:
-                            await sel_i.followup.send("Failed to open modal.", ephemeral=True)
-                        except Exception:
-                            pass
-
-                select.callback = sel_cb
-                v = View(timeout=60)
-                v.add_item(select)
-                await i.response.send_message("Choose category for this preset:", view=v, ephemeral=True)
-                return
-
-            restore = await self._temp_disable_then_restore(message, view, add_btn)
-            try:
-                modal = AddPresetModal(restore=restore)
-                await i.response.send_modal(modal)
-            except Exception:
-                await restore()
+                chosen = sel_i.data["values"][0]
+                category = None if chosen == "__none__" else chosen
+                restore = await self._temp_disable_then_restore(message, view, add_btn)
                 try:
-                    await i.followup.send("Failed to open modal.", ephemeral=True)
+                    modal = AddPresetModal(category=category, restore=restore)
+                    await sel_i.response.send_modal(modal)
                 except Exception:
-                    pass
+                    await restore()
+                    try:
+                        await sel_i.followup.send("Failed to open modal.", ephemeral=True)
+                    except Exception:
+                        pass
+
+            select.callback = sel_cb
+            v = View(timeout=60)
+            v.add_item(select)
+            await i.response.send_message(
+                "Choose an ability category *(optional — pick 'Not Sure' to skip)*:",
+                view=v,
+                ephemeral=True,
+            )
 
         async def remove_cb(i: discord.Interaction):
             try:
@@ -582,27 +587,25 @@ class Presets(commands.Cog):
         """Entry point used from the dashboard button."""
         await self._open_preset_view_for_channel(interaction, channel)
 
-    @commands.command(name="prioritylist")
-    @commands.has_permissions(administrator=True)
-    async def prioritylist(self, ctx: commands.Context, value: bool):
-        """Enable or disable the priority list for presets. When enabled, users must pick a category when adding presets."""
-        guild_id = str(ctx.guild.id)
-        gid = ctx.guild.id
-        data = load_guild_data(gid) or {}
-        data["priority_list_enabled"] = bool(value)
-        if value and "priority_list_categories" not in data:
-            data["priority_list_categories"] = []
-        save_guild_data(gid, data)
-        state = "enabled" if value else "disabled"
-        await ctx.send(f"Priority list has been **{state}** for this server.")
-
     # ---------- Admin command: reorder / manage all presets ----------
     @commands.command(name="ospreset")
     @commands.has_permissions(administrator=True)
     async def ospreset(self, ctx: commands.Context):
         guild_id = _guild_key(ctx)
-        priority_enabled = self._get_priority_list_enabled(guild_id)
-        presets = self._load_presets_sorted_by_priority(guild_id) if priority_enabled else self._load_presets(guild_id)
+        presets = self._load_presets(guild_id)
+
+        # Sort by configured category order (uncategorized last)
+        category_order = self._get_category_order(guild_id)
+        order_idx = {c: i for i, c in enumerate(category_order)}
+
+        def _preset_sort_key(p):
+            display = resolve_category_display(p.get("category"))
+            if display == "Uncategorized":
+                return (len(category_order), p.get("position", 0))
+            idx = order_idx.get(display, len(category_order))
+            return (idx, p.get("position", 0))
+
+        presets.sort(key=_preset_sort_key)
 
         def _embed_for_guild_page(page_text: str, page_index: int, total_pages: int) -> discord.Embed:
             embed = discord.Embed(title="All Presets", description=page_text, color=EMBED_COLOR, timestamp=datetime.utcnow())
@@ -621,11 +624,11 @@ class Presets(commands.Cog):
         remove_btn = Button(label="Remove", style=discord.ButtonStyle.danger, emoji="➖")
         reset_btn = Button(label="Reset All", style=discord.ButtonStyle.danger, emoji="⚠️")
         close_btn = Button(label="Close", style=discord.ButtonStyle.secondary)
-        priority_list_btn = Button(label="Priority List", style=discord.ButtonStyle.primary, emoji="📋") if priority_enabled else None
 
         async def refresh():
             nonlocal presets, pages, current_page
-            presets = self._load_presets_sorted_by_priority(guild_id) if priority_enabled else self._load_presets(guild_id)
+            presets = self._load_presets(guild_id)
+            presets.sort(key=_preset_sort_key)
             pages = self._build_guild_pages(presets)
             if current_page >= len(pages):
                 current_page = len(pages) - 1 if pages else 0
@@ -633,16 +636,6 @@ class Presets(commands.Cog):
                 await msg.edit(embed=_embed_for_guild_page(pages[current_page], current_page, len(pages)), view=view)
             except Exception:
                 pass
-
-        def _priority_list_embed() -> discord.Embed:
-            categories = self._get_priority_list_categories(guild_id)
-            if not categories:
-                desc = "*Empty*"
-            else:
-                desc = "\n".join(f"**{i+1}.** {c}" for i, c in enumerate(categories))
-            emb = discord.Embed(title="Priority List", description=desc, color=EMBED_COLOR, timestamp=datetime.utcnow())
-            emb.set_footer(text=FOOTER_TEXT)
-            return emb
 
         async def prev_cb(i: discord.Interaction):
             try:
@@ -676,7 +669,8 @@ class Presets(commands.Cog):
 
         async def swap_cb(i: discord.Interaction):
             try:
-                presets_now = self._load_presets_sorted_by_priority(guild_id) if priority_enabled else self._load_presets(guild_id)
+                presets_now = self._load_presets(guild_id)
+                presets_now.sort(key=_preset_sort_key)
                 if len(presets_now) < 2:
                     await i.response.send_message("Need at least 2 presets to swap.", ephemeral=True)
                     return
@@ -724,7 +718,8 @@ class Presets(commands.Cog):
 
         async def remove_cb_os(i: discord.Interaction):
             try:
-                presets_now = self._load_presets_sorted_by_priority(guild_id) if priority_enabled else self._load_presets(guild_id)
+                presets_now = self._load_presets(guild_id)
+                presets_now.sort(key=_preset_sort_key)
                 if not presets_now:
                     await i.response.send_message("No presets to remove.", ephemeral=True)
                     return
@@ -782,101 +777,134 @@ class Presets(commands.Cog):
                 except:
                     pass
 
-        async def priority_list_cb(i: discord.Interaction):
-            """Show priority list embed and view (add / remove category, close)."""
-            cog = self
-
-            class AddCategoryModal(Modal, title="Add Category"):
-                name_input = TextInput(label="Category name", style=discord.TextStyle.short, min_length=1, max_length=100)
-
-                def __init__(self, on_done):
-                    super().__init__()
-                    self._on_done = on_done
-
-                async def on_submit(self, interaction: discord.Interaction):
-                    name = str(self.name_input).strip()
-                    if not name:
-                        await interaction.response.send_message("Category name cannot be empty.", ephemeral=True)
-                        return
-                    categories = cog._get_priority_list_categories(guild_id)
-                    if name in categories:
-                        await interaction.response.send_message("That category already exists.", ephemeral=True)
-                        return
-                    categories.append(name)
-                    cog._set_priority_list_categories(guild_id, categories)
-                    await interaction.response.defer()
-                    await self._on_done()
-
-            async def refresh_priority_view():
-                try:
-                    await msg.edit(embed=_priority_list_embed(), view=pl_view)
-                except Exception:
-                    pass
-
-            pl_view = View(timeout=180)
-            add_cat_btn = Button(label="Add category", style=discord.ButtonStyle.success, emoji="➕", row=0)
-            remove_cat_btn = Button(label="Remove category", style=discord.ButtonStyle.danger, emoji="➖", row=0)
-            close_pl_btn = Button(label="Close", style=discord.ButtonStyle.secondary, row=1)
-
-            async def add_cat_cb(inter: discord.Interaction):
-                modal = AddCategoryModal(refresh_priority_view)
-                await inter.response.send_modal(modal)
-
-            async def remove_cat_cb(inter: discord.Interaction):
-                categories = self._get_priority_list_categories(guild_id)
-                if not categories:
-                    await inter.response.send_message("No categories to remove.", ephemeral=True)
-                    return
-                options = [discord.SelectOption(label=c, value=c) for c in categories]
-                sel = Select(placeholder="Select category to remove", options=options, min_values=1, max_values=1)
-
-                async def sel_cb_rm(sel_i: discord.Interaction):
-                    vals = sel_i.data.get("values", [])
-                    if not vals:
-                        await sel_i.response.send_message("No category selected.", ephemeral=True)
-                        return
-                    cat = vals[0]
-                    new_list = [c for c in categories if c != cat]
-                    self._set_priority_list_categories(guild_id, new_list)
-                    await sel_i.response.defer()
-                    await refresh_priority_view()
-
-                sel.callback = sel_cb_rm
-                v = View(timeout=60)
-                v.add_item(sel)
-                await inter.response.send_message("Choose category to remove:", view=v, ephemeral=True)
-
-            async def close_pl_cb(inter: discord.Interaction):
-                await inter.response.defer()
-                await refresh()
-
-            add_cat_btn.callback = add_cat_cb
-            remove_cat_btn.callback = remove_cat_cb
-            close_pl_btn.callback = close_pl_cb
-            pl_view.add_item(add_cat_btn)
-            pl_view.add_item(remove_cat_btn)
-            pl_view.add_item(close_pl_btn)
-
-            await i.response.defer()
-            try:
-                await msg.edit(embed=_priority_list_embed(), view=pl_view)
-            except Exception:
-                pass
-
         prev_btn.callback = prev_cb
         next_btn.callback = next_cb
         swap_btn.callback = swap_cb
         remove_btn.callback = remove_cb_os
         reset_btn.callback = reset_cb
         close_btn.callback = close_cb
-        if priority_list_btn is not None:
-            priority_list_btn.callback = priority_list_cb
-            view.add_item(priority_list_btn)
 
         view.add_item(prev_btn)
         view.add_item(next_btn)
         view.add_item(swap_btn)
         view.add_item(remove_btn)
+        view.add_item(reset_btn)
+        view.add_item(close_btn)
+        await msg.edit(view=view)
+
+    # ---------- Admin command: manage category order ----------
+    @commands.command(name="ospresetsort")
+    @commands.has_permissions(administrator=True)
+    async def ospresetsort(self, ctx: commands.Context):
+        guild_id = _guild_key(ctx)
+        category_order = self._get_category_order(guild_id)
+        selected_index = 0  # index of currently selected category in the dropdown
+
+        def _embed(order, sel_idx):
+            lines = []
+            for i, c in enumerate(order):
+                prefix = "**▸** " if i == sel_idx else f"{i+1}. "
+                lines.append(f"{prefix}{c}")
+            lines.append("")
+            lines.append("Use the dropdown + Up/Down buttons to reorder.")
+            emb = discord.Embed(
+                title="Category Order",
+                description="\n".join(lines),
+                color=EMBED_COLOR,
+                timestamp=datetime.utcnow(),
+            )
+            emb.set_footer(text=FOOTER_TEXT)
+            return emb
+
+        msg = await ctx.send(embed=_embed(category_order, selected_index))
+
+        view = View(timeout=180)
+
+        # Dropdown showing all categories (select the one to move)
+        cat_options = [
+            discord.SelectOption(label=c, value=str(i))
+            for i, c in enumerate(category_order)
+        ]
+        cat_select = Select(placeholder="Select a category to move", options=cat_options, min_values=1, max_values=1)
+
+        up_btn = Button(emoji="⬆️", style=discord.ButtonStyle.secondary, label="Up")
+        down_btn = Button(emoji="⬇️", style=discord.ButtonStyle.secondary, label="Down")
+        reset_btn = Button(label="Reset to Default", style=discord.ButtonStyle.danger, emoji="↩️")
+        close_btn = Button(label="Close", style=discord.ButtonStyle.secondary)
+
+        async def refresh():
+            nonlocal category_order, selected_index
+            new_order = self._get_category_order(guild_id)
+            category_order = new_order
+            if selected_index >= len(category_order):
+                selected_index = 0
+            # update dropdown options
+            cat_select.options = [
+                discord.SelectOption(label=c, value=str(i))
+                for i, c in enumerate(category_order)
+            ]
+            try:
+                await msg.edit(embed=_embed(category_order, selected_index), view=view)
+            except Exception:
+                pass
+
+        async def select_cb(i: discord.Interaction):
+            if not i.data or "values" not in i.data or not i.data["values"]:
+                await i.response.defer()
+                return
+            nonlocal selected_index
+            selected_index = int(i.data["values"][0])
+            await i.response.defer()
+            await refresh()
+
+        async def up_cb(i: discord.Interaction):
+            nonlocal selected_index
+            if selected_index <= 0:
+                await i.response.send_message("Already at the top.", ephemeral=True)
+                return
+            # swap with the one above
+            new_order = list(category_order)
+            new_order[selected_index], new_order[selected_index - 1] = new_order[selected_index - 1], new_order[selected_index]
+            self._set_category_order(guild_id, new_order)
+            selected_index -= 1
+            await i.response.defer()
+            await refresh()
+
+        async def down_cb(i: discord.Interaction):
+            nonlocal selected_index
+            if selected_index >= len(category_order) - 1:
+                await i.response.send_message("Already at the bottom.", ephemeral=True)
+                return
+            new_order = list(category_order)
+            new_order[selected_index], new_order[selected_index + 1] = new_order[selected_index + 1], new_order[selected_index]
+            self._set_category_order(guild_id, new_order)
+            selected_index += 1
+            await i.response.defer()
+            await refresh()
+
+        async def reset_cb(i: discord.Interaction):
+            self._set_category_order(guild_id, list(DEFAULT_CATEGORY_ORDER))
+            nonlocal selected_index
+            selected_index = 0
+            await i.response.defer()
+            await refresh()
+
+        async def close_cb(i: discord.Interaction):
+            try:
+                await i.response.defer()
+                await msg.delete()
+            except Exception:
+                pass
+
+        cat_select.callback = select_cb
+        up_btn.callback = up_cb
+        down_btn.callback = down_cb
+        reset_btn.callback = reset_cb
+        close_btn.callback = close_cb
+
+        view.add_item(cat_select)
+        view.add_item(up_btn)
+        view.add_item(down_btn)
         view.add_item(reset_btn)
         view.add_item(close_btn)
         await msg.edit(view=view)
