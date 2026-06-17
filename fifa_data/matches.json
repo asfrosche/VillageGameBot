@@ -1,0 +1,1882 @@
+{
+  "last_updated": "2026-06-16T12:39:40.509105",
+  "completed_count": 16,
+  "upcoming_count": 88,
+  "competition": "FIFA World Cup 2026",
+  "completed": [
+    {
+      "id": "400021443",
+      "date": "2026-06-11T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group A",
+      "home": {
+        "name": "Mexico",
+        "score": 2,
+        "id": "43911"
+      },
+      "away": {
+        "name": "South Africa",
+        "score": 0,
+        "id": "43883"
+      },
+      "winner": "43911",
+      "status": 0
+    },
+    {
+      "id": "400021441",
+      "date": "2026-06-12T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group A",
+      "home": {
+        "name": "Korea Republic",
+        "score": 2,
+        "id": "43822"
+      },
+      "away": {
+        "name": "Czechia",
+        "score": 1,
+        "id": "43995"
+      },
+      "winner": "43822",
+      "status": 0
+    },
+    {
+      "id": "400021449",
+      "date": "2026-06-12T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group B",
+      "home": {
+        "name": "Canada",
+        "score": 1,
+        "id": "43899"
+      },
+      "away": {
+        "name": "Bosnia and Herzegovina",
+        "score": 1,
+        "id": "44037"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021458",
+      "date": "2026-06-13T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group D",
+      "home": {
+        "name": "USA",
+        "score": 4,
+        "id": "43921"
+      },
+      "away": {
+        "name": "Paraguay",
+        "score": 1,
+        "id": "43928"
+      },
+      "winner": "43921",
+      "status": 0
+    },
+    {
+      "id": "400021447",
+      "date": "2026-06-13T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group B",
+      "home": {
+        "name": "Qatar",
+        "score": 1,
+        "id": "43834"
+      },
+      "away": {
+        "name": "Switzerland",
+        "score": 1,
+        "id": "43971"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021456",
+      "date": "2026-06-13T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group C",
+      "home": {
+        "name": "Brazil",
+        "score": 1,
+        "id": "43924"
+      },
+      "away": {
+        "name": "Morocco",
+        "score": 1,
+        "id": "43872"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021453",
+      "date": "2026-06-14T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group C",
+      "home": {
+        "name": "Haiti",
+        "score": 0,
+        "id": "43908"
+      },
+      "away": {
+        "name": "Scotland",
+        "score": 1,
+        "id": "43967"
+      },
+      "winner": "43967",
+      "status": 0
+    },
+    {
+      "id": "400021463",
+      "date": "2026-06-14T04:00:00Z",
+      "stage": "First Stage",
+      "group": "Group D",
+      "home": {
+        "name": "Australia",
+        "score": 2,
+        "id": "43976"
+      },
+      "away": {
+        "name": "Türkiye",
+        "score": 0,
+        "id": "43972"
+      },
+      "winner": "43976",
+      "status": 0
+    },
+    {
+      "id": "400021464",
+      "date": "2026-06-14T17:00:00Z",
+      "stage": "First Stage",
+      "group": "Group E",
+      "home": {
+        "name": "Germany",
+        "score": 7,
+        "id": "43948"
+      },
+      "away": {
+        "name": "Curaçao",
+        "score": 1,
+        "id": "1895293"
+      },
+      "winner": "43948",
+      "status": 0
+    },
+    {
+      "id": "400021470",
+      "date": "2026-06-14T20:00:00Z",
+      "stage": "First Stage",
+      "group": "Group F",
+      "home": {
+        "name": "Netherlands",
+        "score": 2,
+        "id": "43960"
+      },
+      "away": {
+        "name": "Japan",
+        "score": 2,
+        "id": "43819"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021467",
+      "date": "2026-06-14T23:00:00Z",
+      "stage": "First Stage",
+      "group": "Group E",
+      "home": {
+        "name": "Côte d'Ivoire",
+        "score": 1,
+        "id": "43854"
+      },
+      "away": {
+        "name": "Ecuador",
+        "score": 0,
+        "id": "43927"
+      },
+      "winner": "43854",
+      "status": 0
+    },
+    {
+      "id": "400021474",
+      "date": "2026-06-15T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group F",
+      "home": {
+        "name": "Sweden",
+        "score": 5,
+        "id": "43970"
+      },
+      "away": {
+        "name": "Tunisia",
+        "score": 1,
+        "id": "43888"
+      },
+      "winner": "43970",
+      "status": 0
+    },
+    {
+      "id": "400021482",
+      "date": "2026-06-15T16:00:00Z",
+      "stage": "First Stage",
+      "group": "Group H",
+      "home": {
+        "name": "Spain",
+        "score": 0,
+        "id": "43969"
+      },
+      "away": {
+        "name": "Cabo Verde",
+        "score": 0,
+        "id": "43850"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021478",
+      "date": "2026-06-15T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group G",
+      "home": {
+        "name": "Belgium",
+        "score": 1,
+        "id": "43935"
+      },
+      "away": {
+        "name": "Egypt",
+        "score": 1,
+        "id": "43855"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021486",
+      "date": "2026-06-15T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group H",
+      "home": {
+        "name": "Saudi Arabia",
+        "score": 1,
+        "id": "43835"
+      },
+      "away": {
+        "name": "Uruguay",
+        "score": 1,
+        "id": "43930"
+      },
+      "winner": null,
+      "status": 0
+    },
+    {
+      "id": "400021476",
+      "date": "2026-06-16T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group G",
+      "home": {
+        "name": "IR Iran",
+        "score": 2,
+        "id": "43817"
+      },
+      "away": {
+        "name": "New Zealand",
+        "score": 2,
+        "id": "43978"
+      },
+      "winner": null,
+      "status": 0
+    }
+  ],
+  "upcoming": [
+    {
+      "id": "400021490",
+      "date": "2026-06-16T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group I",
+      "home": {
+        "name": "France",
+        "score": null,
+        "id": "43946"
+      },
+      "away": {
+        "name": "Senegal",
+        "score": null,
+        "id": "43879"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021488",
+      "date": "2026-06-16T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group I",
+      "home": {
+        "name": "Iraq",
+        "score": null,
+        "id": "43818"
+      },
+      "away": {
+        "name": "Norway",
+        "score": null,
+        "id": "43961"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021496",
+      "date": "2026-06-17T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group J",
+      "home": {
+        "name": "Argentina",
+        "score": null,
+        "id": "43922"
+      },
+      "away": {
+        "name": "Algeria",
+        "score": null,
+        "id": "43843"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021498",
+      "date": "2026-06-17T04:00:00Z",
+      "stage": "First Stage",
+      "group": "Group J",
+      "home": {
+        "name": "Austria",
+        "score": null,
+        "id": "43934"
+      },
+      "away": {
+        "name": "Jordan",
+        "score": null,
+        "id": "43820"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021502",
+      "date": "2026-06-17T17:00:00Z",
+      "stage": "First Stage",
+      "group": "Group K",
+      "home": {
+        "name": "Portugal",
+        "score": null,
+        "id": "43963"
+      },
+      "away": {
+        "name": "Congo DR",
+        "score": null,
+        "id": "20014"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021507",
+      "date": "2026-06-17T20:00:00Z",
+      "stage": "First Stage",
+      "group": "Group L",
+      "home": {
+        "name": "England",
+        "score": null,
+        "id": "43942"
+      },
+      "away": {
+        "name": "Croatia",
+        "score": null,
+        "id": "43938"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021510",
+      "date": "2026-06-17T23:00:00Z",
+      "stage": "First Stage",
+      "group": "Group L",
+      "home": {
+        "name": "Ghana",
+        "score": null,
+        "id": "43860"
+      },
+      "away": {
+        "name": "Panama",
+        "score": null,
+        "id": "43914"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021504",
+      "date": "2026-06-18T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group K",
+      "home": {
+        "name": "Uzbekistan",
+        "score": null,
+        "id": "44005"
+      },
+      "away": {
+        "name": "Colombia",
+        "score": null,
+        "id": "43926"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021440",
+      "date": "2026-06-18T16:00:00Z",
+      "stage": "First Stage",
+      "group": "Group A",
+      "home": {
+        "name": "Czechia",
+        "score": null,
+        "id": "43995"
+      },
+      "away": {
+        "name": "South Africa",
+        "score": null,
+        "id": "43883"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021446",
+      "date": "2026-06-18T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group B",
+      "home": {
+        "name": "Switzerland",
+        "score": null,
+        "id": "43971"
+      },
+      "away": {
+        "name": "Bosnia and Herzegovina",
+        "score": null,
+        "id": "44037"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021450",
+      "date": "2026-06-18T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group B",
+      "home": {
+        "name": "Canada",
+        "score": null,
+        "id": "43899"
+      },
+      "away": {
+        "name": "Qatar",
+        "score": null,
+        "id": "43834"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021442",
+      "date": "2026-06-19T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group A",
+      "home": {
+        "name": "Mexico",
+        "score": null,
+        "id": "43911"
+      },
+      "away": {
+        "name": "Korea Republic",
+        "score": null,
+        "id": "43822"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021462",
+      "date": "2026-06-19T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group D",
+      "home": {
+        "name": "USA",
+        "score": null,
+        "id": "43921"
+      },
+      "away": {
+        "name": "Australia",
+        "score": null,
+        "id": "43976"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021454",
+      "date": "2026-06-19T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group C",
+      "home": {
+        "name": "Scotland",
+        "score": null,
+        "id": "43967"
+      },
+      "away": {
+        "name": "Morocco",
+        "score": null,
+        "id": "43872"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021457",
+      "date": "2026-06-20T00:30:00Z",
+      "stage": "First Stage",
+      "group": "Group C",
+      "home": {
+        "name": "Brazil",
+        "score": null,
+        "id": "43924"
+      },
+      "away": {
+        "name": "Haiti",
+        "score": null,
+        "id": "43908"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021460",
+      "date": "2026-06-20T03:00:00Z",
+      "stage": "First Stage",
+      "group": "Group D",
+      "home": {
+        "name": "Türkiye",
+        "score": null,
+        "id": "43972"
+      },
+      "away": {
+        "name": "Paraguay",
+        "score": null,
+        "id": "43928"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021472",
+      "date": "2026-06-20T17:00:00Z",
+      "stage": "First Stage",
+      "group": "Group F",
+      "home": {
+        "name": "Netherlands",
+        "score": null,
+        "id": "43960"
+      },
+      "away": {
+        "name": "Sweden",
+        "score": null,
+        "id": "43970"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021469",
+      "date": "2026-06-20T20:00:00Z",
+      "stage": "First Stage",
+      "group": "Group E",
+      "home": {
+        "name": "Germany",
+        "score": null,
+        "id": "43948"
+      },
+      "away": {
+        "name": "Côte d'Ivoire",
+        "score": null,
+        "id": "43854"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021465",
+      "date": "2026-06-21T00:00:00Z",
+      "stage": "First Stage",
+      "group": "Group E",
+      "home": {
+        "name": "Ecuador",
+        "score": null,
+        "id": "43927"
+      },
+      "away": {
+        "name": "Curaçao",
+        "score": null,
+        "id": "1895293"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021475",
+      "date": "2026-06-21T04:00:00Z",
+      "stage": "First Stage",
+      "group": "Group F",
+      "home": {
+        "name": "Tunisia",
+        "score": null,
+        "id": "43888"
+      },
+      "away": {
+        "name": "Japan",
+        "score": null,
+        "id": "43819"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021483",
+      "date": "2026-06-21T16:00:00Z",
+      "stage": "First Stage",
+      "group": "Group H",
+      "home": {
+        "name": "Spain",
+        "score": null,
+        "id": "43969"
+      },
+      "away": {
+        "name": "Saudi Arabia",
+        "score": null,
+        "id": "43835"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021477",
+      "date": "2026-06-21T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group G",
+      "home": {
+        "name": "Belgium",
+        "score": null,
+        "id": "43935"
+      },
+      "away": {
+        "name": "IR Iran",
+        "score": null,
+        "id": "43817"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021487",
+      "date": "2026-06-21T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group H",
+      "home": {
+        "name": "Uruguay",
+        "score": null,
+        "id": "43930"
+      },
+      "away": {
+        "name": "Cabo Verde",
+        "score": null,
+        "id": "43850"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021480",
+      "date": "2026-06-22T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group G",
+      "home": {
+        "name": "New Zealand",
+        "score": null,
+        "id": "43978"
+      },
+      "away": {
+        "name": "Egypt",
+        "score": null,
+        "id": "43855"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021494",
+      "date": "2026-06-22T17:00:00Z",
+      "stage": "First Stage",
+      "group": "Group J",
+      "home": {
+        "name": "Argentina",
+        "score": null,
+        "id": "43922"
+      },
+      "away": {
+        "name": "Austria",
+        "score": null,
+        "id": "43934"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021492",
+      "date": "2026-06-22T21:00:00Z",
+      "stage": "First Stage",
+      "group": "Group I",
+      "home": {
+        "name": "France",
+        "score": null,
+        "id": "43946"
+      },
+      "away": {
+        "name": "Iraq",
+        "score": null,
+        "id": "43818"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021491",
+      "date": "2026-06-23T00:00:00Z",
+      "stage": "First Stage",
+      "group": "Group I",
+      "home": {
+        "name": "Norway",
+        "score": null,
+        "id": "43961"
+      },
+      "away": {
+        "name": "Senegal",
+        "score": null,
+        "id": "43879"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021499",
+      "date": "2026-06-23T03:00:00Z",
+      "stage": "First Stage",
+      "group": "Group J",
+      "home": {
+        "name": "Jordan",
+        "score": null,
+        "id": "43820"
+      },
+      "away": {
+        "name": "Algeria",
+        "score": null,
+        "id": "43843"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021503",
+      "date": "2026-06-23T17:00:00Z",
+      "stage": "First Stage",
+      "group": "Group K",
+      "home": {
+        "name": "Portugal",
+        "score": null,
+        "id": "43963"
+      },
+      "away": {
+        "name": "Uzbekistan",
+        "score": null,
+        "id": "44005"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021506",
+      "date": "2026-06-23T20:00:00Z",
+      "stage": "First Stage",
+      "group": "Group L",
+      "home": {
+        "name": "England",
+        "score": null,
+        "id": "43942"
+      },
+      "away": {
+        "name": "Ghana",
+        "score": null,
+        "id": "43860"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021511",
+      "date": "2026-06-23T23:00:00Z",
+      "stage": "First Stage",
+      "group": "Group L",
+      "home": {
+        "name": "Panama",
+        "score": null,
+        "id": "43914"
+      },
+      "away": {
+        "name": "Croatia",
+        "score": null,
+        "id": "43938"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021501",
+      "date": "2026-06-24T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group K",
+      "home": {
+        "name": "Colombia",
+        "score": null,
+        "id": "43926"
+      },
+      "away": {
+        "name": "Congo DR",
+        "score": null,
+        "id": "20014"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021448",
+      "date": "2026-06-24T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group B",
+      "home": {
+        "name": "Bosnia and Herzegovina",
+        "score": null,
+        "id": "44037"
+      },
+      "away": {
+        "name": "Qatar",
+        "score": null,
+        "id": "43834"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021451",
+      "date": "2026-06-24T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group B",
+      "home": {
+        "name": "Switzerland",
+        "score": null,
+        "id": "43971"
+      },
+      "away": {
+        "name": "Canada",
+        "score": null,
+        "id": "43899"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021452",
+      "date": "2026-06-24T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group C",
+      "home": {
+        "name": "Morocco",
+        "score": null,
+        "id": "43872"
+      },
+      "away": {
+        "name": "Haiti",
+        "score": null,
+        "id": "43908"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021455",
+      "date": "2026-06-24T22:00:00Z",
+      "stage": "First Stage",
+      "group": "Group C",
+      "home": {
+        "name": "Scotland",
+        "score": null,
+        "id": "43967"
+      },
+      "away": {
+        "name": "Brazil",
+        "score": null,
+        "id": "43924"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021445",
+      "date": "2026-06-25T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group A",
+      "home": {
+        "name": "South Africa",
+        "score": null,
+        "id": "43883"
+      },
+      "away": {
+        "name": "Korea Republic",
+        "score": null,
+        "id": "43822"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021444",
+      "date": "2026-06-25T01:00:00Z",
+      "stage": "First Stage",
+      "group": "Group A",
+      "home": {
+        "name": "Czechia",
+        "score": null,
+        "id": "43995"
+      },
+      "away": {
+        "name": "Mexico",
+        "score": null,
+        "id": "43911"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021468",
+      "date": "2026-06-25T20:00:00Z",
+      "stage": "First Stage",
+      "group": "Group E",
+      "home": {
+        "name": "Curaçao",
+        "score": null,
+        "id": "1895293"
+      },
+      "away": {
+        "name": "Côte d'Ivoire",
+        "score": null,
+        "id": "43854"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021466",
+      "date": "2026-06-25T20:00:00Z",
+      "stage": "First Stage",
+      "group": "Group E",
+      "home": {
+        "name": "Ecuador",
+        "score": null,
+        "id": "43927"
+      },
+      "away": {
+        "name": "Germany",
+        "score": null,
+        "id": "43948"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021473",
+      "date": "2026-06-25T23:00:00Z",
+      "stage": "First Stage",
+      "group": "Group F",
+      "home": {
+        "name": "Tunisia",
+        "score": null,
+        "id": "43888"
+      },
+      "away": {
+        "name": "Netherlands",
+        "score": null,
+        "id": "43960"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021471",
+      "date": "2026-06-25T23:00:00Z",
+      "stage": "First Stage",
+      "group": "Group F",
+      "home": {
+        "name": "Japan",
+        "score": null,
+        "id": "43819"
+      },
+      "away": {
+        "name": "Sweden",
+        "score": null,
+        "id": "43970"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021461",
+      "date": "2026-06-26T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group D",
+      "home": {
+        "name": "Paraguay",
+        "score": null,
+        "id": "43928"
+      },
+      "away": {
+        "name": "Australia",
+        "score": null,
+        "id": "43976"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021459",
+      "date": "2026-06-26T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group D",
+      "home": {
+        "name": "Türkiye",
+        "score": null,
+        "id": "43972"
+      },
+      "away": {
+        "name": "USA",
+        "score": null,
+        "id": "43921"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021493",
+      "date": "2026-06-26T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group I",
+      "home": {
+        "name": "Senegal",
+        "score": null,
+        "id": "43879"
+      },
+      "away": {
+        "name": "Iraq",
+        "score": null,
+        "id": "43818"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021489",
+      "date": "2026-06-26T19:00:00Z",
+      "stage": "First Stage",
+      "group": "Group I",
+      "home": {
+        "name": "Norway",
+        "score": null,
+        "id": "43961"
+      },
+      "away": {
+        "name": "France",
+        "score": null,
+        "id": "43946"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021484",
+      "date": "2026-06-27T00:00:00Z",
+      "stage": "First Stage",
+      "group": "Group H",
+      "home": {
+        "name": "Uruguay",
+        "score": null,
+        "id": "43930"
+      },
+      "away": {
+        "name": "Spain",
+        "score": null,
+        "id": "43969"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021485",
+      "date": "2026-06-27T00:00:00Z",
+      "stage": "First Stage",
+      "group": "Group H",
+      "home": {
+        "name": "Cabo Verde",
+        "score": null,
+        "id": "43850"
+      },
+      "away": {
+        "name": "Saudi Arabia",
+        "score": null,
+        "id": "43835"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021481",
+      "date": "2026-06-27T03:00:00Z",
+      "stage": "First Stage",
+      "group": "Group G",
+      "home": {
+        "name": "New Zealand",
+        "score": null,
+        "id": "43978"
+      },
+      "away": {
+        "name": "Belgium",
+        "score": null,
+        "id": "43935"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021479",
+      "date": "2026-06-27T03:00:00Z",
+      "stage": "First Stage",
+      "group": "Group G",
+      "home": {
+        "name": "Egypt",
+        "score": null,
+        "id": "43855"
+      },
+      "away": {
+        "name": "IR Iran",
+        "score": null,
+        "id": "43817"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021508",
+      "date": "2026-06-27T21:00:00Z",
+      "stage": "First Stage",
+      "group": "Group L",
+      "home": {
+        "name": "Panama",
+        "score": null,
+        "id": "43914"
+      },
+      "away": {
+        "name": "England",
+        "score": null,
+        "id": "43942"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021509",
+      "date": "2026-06-27T21:00:00Z",
+      "stage": "First Stage",
+      "group": "Group L",
+      "home": {
+        "name": "Croatia",
+        "score": null,
+        "id": "43938"
+      },
+      "away": {
+        "name": "Ghana",
+        "score": null,
+        "id": "43860"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021500",
+      "date": "2026-06-27T23:30:00Z",
+      "stage": "First Stage",
+      "group": "Group K",
+      "home": {
+        "name": "Congo DR",
+        "score": null,
+        "id": "20014"
+      },
+      "away": {
+        "name": "Uzbekistan",
+        "score": null,
+        "id": "44005"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021505",
+      "date": "2026-06-27T23:30:00Z",
+      "stage": "First Stage",
+      "group": "Group K",
+      "home": {
+        "name": "Colombia",
+        "score": null,
+        "id": "43926"
+      },
+      "away": {
+        "name": "Portugal",
+        "score": null,
+        "id": "43963"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021497",
+      "date": "2026-06-28T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group J",
+      "home": {
+        "name": "Algeria",
+        "score": null,
+        "id": "43843"
+      },
+      "away": {
+        "name": "Austria",
+        "score": null,
+        "id": "43934"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021495",
+      "date": "2026-06-28T02:00:00Z",
+      "stage": "First Stage",
+      "group": "Group J",
+      "home": {
+        "name": "Jordan",
+        "score": null,
+        "id": "43820"
+      },
+      "away": {
+        "name": "Argentina",
+        "score": null,
+        "id": "43922"
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021518",
+      "date": "2026-06-28T19:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021516",
+      "date": "2026-06-29T17:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021513",
+      "date": "2026-06-29T20:30:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021522",
+      "date": "2026-06-30T01:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021514",
+      "date": "2026-06-30T17:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021523",
+      "date": "2026-06-30T21:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021520",
+      "date": "2026-07-01T01:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021512",
+      "date": "2026-07-01T16:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021525",
+      "date": "2026-07-01T20:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021524",
+      "date": "2026-07-02T00:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021519",
+      "date": "2026-07-02T19:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021526",
+      "date": "2026-07-02T23:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021527",
+      "date": "2026-07-03T03:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021515",
+      "date": "2026-07-03T18:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021521",
+      "date": "2026-07-03T22:00:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021517",
+      "date": "2026-07-04T01:30:00Z",
+      "stage": "Round of 32",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021530",
+      "date": "2026-07-04T17:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021533",
+      "date": "2026-07-04T21:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021532",
+      "date": "2026-07-05T20:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021531",
+      "date": "2026-07-06T00:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021529",
+      "date": "2026-07-06T19:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021534",
+      "date": "2026-07-07T00:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021528",
+      "date": "2026-07-07T16:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021535",
+      "date": "2026-07-07T20:00:00Z",
+      "stage": "Round of 16",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021536",
+      "date": "2026-07-09T20:00:00Z",
+      "stage": "Quarter-final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021538",
+      "date": "2026-07-10T19:00:00Z",
+      "stage": "Quarter-final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021539",
+      "date": "2026-07-11T21:00:00Z",
+      "stage": "Quarter-final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021537",
+      "date": "2026-07-12T01:00:00Z",
+      "stage": "Quarter-final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021541",
+      "date": "2026-07-14T19:00:00Z",
+      "stage": "Semi-final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021540",
+      "date": "2026-07-15T19:00:00Z",
+      "stage": "Semi-final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021542",
+      "date": "2026-07-18T21:00:00Z",
+      "stage": "Play-off for third place",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    },
+    {
+      "id": "400021543",
+      "date": "2026-07-19T19:00:00Z",
+      "stage": "Final",
+      "group": null,
+      "home": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "away": {
+        "name": "?",
+        "score": null,
+        "id": null
+      },
+      "winner": null,
+      "status": 1
+    }
+  ]
+}
