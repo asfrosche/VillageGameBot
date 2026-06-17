@@ -52,6 +52,7 @@ from utils.embeds import error_embed, info_embed, plain_embed
 from cogs.estate_cog import Estate
 from cogs.item_drop_cog import ItemDrop
 from cogs.channel_cog import ChannelMap
+from cogs.draft_cog import DraftCog
 
 
 
@@ -618,6 +619,7 @@ async def startcog():
     await bot.add_cog(ItemDrop(bot))
     await bot.add_cog(ChannelMap(bot))
     await bot.add_cog(VgIntro(bot))
+    await bot.add_cog(DraftCog(bot))
 
 
 asyncio.run(startcog())

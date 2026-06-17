@@ -9,6 +9,73 @@ from discord.ext import commands
 from discord import AllowedMentions
 from discord.ui import Select, View, Button
 from cogs.data_utils import load_guild_data, save_guild_data
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+COMMON_TIMEZONES = [
+    ("UTC", "UTC", "🌐"),
+    ("US Eastern", "America/New_York", "🇺🇸"),
+    ("US Central", "America/Chicago", "🇺🇸"),
+    ("US Mountain", "America/Denver", "🇺🇸"),
+    ("US Pacific", "America/Los_Angeles", "🇺🇸"),
+    ("Hawaii", "Pacific/Honolulu", "🌺"),
+    ("Brazil", "America/Sao_Paulo", "🇧🇷"),
+    ("Mexico", "America/Mexico_City", "🇲🇽"),
+    ("UK/Ireland", "Europe/London", "🇬🇧"),
+    ("Central Europe", "Europe/Paris", "🇪🇺"),
+    ("Eastern Europe", "Europe/Bucharest", "🇪🇺"),
+    ("Moscow", "Europe/Moscow", "🇷🇺"),
+    ("India", "Asia/Kolkata", "🇮🇳"),
+    ("China", "Asia/Shanghai", "🇨🇳"),
+    ("Japan/Korea", "Asia/Tokyo", "🇯🇵"),
+    ("Singapore", "Asia/Singapore", "🇸🇬"),
+    ("Dubai", "Asia/Dubai", "🇦🇪"),
+    ("Australia Eastern", "Australia/Sydney", "🇦🇺"),
+    ("Australia Western", "Australia/Perth", "🇦🇺"),
+    ("New Zealand", "Pacific/Auckland", "🇳🇿"),
+    ("South Africa", "Africa/Johannesburg", "🇿🇦"),
+    ("Cairo", "Africa/Cairo", "🇪🇬"),
+]
+
+
+class TimezoneSelectView(discord.ui.View):
+    def __init__(self, user_id: int, dt: datetime):
+        super().__init__()
+        self.user_id = user_id
+        self.dt = dt
+
+    @discord.ui.select(
+        placeholder="🌍 Pick a timezone...",
+        options=[
+            discord.SelectOption(label=label, value=value, emoji=emoji)
+            for label, value, emoji in COMMON_TIMEZONES
+        ] + [discord.SelectOption(label="Custom...", value="__custom__", emoji="✏️")]
+    )
+    async def tz_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("Not your menu.", ephemeral=True)
+
+        value = select.values[0]
+        if value == "__custom__":
+            await interaction.response.edit_message(
+                content="✏️ Use `.timestamp DD-MM HH:MM <timezone>` for a timezone not in the list.",
+                view=None,
+            )
+            return
+
+        tz = ZoneInfo(value)
+        dt_local = self.dt.replace(tzinfo=tz)
+        ts = int(dt_local.timestamp())
+
+        embed = discord.Embed(title="🕐 Discord Timestamps", color=0xff3fb9)
+        embed.add_field(name="Relative", value=f"`<t:{ts}:R>` → <t:{ts}:R>", inline=False)
+        embed.add_field(name="Full", value=f"`<t:{ts}:F>` → <t:{ts}:F>", inline=False)
+        embed.add_field(name="Date Only", value=f"`<t:{ts}:D>` → <t:{ts}:D>", inline=True)
+        embed.add_field(name="Time Only", value=f"`<t:{ts}:t>` → <t:{ts}:t>", inline=True)
+        embed.add_field(name="Long Time", value=f"`<t:{ts}:T>` → <t:{ts}:T>", inline=True)
+        embed.set_footer(text=f"{dt_local.strftime('%d-%m %H:%M')} {value}")
+
+        await interaction.response.edit_message(content=None, embed=embed, view=None)
 
 
 class Other(commands.Cog):
@@ -485,14 +552,29 @@ class Other(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
-    @commands.command()
-    async def timestamp(self, ctx, date_str: str, time_str: str):
+    @commands.command(aliases=["ts"])
+    async def timestamp(self, ctx, date_str: str = None, time_str: str = None):
+        """Generate Discord timestamps that show in everyone's local time.
+        
+        Usage: .timestamp DD-MM HH:MM
+        Example: .timestamp 25-12 14:30
+        
+        Year is assumed to be {datetime.now().year}.
+        After submitting, pick a timezone from the dropdown.
+        """
+        if date_str is None or time_str is None:
+            await ctx.send("❌ Usage: `.timestamp DD-MM HH:MM` — e.g. `.timestamp 25-12 14:30`\nThen pick a timezone from the dropdown.")
+            return
+
         try:
-            datetime_obj = datetime.strptime(f"{date_str} {time_str}", "%d-%m-%Y %H:%M:%S")
-            timestamp_str = datetime_obj.strftime("<t:%s>" % int(datetime_obj.timestamp()))
-            await ctx.send(f"Discord Timestamp: {timestamp_str}")
+            dt = datetime.strptime(f"{date_str} {time_str}", "%d-%m %H:%M")
+            dt = dt.replace(year=datetime.now().year)
         except ValueError:
-            await ctx.send("Invalid date or time format. Please use 'DD-MM-YYYY' for date and 'HH:MM:SS' for time.")
+            await ctx.send("❌ Wrong format. Use `.timestamp DD-MM HH:MM` (e.g. `.timestamp 25-12 14:30`) then pick a timezone from the dropdown.")
+            return
+
+        view = TimezoneSelectView(ctx.author.id, dt)
+        await ctx.send("🌍 **Select a timezone:**", view=view)
 
     @commands.command()
     async def time(self, ctx):
@@ -651,6 +733,7 @@ class Other(commands.Cog):
                 "games": self.help_games,
                 "birthdays": self.help_birthdays,
                 "calendar": self.help_calendar,
+                "draft": self.help_draft,
             }
             if category in categories:
                 await categories[category](ctx)
@@ -723,6 +806,7 @@ class Other(commands.Cog):
         embedh.add_field(name="↪ - Send Role", value="2 Commands\n`.help sendrole`", inline=True)
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
         embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
+        embedh.add_field(name="🏆 - Draft", value="20 Commands\n`.help draft`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -1000,7 +1084,7 @@ class Other(commands.Cog):
             "━━━━━━━━━━━━━━━━\n"
             "**`.deletechannel`** ─ Delete this channel (admin)\n"
             "**`.deletecategory`** ─ Delete this category (admin)\n"
-            "**`.timestamp <DD-MM-YYYY> <HH:MM:SS>`** ─ Gen timestamp\n"
+            "**`.timestamp <DD-MM> <HH:MM>`** ─ Gen timestamp with timezone picker\n"
             "**`.time`** ─ Get sent time of replied-to message\n"
             "**`.dropitem`** ─ Drop interactive item (see docs)\n"
             "**`.revive`** ─ Revive dead players (admin)"
@@ -1234,6 +1318,40 @@ class Other(commands.Cog):
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_calendar)
+
+    async def help_draft(self, ctx):
+        embed = discord.Embed(title="🏆 Draft commands", description="20 commands", color=0xff3fb9)
+        embed.add_field(name="Draft Commands", value=(
+            "**`.draftstart @u1 @u2 ...`** ─ Start a snake draft (admin)\n"
+            "**`.prepick`** ─ Manage your prepicks (max 2)\n"
+            "**`.draftboard`** ─ Show all teams\n"
+            "**`.myteam`** ─ Show your team\n"
+            "**`.team @user`** ─ Show a user's team with fantasy points\n"
+            "**`.forcepick <name>`** ─ Force a pick for the current user (admin)\n"
+            "**`.undo`** ─ Undo the most recent pick (admin)\n"
+            "**`.pause`** ─ Pause the draft (admin)\n"
+            "**`.resume`** ─ Resume the draft (admin)\n"
+            "**`.enddraft`** ─ End the draft (admin)"
+        ), inline=False)
+        embed.add_field(name="Points Commands", value=(
+            "**`.draftpoints`** ─ Live fantasy points leaderboard for all teams\n"
+            "**`.standings`** ─ Standings with avg & best points\n"
+            "**`.player <name>`** / `.pp` ─ Look up a player's FIFA fantasy points\n"
+            "**`.scoutingboard`** ─ Scouting bonus leaderboard (ownership % at time of scoring)\n"
+            "**`.topplayers [N]`** ─ Top N drafted players by points (default 10)\n"
+            "**`.teamvalue @user`** ─ Point breakdown per player on a team\n"
+            "**`.team @user`** ─ Same as team command with fantasy points"
+        ), inline=False)
+        embed.add_field(name="Match Analytics", value=(
+            "**`.matches [filter]`** / `.matchinfo` ─ Latest match results with fantasy top scorers\n"
+            "**`.trending [position]`** / `.form` ─ Players with best form rating\n"
+            "**`.differentials [N]`** / `.diff` ─ Best differential picks (high pts, low ownership)"
+        ), inline=False)
+        embed.add_field(name="Simulation", value=(
+            "**`.simulate`** / `.sim` ─ Fetch latest data + live tournament simulation with goal animation"
+        ), inline=False)
+        embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
+        await self.send_help_page(ctx, embed, self.help_draft)
 
 
 class NarrationColorView(discord.ui.View):

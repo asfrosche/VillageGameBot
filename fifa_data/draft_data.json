@@ -1,0 +1,2407 @@
+{
+  "1074546612887638086": {
+    "channel_id": 1515084506007208036,
+    "managers": [
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      289028781497253888,
+      527476877086949376
+    ],
+    "snake_order": [
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      609732628790378512,
+      1051933684212715540,
+      1094255183321641020,
+      499627134973640707,
+      383330685139550208,
+      675440387594256384,
+      460859612216819733,
+      910081079283699732,
+      696063215238381609,
+      691180618402234399,
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      609732628790378512,
+      1051933684212715540,
+      1094255183321641020,
+      499627134973640707,
+      383330685139550208,
+      675440387594256384,
+      460859612216819733,
+      910081079283699732,
+      696063215238381609,
+      691180618402234399,
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      609732628790378512,
+      1051933684212715540,
+      1094255183321641020,
+      499627134973640707,
+      383330685139550208,
+      675440387594256384,
+      460859612216819733,
+      910081079283699732,
+      696063215238381609,
+      691180618402234399,
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      609732628790378512,
+      1051933684212715540,
+      1094255183321641020,
+      499627134973640707,
+      383330685139550208,
+      675440387594256384,
+      460859612216819733,
+      910081079283699732,
+      696063215238381609,
+      691180618402234399,
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      609732628790378512,
+      1051933684212715540,
+      1094255183321641020,
+      499627134973640707,
+      383330685139550208,
+      675440387594256384,
+      460859612216819733,
+      910081079283699732,
+      696063215238381609,
+      691180618402234399,
+      691180618402234399,
+      696063215238381609,
+      910081079283699732,
+      460859612216819733,
+      675440387594256384,
+      383330685139550208,
+      499627134973640707,
+      1094255183321641020,
+      1051933684212715540,
+      609732628790378512,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888,
+      289028781497253888
+    ],
+    "current_index": 110,
+    "teams": {
+      "691180618402234399": {
+        "players": [
+          {
+            "name": "Kyllian mbappe",
+            "country": "France",
+            "position": "FWD",
+            "owner": 691180618402234399,
+            "pick_number": 1,
+            "fifa_id": 500,
+            "fifa_name": "Kylian Mbappé"
+          },
+          {
+            "name": "Kimmich",
+            "country": "Germany",
+            "position": "DEF",
+            "owner": 691180618402234399,
+            "pick_number": 20,
+            "fifa_id": 542,
+            "fifa_name": "Joshua Kimmich"
+          },
+          {
+            "name": "Nuno mendez",
+            "country": "Portugal",
+            "position": "DEF",
+            "owner": 691180618402234399,
+            "pick_number": 21,
+            "fifa_id": 916,
+            "fifa_name": "Nuno Mendes"
+          },
+          {
+            "name": "Marc Cucurella",
+            "country": "Spain",
+            "position": "DEF",
+            "owner": 691180618402234399,
+            "pick_number": 40,
+            "fifa_id": 1088,
+            "fifa_name": "Marc Cucurella"
+          },
+          {
+            "name": "Jamal Musiala",
+            "country": "Germany",
+            "position": "MID",
+            "owner": 691180618402234399,
+            "pick_number": 41,
+            "fifa_id": 1600,
+            "fifa_name": "Jamal Musiala"
+          },
+          {
+            "name": "C Pulisic",
+            "country": "United States",
+            "position": "MID",
+            "owner": 691180618402234399,
+            "pick_number": 60,
+            "fifa_id": 1274,
+            "fifa_name": "Christian Pulisic"
+          },
+          {
+            "name": "Reece James",
+            "country": "England",
+            "position": "DEF",
+            "owner": 691180618402234399,
+            "pick_number": 61,
+            "fifa_id": 1709,
+            "fifa_name": "Reece James"
+          },
+          {
+            "name": "Unai Simon",
+            "country": "Spain",
+            "position": "GK",
+            "owner": 691180618402234399,
+            "pick_number": 80,
+            "fifa_id": 1099,
+            "fifa_name": "Unai Simón"
+          },
+          {
+            "name": "Raul Jiminez",
+            "country": "Mexico",
+            "position": "FWD",
+            "owner": 691180618402234399,
+            "pick_number": 81,
+            "fifa_id": 748,
+            "fifa_name": "Raúl Jiménez"
+          },
+          {
+            "name": "Rafael Leão",
+            "country": "Portugal",
+            "position": "MID",
+            "owner": 691180618402234399,
+            "pick_number": 100,
+            "fifa_id": 1574,
+            "fifa_name": "Rafael Leão"
+          },
+          {
+            "name": "Son Heung-Min",
+            "country": "South Korea",
+            "position": "MID",
+            "owner": 691180618402234399,
+            "pick_number": 101,
+            "fifa_id": 723,
+            "fifa_name": "Son Heung-Min"
+          }
+        ],
+        "country_counts": {
+          "France": 1,
+          "Germany": 2,
+          "Portugal": 2,
+          "Spain": 2,
+          "United States": 1,
+          "England": 1,
+          "Mexico": 1,
+          "South Korea": 1
+        }
+      },
+      "696063215238381609": {
+        "players": [
+          {
+            "name": "Bruno Fernandez",
+            "country": "Portugal",
+            "position": "MID",
+            "owner": 696063215238381609,
+            "pick_number": 2,
+            "fifa_id": 939,
+            "fifa_name": "Bruno Fernandes"
+          },
+          {
+            "name": "Nico O'Reilly",
+            "country": "England",
+            "position": "DEF",
+            "owner": 696063215238381609,
+            "pick_number": 19,
+            "fifa_id": 457,
+            "fifa_name": "Nico O'Reilly"
+          },
+          {
+            "name": "Michael Olise",
+            "country": "France",
+            "position": "MID",
+            "owner": 696063215238381609,
+            "pick_number": 22,
+            "fifa_id": 517,
+            "fifa_name": "Michael Olise"
+          },
+          {
+            "name": "Christiano Ronaldo",
+            "country": "Portugal",
+            "position": "FWD",
+            "owner": 696063215238381609,
+            "pick_number": 39,
+            "fifa_id": 1573,
+            "fifa_name": "Cristiano Ronaldo"
+          },
+          {
+            "name": "Florian Wirtz",
+            "country": "Germany",
+            "position": "MID",
+            "owner": 696063215238381609,
+            "pick_number": 42,
+            "fifa_id": 543,
+            "fifa_name": "Florian Wirtz"
+          },
+          {
+            "name": "Fabian Ruiz",
+            "country": "Spain",
+            "position": "MID",
+            "owner": 696063215238381609,
+            "pick_number": 59,
+            "fifa_id": 1998,
+            "fifa_name": "Fabián Ruiz"
+          },
+          {
+            "name": "Upamecano",
+            "country": "France",
+            "position": "DEF",
+            "owner": 696063215238381609,
+            "pick_number": 62,
+            "fifa_id": 494,
+            "fifa_name": "Dayot Upamecano"
+          },
+          {
+            "name": "Declan Rice",
+            "country": "England",
+            "position": "MID",
+            "owner": 696063215238381609,
+            "pick_number": 79,
+            "fifa_id": 488,
+            "fifa_name": "Declan Rice"
+          },
+          {
+            "name": "Darwin Nunez",
+            "country": "Uruguay",
+            "position": "FWD",
+            "owner": 696063215238381609,
+            "pick_number": 82,
+            "fifa_id": 1236,
+            "fifa_name": "Darwin Núñez"
+          },
+          {
+            "name": "Nathaniel Brown",
+            "country": "Germany",
+            "position": "DEF",
+            "owner": 696063215238381609,
+            "pick_number": 99,
+            "fifa_id": 525,
+            "fifa_name": "Nathaniel Brown"
+          },
+          {
+            "name": "Gregor Kobel",
+            "country": "Switzerland",
+            "position": "GK",
+            "owner": 696063215238381609,
+            "pick_number": 102,
+            "fifa_id": 1153,
+            "fifa_name": "Gregor Kobel"
+          }
+        ],
+        "country_counts": {
+          "Portugal": 2,
+          "England": 2,
+          "France": 2,
+          "Germany": 2,
+          "Spain": 1,
+          "Uruguay": 1,
+          "Switzerland": 1
+        }
+      },
+      "910081079283699732": {
+        "players": [
+          {
+            "name": "Harry Kane",
+            "country": "England",
+            "position": "FWD",
+            "owner": 910081079283699732,
+            "pick_number": 3,
+            "fifa_id": 468,
+            "fifa_name": "Harry Kane"
+          },
+          {
+            "name": "Pau Cubarsí",
+            "country": "Spain",
+            "position": "DEF",
+            "owner": 910081079283699732,
+            "pick_number": 23,
+            "fifa_id": 1089,
+            "fifa_name": "Pau Cubarsí"
+          },
+          {
+            "name": "Jordan Bos",
+            "country": "Australia",
+            "position": "DEF",
+            "owner": 910081079283699732,
+            "pick_number": 38,
+            "fifa_id": 58,
+            "fifa_name": "Jordan Bos"
+          },
+          {
+            "name": "Hwang In-Beom",
+            "country": "South Korea",
+            "position": "MID",
+            "owner": 910081079283699732,
+            "pick_number": 43,
+            "fifa_id": 1549,
+            "fifa_name": "Hwang In-Beom"
+          },
+          {
+            "name": "De Jong",
+            "country": "Netherlands",
+            "position": "MID",
+            "owner": 910081079283699732,
+            "pick_number": 58,
+            "fifa_id": 2040,
+            "fifa_name": "Frenkie de Jong"
+          },
+          {
+            "name": "I Saibari",
+            "country": "Morocco",
+            "position": "MID",
+            "owner": 910081079283699732,
+            "pick_number": 63,
+            "fifa_id": 792,
+            "fifa_name": "Ismael Saibari"
+          },
+          {
+            "name": "Nakamura",
+            "country": "Japan",
+            "position": "MID",
+            "owner": 910081079283699732,
+            "pick_number": 78,
+            "fifa_id": 671,
+            "fifa_name": "Keito Nakamura"
+          },
+          {
+            "name": "Van de ven",
+            "country": "Netherlands",
+            "position": "DEF",
+            "owner": 910081079283699732,
+            "pick_number": 83,
+            "fifa_id": 797,
+            "fifa_name": "Micky van de Ven"
+          },
+          {
+            "name": "Brahim Díaz",
+            "country": "Morocco",
+            "position": "MID",
+            "owner": 910081079283699732,
+            "pick_number": 98,
+            "fifa_id": 2020,
+            "fifa_name": "Brahim Díaz"
+          },
+          {
+            "name": "Ayase Ueda",
+            "country": "Japan",
+            "position": "FWD",
+            "owner": 910081079283699732,
+            "pick_number": 103,
+            "fifa_id": 672,
+            "fifa_name": "Ayase Ueda"
+          },
+          {
+            "name": "Manuel Neuer",
+            "country": "Germany",
+            "position": "GK",
+            "owner": 910081079283699732,
+            "pick_number": 0,
+            "fifa_id": 1598,
+            "fifa_name": "Manuel Neuer"
+          }
+        ],
+        "country_counts": {
+          "England": 1,
+          "Spain": 1,
+          "Australia": 1,
+          "South Korea": 1,
+          "Netherlands": 2,
+          "Morocco": 2,
+          "Japan": 2,
+          "Germany": 1
+        }
+      },
+      "460859612216819733": {
+        "players": [
+          {
+            "name": "Nico Tagliafico",
+            "country": "Argentina",
+            "position": "DEF",
+            "owner": 460859612216819733,
+            "pick_number": 4,
+            "fifa_id": 34,
+            "fifa_name": "Nicolás Tagliafico"
+          },
+          {
+            "name": "Kai Havertz",
+            "country": "Germany",
+            "position": "FWD",
+            "owner": 460859612216819733,
+            "pick_number": 17,
+            "fifa_id": 528,
+            "fifa_name": "Kai Havertz"
+          },
+          {
+            "name": "Vini Jr",
+            "country": "Brazil",
+            "position": "MID",
+            "owner": 460859612216819733,
+            "pick_number": 37,
+            "fifa_id": 173,
+            "fifa_name": "Vinícius Júnior"
+          },
+          {
+            "name": "Gakpo",
+            "country": "Netherlands",
+            "position": "FWD",
+            "owner": 460859612216819733,
+            "pick_number": 44,
+            "fifa_id": 804,
+            "fifa_name": "Cody Gakpo"
+          },
+          {
+            "name": "Aymeric Laporte",
+            "country": "Spain",
+            "position": "DEF",
+            "owner": 460859612216819733,
+            "pick_number": 57,
+            "fifa_id": 1086,
+            "fifa_name": "Aymeric Laporte"
+          },
+          {
+            "name": "Arda Guler",
+            "country": "Turkey",
+            "position": "MID",
+            "owner": 460859612216819733,
+            "pick_number": 64,
+            "fifa_id": 1215,
+            "fifa_name": "Arda Güler"
+          },
+          {
+            "name": "Nicolas pepe",
+            "country": "Côte d'Ivoire",
+            "position": "FWD",
+            "owner": 460859612216819733,
+            "pick_number": 77,
+            "fifa_id": 308,
+            "fifa_name": "Nicolas Pépé"
+          },
+          {
+            "name": "Malik Tillman",
+            "country": "United States",
+            "position": "MID",
+            "owner": 460859612216819733,
+            "pick_number": 84,
+            "fifa_id": 1254,
+            "fifa_name": "Malik Tillman"
+          },
+          {
+            "name": "Israel Reyes Romero",
+            "country": "Mexico",
+            "position": "DEF",
+            "owner": 460859612216819733,
+            "pick_number": 97,
+            "fifa_id": 744,
+            "fifa_name": "Israel Reyes"
+          },
+          {
+            "name": "Mathias Olivera",
+            "country": "Uruguay",
+            "position": "DEF",
+            "owner": 460859612216819733,
+            "pick_number": 104,
+            "fifa_id": 1229,
+            "fifa_name": "Mathías Olivera"
+          },
+          {
+            "name": "Diogo Costa",
+            "country": "Portugal",
+            "position": "GK",
+            "owner": 460859612216819733,
+            "pick_number": 0,
+            "fifa_id": 1569,
+            "fifa_name": "Diogo Costa"
+          }
+        ],
+        "country_counts": {
+          "Argentina": 1,
+          "Germany": 1,
+          "Brazil": 1,
+          "Netherlands": 1,
+          "Spain": 1,
+          "Turkey": 1,
+          "Côte d'Ivoire": 1,
+          "United States": 1,
+          "Mexico": 1,
+          "Uruguay": 1,
+          "Portugal": 1
+        }
+      },
+      "675440387594256384": {
+        "players": [
+          {
+            "name": "Ousmane Dembélé",
+            "country": "France",
+            "position": "MID",
+            "owner": 675440387594256384,
+            "pick_number": 5,
+            "fifa_id": 501,
+            "fifa_name": "Ousmane Dembélé"
+          },
+          {
+            "name": "Alisson Becker",
+            "country": "Brazil",
+            "position": "GK",
+            "owner": 675440387594256384,
+            "pick_number": 16,
+            "fifa_id": 183,
+            "fifa_name": "Alisson Becker"
+          },
+          {
+            "name": "Pedro González López (Pedri)",
+            "country": "Spain",
+            "position": "MID",
+            "owner": 675440387594256384,
+            "pick_number": 25,
+            "fifa_id": 1106,
+            "fifa_name": "Pedri"
+          },
+          {
+            "name": "Julián Álvarez",
+            "country": "Argentina",
+            "position": "FWD",
+            "owner": 675440387594256384,
+            "pick_number": 36,
+            "fifa_id": 39,
+            "fifa_name": "Julián Alvarez"
+          },
+          {
+            "name": "Rodrigo Hernández Cascante (Rodri)",
+            "country": "Spain",
+            "position": "MID",
+            "owner": 675440387594256384,
+            "pick_number": 45,
+            "fifa_id": 1104,
+            "fifa_name": "Rodri"
+          },
+          {
+            "name": "Rúben Dias",
+            "country": "Portugal",
+            "position": "DEF",
+            "owner": 675440387594256384,
+            "pick_number": 56,
+            "fifa_id": 1570,
+            "fifa_name": "Rúben Dias"
+          },
+          {
+            "name": "Leroy Sané",
+            "country": "Germany",
+            "position": "MID",
+            "owner": 675440387594256384,
+            "pick_number": 65,
+            "fifa_id": 529,
+            "fifa_name": "Leroy Sané"
+          },
+          {
+            "name": "Marc Guéhi",
+            "country": "England",
+            "position": "DEF",
+            "owner": 675440387594256384,
+            "pick_number": 76,
+            "fifa_id": 461,
+            "fifa_name": "Marc Guéhi"
+          },
+          {
+            "name": "J.van Hecke",
+            "country": "Netherlands",
+            "position": "DEF",
+            "owner": 675440387594256384,
+            "pick_number": 85,
+            "fifa_id": 802,
+            "fifa_name": "Jan Paul van Hecke"
+          },
+          {
+            "name": "Martin Odegaard",
+            "country": "Norway",
+            "position": "MID",
+            "owner": 675440387594256384,
+            "pick_number": 96,
+            "fifa_id": 1684,
+            "fifa_name": "Martin Ødegaard"
+          },
+          {
+            "name": "Matheus Cunha",
+            "country": "Brazil",
+            "position": "FWD",
+            "owner": 675440387594256384,
+            "pick_number": 105,
+            "fifa_id": 174,
+            "fifa_name": "Matheus Cunha"
+          }
+        ],
+        "country_counts": {
+          "France": 1,
+          "Brazil": 2,
+          "Spain": 2,
+          "Argentina": 1,
+          "Portugal": 1,
+          "Germany": 1,
+          "England": 1,
+          "Netherlands": 1,
+          "Norway": 1
+        }
+      },
+      "383330685139550208": {
+        "players": [
+          {
+            "name": "Denzel Dumfries",
+            "country": "Netherlands",
+            "position": "DEF",
+            "owner": 383330685139550208,
+            "pick_number": 6,
+            "fifa_id": 795,
+            "fifa_name": "Denzel Dumfries"
+          },
+          {
+            "name": "Marquinhos",
+            "country": "Brazil",
+            "position": "DEF",
+            "owner": 383330685139550208,
+            "pick_number": 15,
+            "fifa_id": 165,
+            "fifa_name": "Marquinhos"
+          },
+          {
+            "name": "Luis Diaz",
+            "country": "Colombia",
+            "position": "MID",
+            "owner": 383330685139550208,
+            "pick_number": 26,
+            "fifa_id": 256,
+            "fifa_name": "Luis Díaz"
+          },
+          {
+            "name": "Romelu Lukaku",
+            "country": "Belgium",
+            "position": "FWD",
+            "owner": 383330685139550208,
+            "pick_number": 35,
+            "fifa_id": 124,
+            "fifa_name": "Romelu Lukaku"
+          },
+          {
+            "name": "Livakovic",
+            "country": "Croatia",
+            "position": "GK",
+            "owner": 383330685139550208,
+            "pick_number": 46,
+            "fifa_id": 338,
+            "fifa_name": "Dominik Livakovic"
+          },
+          {
+            "name": "Sadio Mane",
+            "country": "Senegal",
+            "position": "MID",
+            "owner": 383330685139550208,
+            "pick_number": 55,
+            "fifa_id": 1696,
+            "fifa_name": "Sadio Mané"
+          },
+          {
+            "name": "Desire Doue",
+            "country": "France",
+            "position": "MID",
+            "owner": 383330685139550208,
+            "pick_number": 66,
+            "fifa_id": 505,
+            "fifa_name": "Désiré Doué"
+          },
+          {
+            "name": "Trossard",
+            "country": "Belgium",
+            "position": "MID",
+            "owner": 383330685139550208,
+            "pick_number": 75,
+            "fifa_id": 1526,
+            "fifa_name": "Leandro Trossard"
+          },
+          {
+            "name": "Otamendi",
+            "country": "Argentina",
+            "position": "DEF",
+            "owner": 383330685139550208,
+            "pick_number": 86,
+            "fifa_id": 31,
+            "fifa_name": "Nicolás Otamendi"
+          },
+          {
+            "name": "Julian Quiñones",
+            "country": "Mexico",
+            "position": "FWD",
+            "owner": 383330685139550208,
+            "pick_number": 95,
+            "fifa_id": 750,
+            "fifa_name": "Julián Quiñones"
+          },
+          {
+            "name": "Houssem Aouar",
+            "country": "Algeria",
+            "position": "MID",
+            "owner": 383330685139550208,
+            "pick_number": 106,
+            "fifa_id": 26,
+            "fifa_name": "Houssem Aouar"
+          }
+        ],
+        "country_counts": {
+          "Netherlands": 1,
+          "Brazil": 1,
+          "Colombia": 1,
+          "Belgium": 2,
+          "Croatia": 1,
+          "Senegal": 1,
+          "France": 1,
+          "Argentina": 1,
+          "Mexico": 1,
+          "Algeria": 1
+        }
+      },
+      "499627134973640707": {
+        "players": [
+          {
+            "name": "Yassine Bounou",
+            "country": "Morocco",
+            "position": "GK",
+            "owner": 499627134973640707,
+            "pick_number": 7,
+            "fifa_id": 2010,
+            "fifa_name": "Yassine Bounou"
+          },
+          {
+            "name": "Josko Gvardiol",
+            "country": "Croatia",
+            "position": "DEF",
+            "owner": 499627134973640707,
+            "pick_number": 14,
+            "fifa_id": 1536,
+            "fifa_name": "Josko Gvardiol"
+          },
+          {
+            "name": "Virgil van Dijk",
+            "country": "Netherlands",
+            "position": "DEF",
+            "owner": 499627134973640707,
+            "pick_number": 27,
+            "fifa_id": 796,
+            "fifa_name": "Virgil van Dijk"
+          },
+          {
+            "name": "Amad Diallo",
+            "country": "Côte d'Ivoire",
+            "position": "FWD",
+            "owner": 499627134973640707,
+            "pick_number": 34,
+            "fifa_id": 310,
+            "fifa_name": "Amad Diallo"
+          },
+          {
+            "name": "James Rodríguez",
+            "country": "Colombia",
+            "position": "MID",
+            "owner": 499627134973640707,
+            "pick_number": 47,
+            "fifa_id": 270,
+            "fifa_name": "James Rodríguez"
+          },
+          {
+            "name": "Victor Gyökeres",
+            "country": "Sweden",
+            "position": "FWD",
+            "owner": 499627134973640707,
+            "pick_number": 54,
+            "fifa_id": 1124,
+            "fifa_name": "Viktor Gyökeres"
+          },
+          {
+            "name": "Deniz Undav",
+            "country": "Germany",
+            "position": "FWD",
+            "owner": 499627134973640707,
+            "pick_number": 67,
+            "fifa_id": 531,
+            "fifa_name": "Deniz Undav"
+          },
+          {
+            "name": "Marcel Sabitzer",
+            "country": "Austria",
+            "position": "MID",
+            "owner": 499627134973640707,
+            "pick_number": 74,
+            "fifa_id": 107,
+            "fifa_name": "Marcel Sabitzer"
+          },
+          {
+            "name": "Daniel Muñoz",
+            "country": "Colombia",
+            "position": "DEF",
+            "owner": 499627134973640707,
+            "pick_number": 87,
+            "fifa_id": 248,
+            "fifa_name": "Daniel Muñoz"
+          },
+          {
+            "name": "Rayan Cherki",
+            "country": "France",
+            "position": "MID",
+            "owner": 499627134973640707,
+            "pick_number": 94,
+            "fifa_id": 516,
+            "fifa_name": "Rayan Cherki"
+          },
+          {
+            "name": "Luka Modrić",
+            "country": "Croatia",
+            "position": "MID",
+            "owner": 499627134973640707,
+            "pick_number": 107,
+            "fifa_id": 346,
+            "fifa_name": "Luka Modric"
+          }
+        ],
+        "country_counts": {
+          "Morocco": 1,
+          "Croatia": 2,
+          "Netherlands": 1,
+          "Côte d'Ivoire": 1,
+          "Colombia": 2,
+          "Sweden": 1,
+          "Germany": 1,
+          "Austria": 1,
+          "France": 1
+        }
+      },
+      "1094255183321641020": {
+        "players": [
+          {
+            "name": "Nico Williams",
+            "country": "Spain",
+            "position": "MID",
+            "owner": 1094255183321641020,
+            "pick_number": 8,
+            "fifa_id": 2000,
+            "fifa_name": "Nico Williams"
+          },
+          {
+            "name": "Emiliano Martinez",
+            "country": "Argentina",
+            "position": "GK",
+            "owner": 1094255183321641020,
+            "pick_number": 13,
+            "fifa_id": 45,
+            "fifa_name": "Emiliano Martínez"
+          },
+          {
+            "name": "Joao Neves",
+            "country": "Portugal",
+            "position": "MID",
+            "owner": 1094255183321641020,
+            "pick_number": 28,
+            "fifa_id": 937,
+            "fifa_name": "João Neves"
+          },
+          {
+            "name": "Jeremy Doku",
+            "country": "Belgium",
+            "position": "MID",
+            "owner": 1094255183321641020,
+            "pick_number": 33,
+            "fifa_id": 125,
+            "fifa_name": "Jérémy Doku"
+          },
+          {
+            "name": "Yan Diomandé",
+            "country": "Côte d'Ivoire",
+            "position": "FWD",
+            "owner": 1094255183321641020,
+            "pick_number": 48,
+            "fifa_id": 307,
+            "fifa_name": "Yan Diomande"
+          },
+          {
+            "name": "Guela Doue",
+            "country": "Côte d'Ivoire",
+            "position": "DEF",
+            "owner": 1094255183321641020,
+            "pick_number": 53,
+            "fifa_id": 303,
+            "fifa_name": "Guéla Doué"
+          },
+          {
+            "name": "Trezeguet",
+            "country": "Egypt",
+            "position": "FWD",
+            "owner": 1094255183321641020,
+            "pick_number": 68,
+            "fifa_id": 447,
+            "fifa_name": "Trezeguet"
+          },
+          {
+            "name": "Jules Kounde",
+            "country": "France",
+            "position": "DEF",
+            "owner": 1094255183321641020,
+            "pick_number": 73,
+            "fifa_id": 1430,
+            "fifa_name": "Jules Koundé"
+          },
+          {
+            "name": "Andrej Kramaric",
+            "country": "Croatia",
+            "position": "FWD",
+            "owner": 1094255183321641020,
+            "pick_number": 88,
+            "fifa_id": 333,
+            "fifa_name": "Andrej Kramaric"
+          },
+          {
+            "name": "Yasin Ayari",
+            "country": "Sweden",
+            "position": "MID",
+            "owner": 1094255183321641020,
+            "pick_number": 93,
+            "fifa_id": 1114,
+            "fifa_name": "Yasin Ayari"
+          },
+          {
+            "name": "Thomas Meunier",
+            "country": "Belgium",
+            "position": "DEF",
+            "owner": 1094255183321641020,
+            "pick_number": 108,
+            "fifa_id": 117,
+            "fifa_name": "Thomas Meunier"
+          }
+        ],
+        "country_counts": {
+          "Spain": 1,
+          "Argentina": 1,
+          "Portugal": 1,
+          "Belgium": 2,
+          "Côte d'Ivoire": 2,
+          "Egypt": 1,
+          "France": 1,
+          "Croatia": 1,
+          "Sweden": 1
+        }
+      },
+      "1051933684212715540": {
+        "players": [
+          {
+            "name": "Mike Maignon",
+            "country": "France",
+            "position": "GK",
+            "owner": 1051933684212715540,
+            "pick_number": 9,
+            "fifa_id": 506,
+            "fifa_name": "Mike Maignan"
+          },
+          {
+            "name": "Raphinha",
+            "country": "Brazil",
+            "position": "MID",
+            "owner": 1051933684212715540,
+            "pick_number": 12,
+            "fifa_id": 1366,
+            "fifa_name": "Raphinha"
+          },
+          {
+            "name": "Mikel Oyarzabal",
+            "country": "Spain",
+            "position": "FWD",
+            "owner": 1051933684212715540,
+            "pick_number": 29,
+            "fifa_id": 1094,
+            "fifa_name": "Mikel Oyarzabal"
+          },
+          {
+            "name": "Kevin De Bruyne",
+            "country": "Belgium",
+            "position": "MID",
+            "owner": 1051933684212715540,
+            "pick_number": 32,
+            "fifa_id": 138,
+            "fifa_name": "Kevin De Bruyne"
+          },
+          {
+            "name": "Theo Hernandez",
+            "country": "France",
+            "position": "DEF",
+            "owner": 1051933684212715540,
+            "pick_number": 49,
+            "fifa_id": 492,
+            "fifa_name": "Theo Hernández"
+          },
+          {
+            "name": "Folarin Balogun",
+            "country": "United States",
+            "position": "FWD",
+            "owner": 1051933684212715540,
+            "pick_number": 52,
+            "fifa_id": 1267,
+            "fifa_name": "Folarin Balogun"
+          },
+          {
+            "name": "Gabriel",
+            "country": "Brazil",
+            "position": "DEF",
+            "owner": 1051933684212715540,
+            "pick_number": 69,
+            "fifa_id": 164,
+            "fifa_name": "Gabriel Magalhães"
+          },
+          {
+            "name": "Bernardo Silva",
+            "country": "Portugal",
+            "position": "MID",
+            "owner": 1051933684212715540,
+            "pick_number": 72,
+            "fifa_id": 1572,
+            "fifa_name": "Bernardo Silva"
+          },
+          {
+            "name": "joao cancelo",
+            "country": "Portugal",
+            "position": "DEF",
+            "owner": 1051933684212715540,
+            "pick_number": 89,
+            "fifa_id": 917,
+            "fifa_name": "João Cancelo"
+          },
+          {
+            "name": "Enzo Fernández",
+            "country": "Argentina",
+            "position": "MID",
+            "owner": 1051933684212715540,
+            "pick_number": 92,
+            "fifa_id": 57,
+            "fifa_name": "Enzo Fernández"
+          },
+          {
+            "name": "Takefusa Kubo",
+            "country": "Japan",
+            "position": "MID",
+            "owner": 1051933684212715540,
+            "pick_number": 109,
+            "fifa_id": 1458,
+            "fifa_name": "Takefusa Kubo"
+          }
+        ],
+        "country_counts": {
+          "France": 2,
+          "Brazil": 2,
+          "Spain": 1,
+          "Belgium": 1,
+          "United States": 1,
+          "Portugal": 2,
+          "Argentina": 1,
+          "Japan": 1
+        }
+      },
+      "609732628790378512": {
+        "players": [
+          {
+            "name": "Lionel Messi",
+            "country": "Argentina",
+            "position": "FWD",
+            "owner": 609732628790378512,
+            "pick_number": 10,
+            "fifa_id": 38,
+            "fifa_name": "Lionel Messi"
+          },
+          {
+            "name": "William Saliba",
+            "country": "France",
+            "position": "DEF",
+            "owner": 609732628790378512,
+            "pick_number": 11,
+            "fifa_id": 1429,
+            "fifa_name": "William Saliba"
+          },
+          {
+            "name": "Achraf Hakimi",
+            "country": "Morocco",
+            "position": "DEF",
+            "owner": 609732628790378512,
+            "pick_number": 30,
+            "fifa_id": 2012,
+            "fifa_name": "Achraf Hakimi"
+          },
+          {
+            "name": "Jude Bellingham",
+            "country": "England",
+            "position": "MID",
+            "owner": 609732628790378512,
+            "pick_number": 31,
+            "fifa_id": 491,
+            "fifa_name": "Jude Bellingham"
+          },
+          {
+            "name": "Abdukodir Khusanov",
+            "country": "Uzbekistan",
+            "position": "DEF",
+            "owner": 609732628790378512,
+            "pick_number": 50,
+            "fifa_id": 1293,
+            "fifa_name": "Abdukodir Khusanov"
+          },
+          {
+            "name": "F Valverde",
+            "country": "Uruguay",
+            "position": "MID",
+            "owner": 609732628790378512,
+            "pick_number": 51,
+            "fifa_id": 1248,
+            "fifa_name": "Federico Valverde"
+          },
+          {
+            "name": "A Isak",
+            "country": "Sweden",
+            "position": "FWD",
+            "owner": 609732628790378512,
+            "pick_number": 70,
+            "fifa_id": 1520,
+            "fifa_name": "Alexander Isak"
+          },
+          {
+            "name": "T Curtois",
+            "country": "Belgium",
+            "position": "GK",
+            "owner": 609732628790378512,
+            "pick_number": 71,
+            "fifa_id": 1522,
+            "fifa_name": "Thibaut Courtois"
+          },
+          {
+            "name": "Noussair Mazraoui",
+            "country": "Morocco",
+            "position": "DEF",
+            "owner": 609732628790378512,
+            "pick_number": 90,
+            "fifa_id": 2014,
+            "fifa_name": "Noussair Mazraoui"
+          },
+          {
+            "name": "Antoine Semenyo",
+            "country": "Ghana",
+            "position": "MID",
+            "owner": 609732628790378512,
+            "pick_number": 91,
+            "fifa_id": 1992,
+            "fifa_name": "Antoine Semenyo"
+          },
+          {
+            "name": "Alexis McAllister",
+            "country": "Argentina",
+            "position": "MID",
+            "owner": 609732628790378512,
+            "pick_number": 110,
+            "fifa_id": 56,
+            "fifa_name": "Alexis Mac Allister"
+          }
+        ],
+        "country_counts": {
+          "Argentina": 2,
+          "France": 1,
+          "Morocco": 2,
+          "England": 1,
+          "Uzbekistan": 1,
+          "Uruguay": 1,
+          "Sweden": 1,
+          "Belgium": 1,
+          "Ghana": 1
+        }
+      },
+      "289028781497253888": {
+        "players": [
+          {
+            "name": "Jordan Pickford",
+            "country": "England",
+            "position": "GK",
+            "owner": 289028781497253888,
+            "pick_number": 111,
+            "fifa_id": 477,
+            "fifa_name": "Jordan Pickford"
+          },
+          {
+            "name": "Jonathan Tah",
+            "country": "Germany",
+            "position": "DEF",
+            "owner": 289028781497253888,
+            "pick_number": 112,
+            "fifa_id": 523,
+            "fifa_name": "Jonathan Tah"
+          },
+          {
+            "name": "Nico Schlotterbeck",
+            "country": "Germany",
+            "position": "DEF",
+            "owner": 289028781497253888,
+            "pick_number": 113,
+            "fifa_id": 526,
+            "fifa_name": "Nico Schlotterbeck"
+          },
+          {
+            "name": "Ronald Araujo",
+            "country": "Uruguay",
+            "position": "DEF",
+            "owner": 289028781497253888,
+            "pick_number": 114,
+            "fifa_id": 1226,
+            "fifa_name": "Ronald Araujo"
+          },
+          {
+            "name": "Lamine Yamal",
+            "country": "Spain",
+            "position": "MID",
+            "owner": 289028781497253888,
+            "pick_number": 115,
+            "fifa_id": 1092,
+            "fifa_name": "Lamine Yamal"
+          },
+          {
+            "name": "Vitinha",
+            "country": "Portugal",
+            "position": "MID",
+            "owner": 289028781497253888,
+            "pick_number": 116,
+            "fifa_id": 936,
+            "fifa_name": "Vitinha"
+          },
+          {
+            "name": "Mohamed Salah",
+            "country": "Egypt",
+            "position": "MID",
+            "owner": 289028781497253888,
+            "pick_number": 117,
+            "fifa_id": 1597,
+            "fifa_name": "Mohamed Salah"
+          },
+          {
+            "name": "Aurelien Tchouameni",
+            "country": "France",
+            "position": "MID",
+            "owner": 289028781497253888,
+            "pick_number": 118,
+            "fifa_id": 515,
+            "fifa_name": "Aurélien Tchouaméni"
+          },
+          {
+            "name": "Anthony Gordon",
+            "country": "England",
+            "position": "MID",
+            "owner": 289028781497253888,
+            "pick_number": 119,
+            "fifa_id": 474,
+            "fifa_name": "Anthony Gordon"
+          },
+          {
+            "name": "Erling Haaland",
+            "country": "Norway",
+            "position": "FWD",
+            "owner": 289028781497253888,
+            "pick_number": 120,
+            "fifa_id": 855,
+            "fifa_name": "Erling Haaland"
+          },
+          {
+            "name": "Ferran Torres",
+            "country": "Spain",
+            "position": "FWD",
+            "owner": 289028781497253888,
+            "pick_number": 121,
+            "fifa_id": 1093,
+            "fifa_name": "Ferran Torres"
+          }
+        ],
+        "country_counts": {
+          "England": 2,
+          "Germany": 2,
+          "Uruguay": 1,
+          "Spain": 2,
+          "Portugal": 1,
+          "Egypt": 1,
+          "France": 1,
+          "Norway": 1
+        }
+      },
+      "527476877086949376": {
+        "players": [
+          {
+            "name": "Felix Nmecha",
+            "country": "Germany",
+            "position": "MID",
+            "owner": 527476877086949376,
+            "pick_number": 122,
+            "fifa_id": 1601,
+            "fifa_name": "Felix Nmecha"
+          },
+          {
+            "name": "Tijjani Reijnders",
+            "country": "Netherlands",
+            "position": "MID",
+            "owner": 527476877086949376,
+            "pick_number": 123,
+            "fifa_id": 816,
+            "fifa_name": "Tijjani Reijnders"
+          },
+          {
+            "name": "Daichi Kamada",
+            "country": "Japan",
+            "position": "MID",
+            "owner": 527476877086949376,
+            "pick_number": 124,
+            "fifa_id": 682,
+            "fifa_name": "Daichi Kamada"
+          },
+          {
+            "name": "Iliman Ndiaye",
+            "country": "Senegal",
+            "position": "FWD",
+            "owner": 527476877086949376,
+            "pick_number": 125,
+            "fifa_id": 1042,
+            "fifa_name": "Iliman Ndiaye"
+          },
+          {
+            "name": "Lautaro Martínez",
+            "country": "Argentina",
+            "position": "FWD",
+            "owner": 527476877086949376,
+            "pick_number": 126,
+            "fifa_id": 1338,
+            "fifa_name": "Lautaro Martínez"
+          },
+          {
+            "name": "Nahuel Molina",
+            "country": "Argentina",
+            "position": "DEF",
+            "owner": 527476877086949376,
+            "pick_number": 127,
+            "fifa_id": 30,
+            "fifa_name": "Nahuel Molina"
+          },
+          {
+            "name": "Patrick Beach",
+            "country": "Australia",
+            "position": "GK",
+            "owner": 527476877086949376,
+            "pick_number": 128,
+            "fifa_id": 76,
+            "fifa_name": "Patrick Beach"
+          },
+          {
+            "name": "Breel Embolo",
+            "country": "Switzerland",
+            "position": "FWD",
+            "owner": 527476877086949376,
+            "pick_number": 129,
+            "fifa_id": 1149,
+            "fifa_name": "Breel Embolo"
+          },
+          {
+            "name": "Ricardo Rodríguez",
+            "country": "Switzerland",
+            "position": "DEF",
+            "owner": 527476877086949376,
+            "pick_number": 130,
+            "fifa_id": 1142,
+            "fifa_name": "Ricardo Rodríguez"
+          },
+          {
+            "name": "Marcos Llorente",
+            "country": "Spain",
+            "position": "DEF",
+            "owner": 527476877086949376,
+            "pick_number": 131,
+            "fifa_id": 1102,
+            "fifa_name": "Marcos Llorente"
+          },
+          {
+            "name": "Bukayo Saka",
+            "country": "England",
+            "position": "MID",
+            "owner": 527476877086949376,
+            "pick_number": 132,
+            "fifa_id": 469,
+            "fifa_name": "Bukayo Saka"
+          }
+        ],
+        "country_counts": {
+          "Germany": 2,
+          "Netherlands": 1,
+          "Japan": 1,
+          "Senegal": 1,
+          "Argentina": 2,
+          "Australia": 1,
+          "Switzerland": 2,
+          "Spain": 1,
+          "England": 1
+        }
+      }
+    },
+    "pick_history": [
+      {
+        "name": "Kyllian mbappe",
+        "country": "France",
+        "position": "FWD",
+        "owner": 691180618402234399,
+        "pick_number": 1
+      },
+      {
+        "name": "Bruno Fernandez",
+        "country": "Portugal",
+        "position": "MID",
+        "owner": 696063215238381609,
+        "pick_number": 2
+      },
+      {
+        "name": "Harry Kane",
+        "country": "England",
+        "position": "FWD",
+        "owner": 910081079283699732,
+        "pick_number": 3
+      },
+      {
+        "name": "Nico Tagliafico",
+        "country": "Argentina",
+        "position": "DEF",
+        "owner": 460859612216819733,
+        "pick_number": 4
+      },
+      {
+        "name": "Ousmane Dembélé",
+        "country": "France",
+        "position": "MID",
+        "owner": 675440387594256384,
+        "pick_number": 5
+      },
+      {
+        "name": "Denzel Dumfries",
+        "country": "Netherlands",
+        "position": "DEF",
+        "owner": 383330685139550208,
+        "pick_number": 6
+      },
+      {
+        "name": "Yassine Bounou",
+        "country": "Morocco",
+        "position": "GK",
+        "owner": 499627134973640707,
+        "pick_number": 7
+      },
+      {
+        "name": "Nico Williams",
+        "country": "Spain",
+        "position": "MID",
+        "owner": 1094255183321641020,
+        "pick_number": 8
+      },
+      {
+        "name": "Mike Maignon",
+        "country": "France",
+        "position": "GK",
+        "owner": 1051933684212715540,
+        "pick_number": 9
+      },
+      {
+        "name": "Lionel Messi",
+        "country": "Argentina",
+        "position": "FWD",
+        "owner": 609732628790378512,
+        "pick_number": 10
+      },
+      {
+        "name": "William Saliba",
+        "country": "France",
+        "position": "DEF",
+        "owner": 609732628790378512,
+        "pick_number": 11
+      },
+      {
+        "name": "Raphinha",
+        "country": "Brazil",
+        "position": "MID",
+        "owner": 1051933684212715540,
+        "pick_number": 12
+      },
+      {
+        "name": "Emiliano Martinez",
+        "country": "Argentina",
+        "position": "GK",
+        "owner": 1094255183321641020,
+        "pick_number": 13
+      },
+      {
+        "name": "Josko Gvardiol",
+        "country": "Croatia",
+        "position": "DEF",
+        "owner": 499627134973640707,
+        "pick_number": 14
+      },
+      {
+        "name": "Marquinhos",
+        "country": "Brazil",
+        "position": "DEF",
+        "owner": 383330685139550208,
+        "pick_number": 15
+      },
+      {
+        "name": "Alisson Becker",
+        "country": "Brazil",
+        "position": "GK",
+        "owner": 675440387594256384,
+        "pick_number": 16
+      },
+      {
+        "name": "Kai Havertz",
+        "country": "Germany",
+        "position": "FWD",
+        "owner": 460859612216819733,
+        "pick_number": 17
+      },
+      {
+        "name": "Oliver Baumann",
+        "country": "Germany",
+        "position": "GK",
+        "owner": 910081079283699732,
+        "pick_number": 18
+      },
+      {
+        "name": "Nico O'Reilly",
+        "country": "England",
+        "position": "DEF",
+        "owner": 696063215238381609,
+        "pick_number": 19
+      },
+      {
+        "name": "Kimmich",
+        "country": "Germany",
+        "position": "DEF",
+        "owner": 691180618402234399,
+        "pick_number": 20
+      },
+      {
+        "name": "Nuno mendez",
+        "country": "Portugal",
+        "position": "DEF",
+        "owner": 691180618402234399,
+        "pick_number": 21
+      },
+      {
+        "name": "Michael Olise",
+        "country": "France",
+        "position": "MID",
+        "owner": 696063215238381609,
+        "pick_number": 22
+      },
+      {
+        "name": "Pau Cubarsí",
+        "country": "Spain",
+        "position": "DEF",
+        "owner": 910081079283699732,
+        "pick_number": 23
+      },
+      {
+        "name": "Jose Sa",
+        "country": "Portugal",
+        "position": "GK",
+        "owner": 460859612216819733,
+        "pick_number": 24
+      },
+      {
+        "name": "Pedro González López (Pedri)",
+        "country": "Spain",
+        "position": "MID",
+        "owner": 675440387594256384,
+        "pick_number": 25
+      },
+      {
+        "name": "Luis Diaz",
+        "country": "Colombia",
+        "position": "MID",
+        "owner": 383330685139550208,
+        "pick_number": 26
+      },
+      {
+        "name": "Virgil van Dijk",
+        "country": "Netherlands",
+        "position": "DEF",
+        "owner": 499627134973640707,
+        "pick_number": 27
+      },
+      {
+        "name": "Joao Neves",
+        "country": "Portugal",
+        "position": "MID",
+        "owner": 1094255183321641020,
+        "pick_number": 28
+      },
+      {
+        "name": "Mikel Oyarzabal",
+        "country": "Spain",
+        "position": "FWD",
+        "owner": 1051933684212715540,
+        "pick_number": 29
+      },
+      {
+        "name": "Achraf Hakimi",
+        "country": "Morocco",
+        "position": "DEF",
+        "owner": 609732628790378512,
+        "pick_number": 30
+      },
+      {
+        "name": "Jude Bellingham",
+        "country": "England",
+        "position": "MID",
+        "owner": 609732628790378512,
+        "pick_number": 31
+      },
+      {
+        "name": "Kevin De Bruyne",
+        "country": "Belgium",
+        "position": "MID",
+        "owner": 1051933684212715540,
+        "pick_number": 32
+      },
+      {
+        "name": "Jeremy Doku",
+        "country": "Belgium",
+        "position": "MID",
+        "owner": 1094255183321641020,
+        "pick_number": 33
+      },
+      {
+        "name": "Amad Diallo",
+        "country": "Côte d'Ivoire",
+        "position": "FWD",
+        "owner": 499627134973640707,
+        "pick_number": 34
+      },
+      {
+        "name": "Romelu Lukaku",
+        "country": "Belgium",
+        "position": "FWD",
+        "owner": 383330685139550208,
+        "pick_number": 35
+      },
+      {
+        "name": "Julián Álvarez",
+        "country": "Argentina",
+        "position": "FWD",
+        "owner": 675440387594256384,
+        "pick_number": 36
+      },
+      {
+        "name": "Vini Jr",
+        "country": "Brazil",
+        "position": "MID",
+        "owner": 460859612216819733,
+        "pick_number": 37
+      },
+      {
+        "name": "Jordan Bos",
+        "country": "Australia",
+        "position": "DEF",
+        "owner": 910081079283699732,
+        "pick_number": 38
+      },
+      {
+        "name": "Christiano Ronaldo",
+        "country": "Portugal",
+        "position": "FWD",
+        "owner": 696063215238381609,
+        "pick_number": 39
+      },
+      {
+        "name": "Marc Cucurella",
+        "country": "Spain",
+        "position": "DEF",
+        "owner": 691180618402234399,
+        "pick_number": 40
+      },
+      {
+        "name": "Jamal Musiala",
+        "country": "Germany",
+        "position": "MID",
+        "owner": 691180618402234399,
+        "pick_number": 41
+      },
+      {
+        "name": "Florian Wirtz",
+        "country": "Germany",
+        "position": "MID",
+        "owner": 696063215238381609,
+        "pick_number": 42
+      },
+      {
+        "name": "Hwang In-Beom",
+        "country": "South Korea",
+        "position": "MID",
+        "owner": 910081079283699732,
+        "pick_number": 43
+      },
+      {
+        "name": "Gakpo",
+        "country": "Netherlands",
+        "position": "FWD",
+        "owner": 460859612216819733,
+        "pick_number": 44
+      },
+      {
+        "name": "Rodrigo Hernández Cascante (Rodri)",
+        "country": "Spain",
+        "position": "MID",
+        "owner": 675440387594256384,
+        "pick_number": 45
+      },
+      {
+        "name": "Livakovic",
+        "country": "Croatia",
+        "position": "GK",
+        "owner": 383330685139550208,
+        "pick_number": 46
+      },
+      {
+        "name": "James Rodríguez",
+        "country": "Colombia",
+        "position": "MID",
+        "owner": 499627134973640707,
+        "pick_number": 47
+      },
+      {
+        "name": "Yan Diomandé",
+        "country": "Côte d'Ivoire",
+        "position": "FWD",
+        "owner": 1094255183321641020,
+        "pick_number": 48
+      },
+      {
+        "name": "Theo Hernandez",
+        "country": "France",
+        "position": "DEF",
+        "owner": 1051933684212715540,
+        "pick_number": 49
+      },
+      {
+        "name": "Abdukodir Khusanov",
+        "country": "Uzbekistan",
+        "position": "DEF",
+        "owner": 609732628790378512,
+        "pick_number": 50
+      },
+      {
+        "name": "F Valverde",
+        "country": "Uruguay",
+        "position": "MID",
+        "owner": 609732628790378512,
+        "pick_number": 51
+      },
+      {
+        "name": "Folarin Balogun",
+        "country": "United States",
+        "position": "FWD",
+        "owner": 1051933684212715540,
+        "pick_number": 52
+      },
+      {
+        "name": "Guela Doue",
+        "country": "Côte d'Ivoire",
+        "position": "DEF",
+        "owner": 1094255183321641020,
+        "pick_number": 53
+      },
+      {
+        "name": "Victor Gyökeres",
+        "country": "Sweden",
+        "position": "FWD",
+        "owner": 499627134973640707,
+        "pick_number": 54
+      },
+      {
+        "name": "Sadio Mane",
+        "country": "Senegal",
+        "position": "MID",
+        "owner": 383330685139550208,
+        "pick_number": 55
+      },
+      {
+        "name": "Rúben Dias",
+        "country": "Portugal",
+        "position": "DEF",
+        "owner": 675440387594256384,
+        "pick_number": 56
+      },
+      {
+        "name": "Aymeric Laporte",
+        "country": "Spain",
+        "position": "DEF",
+        "owner": 460859612216819733,
+        "pick_number": 57
+      },
+      {
+        "name": "De Jong",
+        "country": "Netherlands",
+        "position": "MID",
+        "owner": 910081079283699732,
+        "pick_number": 58
+      },
+      {
+        "name": "Fabian Ruiz",
+        "country": "Spain",
+        "position": "MID",
+        "owner": 696063215238381609,
+        "pick_number": 59
+      },
+      {
+        "name": "C Pulisic",
+        "country": "United States",
+        "position": "MID",
+        "owner": 691180618402234399,
+        "pick_number": 60
+      },
+      {
+        "name": "Reece James",
+        "country": "England",
+        "position": "DEF",
+        "owner": 691180618402234399,
+        "pick_number": 61
+      },
+      {
+        "name": "Upamecano",
+        "country": "France",
+        "position": "DEF",
+        "owner": 696063215238381609,
+        "pick_number": 62
+      },
+      {
+        "name": "I Saibari",
+        "country": "Morocco",
+        "position": "MID",
+        "owner": 910081079283699732,
+        "pick_number": 63
+      },
+      {
+        "name": "Arda Guler",
+        "country": "Turkey",
+        "position": "MID",
+        "owner": 460859612216819733,
+        "pick_number": 64
+      },
+      {
+        "name": "Leroy Sané",
+        "country": "Germany",
+        "position": "FWD",
+        "owner": 675440387594256384,
+        "pick_number": 65
+      },
+      {
+        "name": "Desire Doue",
+        "country": "France",
+        "position": "MID",
+        "owner": 383330685139550208,
+        "pick_number": 66
+      },
+      {
+        "name": "Deniz Undav",
+        "country": "Germany",
+        "position": "FWD",
+        "owner": 499627134973640707,
+        "pick_number": 67
+      },
+      {
+        "name": "Trezeguet",
+        "country": "Egypt",
+        "position": "FWD",
+        "owner": 1094255183321641020,
+        "pick_number": 68
+      },
+      {
+        "name": "Gabriel",
+        "country": "Brazil",
+        "position": "DEF",
+        "owner": 1051933684212715540,
+        "pick_number": 69
+      },
+      {
+        "name": "A Isak",
+        "country": "Sweden",
+        "position": "FWD",
+        "owner": 609732628790378512,
+        "pick_number": 70
+      },
+      {
+        "name": "T Curtois",
+        "country": "Belgium",
+        "position": "GK",
+        "owner": 609732628790378512,
+        "pick_number": 71
+      },
+      {
+        "name": "Bernardo Silva",
+        "country": "Portugal",
+        "position": "MID",
+        "owner": 1051933684212715540,
+        "pick_number": 72
+      },
+      {
+        "name": "Jules Kounde",
+        "country": "France",
+        "position": "DEF",
+        "owner": 1094255183321641020,
+        "pick_number": 73
+      },
+      {
+        "name": "Marcel Sabitzer",
+        "country": "Austria",
+        "position": "MID",
+        "owner": 499627134973640707,
+        "pick_number": 74
+      },
+      {
+        "name": "Trossard",
+        "country": "Belgium",
+        "position": "MID",
+        "owner": 383330685139550208,
+        "pick_number": 75
+      },
+      {
+        "name": "Marc Guéhi",
+        "country": "England",
+        "position": "DEF",
+        "owner": 675440387594256384,
+        "pick_number": 76
+      },
+      {
+        "name": "Nicolas pepe",
+        "country": "Côte d'Ivoire",
+        "position": "FWD",
+        "owner": 460859612216819733,
+        "pick_number": 77
+      },
+      {
+        "name": "Nakamura",
+        "country": "Japan",
+        "position": "MID",
+        "owner": 910081079283699732,
+        "pick_number": 78
+      },
+      {
+        "name": "Declan Rice",
+        "country": "England",
+        "position": "MID",
+        "owner": 696063215238381609,
+        "pick_number": 79
+      },
+      {
+        "name": "Unai Simon",
+        "country": "Spain",
+        "position": "GK",
+        "owner": 691180618402234399,
+        "pick_number": 80
+      },
+      {
+        "name": "Raul Jiminez",
+        "country": "Mexico",
+        "position": "FWD",
+        "owner": 691180618402234399,
+        "pick_number": 81
+      },
+      {
+        "name": "Darwin Nunez",
+        "country": "Uruguay",
+        "position": "FWD",
+        "owner": 696063215238381609,
+        "pick_number": 82
+      },
+      {
+        "name": "Van de ven",
+        "country": "Netherlands",
+        "position": "DEF",
+        "owner": 910081079283699732,
+        "pick_number": 83
+      },
+      {
+        "name": "Malik Tillman",
+        "country": "United States",
+        "position": "MID",
+        "owner": 460859612216819733,
+        "pick_number": 84
+      },
+      {
+        "name": "J.van Hecke",
+        "country": "Netherlands",
+        "position": "DEF",
+        "owner": 675440387594256384,
+        "pick_number": 85
+      },
+      {
+        "name": "Otamendi",
+        "country": "Argentina",
+        "position": "DEF",
+        "owner": 383330685139550208,
+        "pick_number": 86
+      },
+      {
+        "name": "Daniel Muñoz",
+        "country": "Colombia",
+        "position": "DEF",
+        "owner": 499627134973640707,
+        "pick_number": 87
+      },
+      {
+        "name": "Andrej Kramaric",
+        "country": "Croatia",
+        "position": "FWD",
+        "owner": 1094255183321641020,
+        "pick_number": 88
+      },
+      {
+        "name": "joao cancelo",
+        "country": "Portugal",
+        "position": "DEF",
+        "owner": 1051933684212715540,
+        "pick_number": 89
+      },
+      {
+        "name": "Noussair Mazraoui",
+        "country": "Morocco",
+        "position": "DEF",
+        "owner": 609732628790378512,
+        "pick_number": 90
+      },
+      {
+        "name": "Antoine Semenyo",
+        "country": "Ghana",
+        "position": "MID",
+        "owner": 609732628790378512,
+        "pick_number": 91
+      },
+      {
+        "name": "Enzo Fernández",
+        "country": "Argentina",
+        "position": "MID",
+        "owner": 1051933684212715540,
+        "pick_number": 92
+      },
+      {
+        "name": "Yasin Ayari",
+        "country": "Sweden",
+        "position": "MID",
+        "owner": 1094255183321641020,
+        "pick_number": 93
+      },
+      {
+        "name": "Rayan Cherki",
+        "country": "France",
+        "position": "MID",
+        "owner": 499627134973640707,
+        "pick_number": 94
+      },
+      {
+        "name": "Julian Quiñones",
+        "country": "Mexico",
+        "position": "FWD",
+        "owner": 383330685139550208,
+        "pick_number": 95
+      },
+      {
+        "name": "Martin Odegaard",
+        "country": "Norway",
+        "position": "MID",
+        "owner": 675440387594256384,
+        "pick_number": 96
+      },
+      {
+        "name": "Israel Reyes Romero",
+        "country": "Mexico",
+        "position": "DEF",
+        "owner": 460859612216819733,
+        "pick_number": 97
+      },
+      {
+        "name": "Brahim Díaz",
+        "country": "Morocco",
+        "position": "MID",
+        "owner": 910081079283699732,
+        "pick_number": 98
+      },
+      {
+        "name": "Nathaniel Brown",
+        "country": "Germany",
+        "position": "DEF",
+        "owner": 696063215238381609,
+        "pick_number": 99
+      },
+      {
+        "name": "Rafael Leão",
+        "country": "Portugal",
+        "position": "MID",
+        "owner": 691180618402234399,
+        "pick_number": 100
+      },
+      {
+        "name": "Son Heung-Min",
+        "country": "South Korea",
+        "position": "MID",
+        "owner": 691180618402234399,
+        "pick_number": 101
+      },
+      {
+        "name": "Gregor Kobel",
+        "country": "Switzerland",
+        "position": "GK",
+        "owner": 696063215238381609,
+        "pick_number": 102
+      },
+      {
+        "name": "Ayase Ueda",
+        "country": "Japan",
+        "position": "FWD",
+        "owner": 910081079283699732,
+        "pick_number": 103
+      },
+      {
+        "name": "Mathias Olivera",
+        "country": "Uruguay",
+        "position": "DEF",
+        "owner": 460859612216819733,
+        "pick_number": 104
+      },
+      {
+        "name": "Matheus Cunha",
+        "country": "Brazil",
+        "position": "FWD",
+        "owner": 675440387594256384,
+        "pick_number": 105
+      },
+      {
+        "name": "Houssem Aouar",
+        "country": "Algeria",
+        "position": "MID",
+        "owner": 383330685139550208,
+        "pick_number": 106
+      },
+      {
+        "name": "Luka Modrić",
+        "country": "Croatia",
+        "position": "MID",
+        "owner": 499627134973640707,
+        "pick_number": 107
+      },
+      {
+        "name": "Thomas Meunier",
+        "country": "Belgium",
+        "position": "DEF",
+        "owner": 1094255183321641020,
+        "pick_number": 108
+      },
+      {
+        "name": "Takefusa Kubo",
+        "country": "Japan",
+        "position": "MID",
+        "owner": 1051933684212715540,
+        "pick_number": 109
+      },
+      {
+        "name": "Alexis McAllister",
+        "country": "Argentina",
+        "position": "MID",
+        "owner": 609732628790378512,
+        "pick_number": 110
+      },
+      {
+        "name": "Jordan Pickford",
+        "country": "England",
+        "position": "GK",
+        "owner": 289028781497253888,
+        "pick_number": 111
+      },
+      {
+        "name": "Jonathan Tah",
+        "country": "Germany",
+        "position": "DEF",
+        "owner": 289028781497253888,
+        "pick_number": 112
+      },
+      {
+        "name": "Nico Schlotterbeck",
+        "country": "Germany",
+        "position": "DEF",
+        "owner": 289028781497253888,
+        "pick_number": 113
+      },
+      {
+        "name": "Ronald Araujo",
+        "country": "Uruguay",
+        "position": "DEF",
+        "owner": 289028781497253888,
+        "pick_number": 114
+      },
+      {
+        "name": "Lamine Yamal",
+        "country": "Spain",
+        "position": "MID",
+        "owner": 289028781497253888,
+        "pick_number": 115
+      },
+      {
+        "name": "Vitinha",
+        "country": "Portugal",
+        "position": "MID",
+        "owner": 289028781497253888,
+        "pick_number": 116
+      },
+      {
+        "name": "Mohamed Salah",
+        "country": "Egypt",
+        "position": "MID",
+        "owner": 289028781497253888,
+        "pick_number": 117
+      },
+      {
+        "name": "Aurelien Tchouameni",
+        "country": "France",
+        "position": "MID",
+        "owner": 289028781497253888,
+        "pick_number": 118
+      },
+      {
+        "name": "Anthony Gordon",
+        "country": "England",
+        "position": "MID",
+        "owner": 289028781497253888,
+        "pick_number": 119
+      },
+      {
+        "name": "Erling Haaland",
+        "country": "Norway",
+        "position": "FWD",
+        "owner": 289028781497253888,
+        "pick_number": 120
+      },
+      {
+        "name": "Ferran Torres",
+        "country": "Spain",
+        "position": "FWD",
+        "owner": 289028781497253888,
+        "pick_number": 121
+      }
+    ],
+    "prepicks": {
+      "675440387594256384": [
+        {
+          "position": "DEF",
+          "country": "England",
+          "player_name": "Marc Guéhi"
+        }
+      ],
+      "460859612216819733": [
+        {
+          "position": "DEF",
+          "country": "Spain",
+          "player_name": "Aymeric Laporte"
+        }
+      ],
+      "1051933684212715540": [],
+      "383330685139550208": [
+        {
+          "position": "MID",
+          "country": "Senegal",
+          "player_name": "Sadio Mane"
+        }
+      ],
+      "1094255183321641020": [],
+      "696063215238381609": [
+        {
+          "position": "DEF",
+          "country": "Germany",
+          "player_name": "Nathaniel Brown"
+        }
+      ],
+      "499627134973640707": [
+        {
+          "position": "FWD",
+          "country": "Germany",
+          "player_name": "Deniz Undav"
+        }
+      ],
+      "691180618402234399": [],
+      "609732628790378512": [],
+      "289028781497253888": []
+    },
+    "status_message_id": 1515104135995981965,
+    "status_channel_id": 1515084506007208036,
+    "turn_message_id": null,
+    "paused": false,
+    "started": true,
+    "ended": true
+  }
+}
