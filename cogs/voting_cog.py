@@ -328,18 +328,18 @@ class Voting(commands.Cog):
         end_message = None
 
         if is_range:
-            prompt = await ctx.send("Reply to this message with a reference to the **end message**.")
+            prompt = await ctx.send("Reply directly to the **end message**, or send its message ID/link.")
             try:
                 def check(m):
-                    return m.author == ctx.author and m.channel == ctx.channel and m.reference and m.reference.message_id == prompt.id
+                    return m.author == ctx.author and m.channel == ctx.channel
                 reply = await self.bot.wait_for("message", check=check, timeout=60)
-                end_id = reply.reference.resolved.id if reply.reference.resolved else None
+                end_id = self._extract_end_message_id(reply)
                 if not end_id:
-                    await ctx.send("Could not resolve the end message.")
+                    await ctx.send("Could not resolve the end message. Reply to it directly or send its message ID/link.")
                     return
                 end_message = await ctx.channel.fetch_message(end_id)
             except asyncio.TimeoutError:
-                await ctx.send("Timed out waiting for the end message reference.")
+                await ctx.send("Timed out waiting for the end message.")
                 return
 
         prefix = self.bot.command_prefix
@@ -436,6 +436,18 @@ class Voting(commands.Cog):
             await ctx.send(embed=embed)
         for embed in self._build_vh_embeds("Vote History", history_text, range_label):
             await ctx.send(embed=embed)
+
+    def _extract_end_message_id(self, message: discord.Message) -> int | None:
+        if message.reference and message.reference.message_id:
+            return message.reference.message_id
+        content = message.content.strip()
+        match = re.search(r"\d{17,20}", content)
+        if match:
+            return int(match.group(0))
+        url_match = re.search(r"discord(?:app)?\.com/channels/\d+/\d+/(\d{17,20})", content)
+        if url_match:
+            return int(url_match.group(1))
+        return None
 
     def _build_vh_embeds(self, title: str, text: str, suffix: str = "") -> list:
         MAX = 4096

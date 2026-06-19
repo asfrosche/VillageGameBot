@@ -8,31 +8,26 @@ import sys
 from datetime import datetime
 from discord.ext import commands
 
-# Add fifa_data/services to path - handles both local and server structures
+# Add fifa_data parent to path so we can import fifa_data.services.*
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(SCRIPT_DIR)
 for p in [
-    os.path.join(BASE_DIR, "fifa_data", "services"),
-    os.path.join(BASE_DIR, "may", "fifa_data", "services"),
-    "/home/container/fifa_data/services",  # Absolute server path
+    os.path.join(BASE_DIR, "fifa_data"),          # local: .../may/fifa_data
+    os.path.join(BASE_DIR, "..", "fifa_data"),     # local alternative
+    "/home/container/fifa_data",                   # server path
 ]:
     if os.path.isdir(p):
         sys.path.insert(0, p)
         break
 
-try:
-    from fantasy_service import FantasyService, norm as fs_norm, FIFA_POSITION_MAP
-    from match_analytics import (
-        get_match_analytics, get_form_players, get_differentials,
-        get_matches_for_team, load_data,
-    )
-    from simulation_service import run_simulation
-except ImportError as e:
-    raise ImportError(
-        f"Could not import fifa_data services. Checked paths: {sys.path}. Error: {e}"
-    )
+from fifa_data.services.simulation_service import run_simulation
+from fifa_data.services.fantasy_service import FantasyService, norm as fs_norm, FIFA_POSITION_MAP
+from fifa_data.services.match_analytics import (
+    get_match_analytics, get_form_players, get_differentials,
+    get_matches_for_team, load_data,
+)
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data", "draft_data.json")
+DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data", "data", "draft_data.json")
 FIFA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
 
 POSITIONS = ["GK", "DEF", "MID", "FWD"]
@@ -1935,10 +1930,93 @@ class DraftCog(commands.Cog):
 
     # ── Live Simulation ─────────────────────────────────────────
 
-    @commands.command(aliases=["sim"])
-    async def simulate(self, ctx, mode: str = None):
-        """Run tournament simulation. Use 'animated' to see live action, otherwise just results."""
-        status_msg = await ctx.send("🌍 **World Cup 2026 — Simulation**\n⏳ Fetching latest FIFA data...")
+    @commands.command(aliases=["simhelp"])
+    async def simulate_help(self, ctx):
+        """Detailed explanation of .sim models (V1-V4)."""
+        lines = [
+            "**World Cup Simulation Models**",
+            "",
+            "**`.sim v1` — ELO Rating Engine**",
+            "• Based on classic ELO + PELE rating system",
+            "• Teams rated by historical performance and match results",
+            "• Real WC 2026 results update ELO in real time",
+            "• Goal difference weighted (1 GD = 1x, 2 GD = 1.5x, 3+ GD = 2x)",
+            "• Expected goals derived from rating ratios with non-linear curve",
+            "• Best for: quick simulations where only team quality matters",
+            "",
+            "**`.sim v2` — Player Attribute Engine**",
+            "• Every player rated individually from FC26 data",
+            "• 11 positional roles rated separately (GK, CB, FB, CM, DM, WINGER, ST)",
+            "• Formation-aware: 4-3-3 vs 4-4-2 vs 3-5-2 etc. each evaluated",
+            "• Attack/Defense/Goalkeeper strength computed from role-weighted averages",
+            "• More granular than V1 — a star player can carry a weaker squad",
+            "• Requires up-to-date players.json and squads.json",
+            "",
+            "**`.sim v3` — Dynamic State Engine**",
+            "• Builds on V2 player ratings",
+            "• Adds 6 dynamic modifiers that change match-to-match:",
+            "  - Chemistry: how well the starting XI fits together",
+            "  - Experience: big-match temperament (boosted in KO stages)",
+            "  - Form: recent performance trend",
+            "  - Momentum: winning/losing streak effects",
+            "  - Continuity: how often same XI plays together",
+            "  - Leadership: captain and veteran influence",
+            "• National strength modifiers add patriotic home-field context",
+            "• Each modifier applies ±10% multiplier to base strength",
+            "• Most realistic simulation of a single match",
+            "",
+            "**`.sim v4` — Tactical Intelligence Engine**",
+            "• Advanced tactical layer **on top of V3** (does not replace it)",
+            "• Every team has a tactical profile with 20+ attributes (0-100):",
+            "  - Possession quality: progressive passes, final-third entries,",
+            "    big chance creation, shot quality (FBref/Opta-based)",
+            "  - Defensive style: low block, mid block, high press,",
+            "    man marking, or zonal (each interacts differently)",
+            "  - Tactical flexibility: ability to adapt mid-match",
+            "  - Set-piece threat, aerial strength, pressing intensity",
+            "• Real manager profiles: risk tolerance, pressing preference,",
+            "  defensive discipline, tactical flexibility",
+            "  (Scaloni, Deschamps, Nagelsmann, Bielsa, Southgate, etc.)",
+            "• Match context matters:",
+            "  - Group stage: standard approach",
+            "  - Knockout: slightly more cautious (-0.01 xG)",
+            "  - Must-win: attacking urgency (+0.02 xG)",
+            "  - Need draw: deep defensive focus (-0.015 xG)",
+            "  - GD chase: high-risk attacking (+0.025 xG, -0.015 defensive)",
+            "• 7 tactical matchup categories evaluated per match:",
+            "  1. High line vs pace exploitation",
+            "  2. Pressing vs weak build-up",
+            "  3. Possession vs low block creativity",
+            "  4. Set-piece mismatches",
+            "  5. Aerial dominance",
+            "  6. Formation advantages (width, midfield control)",
+            "  7. Player-tactic compatibility",
+            "• All adjustments capped at ±10% of base xG",
+            "• Elite teams remain favorites; upsets still happen via Poisson",
+            "• Add `debug` flag for full tactical breakdown per match",
+            "",
+            "**Usage:**",
+            "`.sim v4` — Fast V4 simulation (default)",
+            "`.sim v4 animated` — Watch matches play out in real time",
+            "`.sim v4 debug` — Show tactical reports for first 3 matches",
+            "`.fsim v4` — Alias for `.simulate v4`",
+            "",
+            "**Statistics:** 48 World Cup teams | 20+ tactical attributes each",
+            "| 48 manager profiles | 8 formation profiles | 5 match contexts",
+            "| 5 defensive styles | 5 game plans",
+        ]
+        await ctx.send("\n".join(lines))
+
+    @commands.command(aliases=["fsim"])
+    async def simulate(self, ctx, *, args: str = None):
+        """Run tournament simulation: `.simulate [v1|v2|v3|v4] [fast|animated] [debug]` or `.fsim ...`."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Admin only.")
+        model, presentation, debug = self._parse_simulation_args(args)
+        if model is None:
+            return await ctx.send(presentation)
+
+        status_msg = await ctx.send(f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n⏳ Fetching latest FIFA data...")
 
         fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
 
@@ -2006,25 +2084,56 @@ class DraftCog(commands.Cog):
             self.fantasy._players = None
             self.fantasy._cache_time = 0
 
-            await status_msg.edit(content=f"🌍 **World Cup 2026 — Simulation**\n✅ Data fetched. Simulating...")
+            await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n✅ Data fetched. Simulating...")
         except Exception as e:
-            await status_msg.edit(content=f"🌍 **World Cup 2026 — Simulation**\n⚠️ Using cached data ({e})")
+            await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n⚠️ Using cached data ({e})")
 
         loop = asyncio.get_event_loop()
         try:
-            data = await loop.run_in_executor(None, run_simulation)
+            data = await loop.run_in_executor(None, run_simulation, model, debug)
         except Exception as e:
             import traceback
             traceback.print_exc()
             return await ctx.send(f"❌ Simulation error: {e}")
 
-        if mode == "animated":
-            await self._simulate_animated(ctx, status_msg, data)
+        if presentation == "animated":
+            await self._simulate_animated(ctx, status_msg, data, model=model)
         else:
-            await self._simulate_fast(ctx, status_msg, data)
+            await self._simulate_fast(ctx, status_msg, data, model=model, debug=debug)
 
-    async def _simulate_animated(self, ctx, status_msg, data):
-        await status_msg.edit(content="🌍 **World Cup 2026 — Live Simulation**\n🔄 Group Stage underway...")
+    def _parse_simulation_args(self, args: str | None) -> tuple[str | None, str, bool]:
+        tokens = args.split() if args and args.strip() else []
+        model = "v1"
+        presentation = "fast"
+        debug = False
+
+        if not tokens:
+            return model, presentation, debug
+
+        first = tokens[0].lower()
+        if first in {"v1", "v2", "v3", "v4"}:
+            model = first
+            tokens = tokens[1:]
+        elif first in {"animated", "fast", "debug"}:
+            pass
+        else:
+            return None, "Usage: `.sim [v1|v2|v3|v4] [fast|animated] [debug]`", False
+
+        for token in tokens:
+            lowered = token.lower()
+            if lowered == "animated":
+                presentation = "animated"
+            elif lowered == "fast":
+                presentation = "fast"
+            elif lowered == "debug":
+                debug = True
+            else:
+                return None, "Usage: `.sim [v1|v2|v3|v4] [fast|animated] [debug]`", False
+
+        return model, presentation, debug
+
+    async def _simulate_animated(self, ctx, status_msg, data, model: str = "v1"):
+        await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Live Simulation**\n🔄 Group Stage underway...")
 
         # ── GROUP STAGE ──
         for gid in sorted(data["groups"].keys()):
@@ -2166,12 +2275,12 @@ class DraftCog(commands.Cog):
 
         # ── CHAMPION ──
         champ = data.get("champion", "TBD")
-        await status_msg.edit(content=f"🌍 **World Cup 2026 — SIMULATION COMPLETE**")
+        await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} SIMULATION COMPLETE**")
         await ctx.send(f"🏆🏆🏆 **{champ.upper()}** ARE WORLD CUP 2026 CHAMPIONS! 🏆🏆🏆")
 
-    async def _simulate_fast(self, ctx, status_msg, data):
+    async def _simulate_fast(self, ctx, status_msg, data, model: str = "v1", debug: bool = False):
         """Fast simulation - show results without animations."""
-        await status_msg.edit(content=f"🌍 **World Cup 2026 — Simulation Complete**")
+        await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation Complete**")
 
         # Group Stage - tables only
         for gid in sorted(data["groups"].keys()):
@@ -2209,8 +2318,15 @@ class DraftCog(commands.Cog):
             await ctx.send(f"⚽ **{tp3['home']}** {tp3['home_goals']}-{tp3['away_goals']} **{tp3['away']}** → **{tp3['winner']}** wins!")
 
         champ = data.get("champion", "TBD")
+        if debug:
+            debug_items = data.get("debug", [])
+            if debug_items:
+                await ctx.send(f"🔎 **{model.upper()} Debug Preview** — first {min(3, len(debug_items))} simulated matches")
+                for item in debug_items[:3]:
+                    safe = item.replace("```", "` ` `")
+                    await ctx.send(f"```{safe[:1800]}```")
         await ctx.send(f"🏆🏆🏆 **{champ.upper()}** ARE WORLD CUP 2026 CHAMPIONS! 🏆🏆🏆")
-        await ctx.send(f"📊 Matches: {data['stats']['real_count']} real + {data['stats']['total_group_matches'] - data['stats']['real_count']} simulated group + {data['stats']['knockout_matches'] + data['stats']['third_place']} KO = {data['stats']['total_group_matches'] + data['stats']['knockout_matches'] + data['stats']['third_place']} total")
+        await ctx.send(f"📊 Model: {model.upper()} | Matches: {data['stats']['real_count']} real + {data['stats']['total_group_matches'] - data['stats']['real_count']} simulated group + {data['stats']['knockout_matches'] + data['stats']['third_place']} KO = {data['stats']['total_group_matches'] + data['stats']['knockout_matches'] + data['stats']['third_place']} total")
 
 
 async def setup(bot):

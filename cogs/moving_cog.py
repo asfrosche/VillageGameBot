@@ -1,7 +1,7 @@
 import uuid
 import discord
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from discord.ext import commands
 from cogs.data_utils import load_guild_data
 from utils.bot_db import get_role_dashboard
@@ -323,6 +323,83 @@ class Moving(commands.Cog):
                 await ctx.send("Guild data not loaded.")
         else:
             await ctx.send("You don't have enough perms to use this command")
+
+    @commands.command(aliases=["pendingknocks", "showknocks", "knocks"])
+    async def pendingknock(self, ctx):
+        pending, scanned = await self._get_pending_knocks(ctx)
+
+        if not pending:
+            await ctx.send(f"Pending knock: False\nScanned: {scanned} servers")
+            return
+
+        lines = [
+            "Pending knock: True",
+            f"Scanned: {scanned} servers",
+            f"Count: {len(pending)}",
+        ]
+        for created_at, channel, message in pending[:10]:
+            age = datetime.now(timezone.utc) - created_at
+            lines.append(
+                f"{channel.guild.name} | {channel.mention} | "
+                f"Age: {self._format_duration(age)} | {message.jump_url}"
+            )
+        if len(pending) > 10:
+            lines.append(f"...and {len(pending) - 10} more")
+
+        await ctx.send("\n".join(lines))
+
+    async def _get_pending_knocks(self, ctx):
+        is_owner = await self.bot.is_owner(ctx.author)
+        eligible_guilds = []
+        for guild in self.bot.guilds:
+            member = guild.get_member(ctx.author.id)
+            if is_owner or (member and member.guild_permissions.administrator):
+                eligible_guilds.append(guild)
+
+        pending = []
+        for guild in eligible_guilds:
+            guild_data = load_guild_data(guild.id)
+            if not guild_data:
+                continue
+
+            category = discord.utils.get(guild.categories, name=guild_data["houses_category_name"])
+            if not category:
+                continue
+
+            for channel in category.channels:
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+                try:
+                    async for message in channel.history(limit=50):
+                        embed_titles = [embed.title for embed in message.embeds]
+                        is_knock_message = (
+                            message.author == self.bot.user
+                            and "knock knock" in (message.content or "")
+                            and (message.pinned or "🚪 Someone is knocking..." in embed_titles)
+                        )
+                        if is_knock_message:
+                            pending.append((message.created_at, channel, message))
+                            break
+                except discord.Forbidden:
+                    continue
+
+        pending.sort(key=lambda item: item[0])
+        return pending, len(eligible_guilds)
+
+    def _format_duration(self, delta: timedelta) -> str:
+        total_seconds = int(delta.total_seconds())
+        if total_seconds < 0:
+            total_seconds = 0
+        days, remainder = divmod(total_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if days:
+            return f"{days}d {hours}h {minutes}m"
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        if minutes:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
 
     async def process_knock(self, ctx, new_channel: discord.TextChannel, guild_data):
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])

@@ -1,7 +1,9 @@
-import json, random, math
+import json, os, random, math
 from numpy.random import poisson
 
-with open("worldcupsimulator.py", encoding="utf-8") as f:
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+with open(os.path.join(HERE, "..", "worldcupsimulator.py"), encoding="utf-8") as f:
     content = f.read()
 data_block = content.split("RAW_ROSTERS")[0]
 data_block = data_block.replace("from numpy.random import poisson\n", "")
@@ -13,7 +15,7 @@ MATCHES_TEAM_MAP = {
     "Bosnia and Herzegovina": "Bosnia-Herzegovina",
 }
 
-def update_elo_from_matches(matches_file="matches.json"):
+def update_elo_from_matches(matches_file=os.path.join(HERE, "..", "data", "matches.json")):
     with open(matches_file, encoding="utf-8") as f:
         data = json.load(f)
     completed = data.get("completed", [])
@@ -72,7 +74,7 @@ def sim_match(t1, t2, can_draw=True):
 
 update_elo_from_matches()
 
-with open("matches.json", encoding="utf-8") as f:
+with open(os.path.join(HERE, "..", "data", "matches.json"), encoding="utf-8") as f:
     matches_data = json.load(f)
 
 real_results = {}

@@ -856,6 +856,7 @@ class Other(commands.Cog):
             "  *Open* ─ Knocker joins (leaves current)\n"
             "  *Refuse* ─ Knocker sees occupants\n"
             "  *Expires* ─ OS notified in RC\n"
+            "**`.pendingknock`** / `.showknocks` ─ True/False if any knock is pending + oldest age\n"
             "**`.renknock #House`** ─ Knock on renamed house"
         ), inline=False)
         embedm.add_field(name="PC & Misc", value=(
@@ -950,7 +951,7 @@ class Other(commands.Cog):
             "**`.resetvotes`** ─ Reset all votes\n"
             "**`.votehistory/vh [mode]`** ─ Scan vote history\n"
             "  ─ `grouped` ─ Group by target\n"
-            "  ─ `range` ─ Prompts for end message"
+            "  ─ `range` ─ Reply to end message or send ID/link"
         ), inline=False)
         embedv.add_field(name="Voting in RCs", value=(
             "**`.voteinrc true/false`** ─ Enable voting in RoleChats\n\n"
@@ -1319,36 +1320,45 @@ class Other(commands.Cog):
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_calendar)
 
-    async def help_draft(self, ctx):
-        embed = discord.Embed(title="🏆 Draft commands", description="20 commands", color=0xff3fb9)
+async def help_draft(self, ctx):
+        embed = discord.Embed(title="🏆 Draft commands", description="21 commands", color=0xff3fb9)
         embed.add_field(name="Draft Commands", value=(
-            "**`.draftstart @u1 @u2 ...`** ─ Start a snake draft (admin)\n"
-            "**`.prepick`** ─ Manage your prepicks (max 2)\n"
-            "**`.draftboard`** ─ Show all teams\n"
-            "**`.myteam`** ─ Show your team\n"
-            "**`.team @user`** ─ Show a user's team with fantasy points\n"
-            "**`.forcepick <name>`** ─ Force a pick for the current user (admin)\n"
-            "**`.undo`** ─ Undo the most recent pick (admin)\n"
-            "**`.pause`** ─ Pause the draft (admin)\n"
-            "**`.resume`** ─ Resume the draft (admin)\n"
-            "**`.enddraft`** ─ End the draft (admin)"
+            "**.draftstart @u1 @u2 ...** ─ Start a snake draft (admin)\n"
+            "**.prepick** ─ Manage your prepicks (max 2)\n"
+            "**.draftboard** ─ Show all teams\n"
+            "**.myteam** ─ Show your team\n"
+            "**.team @user** ─ Show a user's team with fantasy points\n"
+            "**.forcepick <name>** ─ Force a pick for the current user (admin)\n"
+            "**.undo** ─ Undo the most recent pick (admin)\n"
+            "**.pause** ─ Pause the draft (admin)\n"
+            "**.resume** ─ Resume the draft (admin)\n"
+            "**.enddraft** ─ End the draft (admin)"
         ), inline=False)
         embed.add_field(name="Points Commands", value=(
-            "**`.draftpoints`** ─ Live fantasy points leaderboard for all teams\n"
-            "**`.standings`** ─ Standings with avg & best points\n"
-            "**`.player <name>`** / `.pp` ─ Look up a player's FIFA fantasy points\n"
-            "**`.scoutingboard`** ─ Scouting bonus leaderboard (ownership % at time of scoring)\n"
-            "**`.topplayers [N]`** ─ Top N drafted players by points (default 10)\n"
-            "**`.teamvalue @user`** ─ Point breakdown per player on a team\n"
-            "**`.team @user`** ─ Same as team command with fantasy points"
+            "**.draftpoints** ─ Live fantasy points leaderboard for all teams\n"
+            "**.standings** ─ Standings with avg & best points\n"
+            "**.player <name>** / **.pp** ─ Look up a player's FIFA fantasy points\n"
+            "**.playerpoints <name>** ─ Same as .player with more detail\n"
+            "**.scoutingboard** ─ Scouting bonus leaderboard (ownership % at scoring time)\n"
+            "**.topplayers [N]** ─ Top N drafted players by points (default 10)\n"
+            "**.teamvalue @user** ─ Point breakdown per player on a team\n"
+            "**.refreshpoints** ─ Fetch fresh FIFA data & save to cache (admin)"
         ), inline=False)
         embed.add_field(name="Match Analytics", value=(
-            "**`.matches [filter]`** / `.matchinfo` ─ Latest match results with fantasy top scorers\n"
-            "**`.trending [position]`** / `.form` ─ Players with best form rating\n"
-            "**`.differentials [N]`** / `.diff` ─ Best differential picks (high pts, low ownership)"
+            "**.matches [filter]** / **.matchinfo** ─ All match results & upcoming\n"
+            "**.trending [position]** / **.form** ─ Players with best form rating\n"
+            "**.differentials [N]** / **.diff** ─ Best differential picks (high pts, low ownership)"
         ), inline=False)
         embed.add_field(name="Simulation", value=(
-            "**`.simulate`** / `.sim` ─ Fetch latest data + live tournament simulation with goal animation"
+            "**.simulate [v1|v2|v3|v4] [fast|animated] [debug]** ─ Run tournament sim\n"
+            "**.fsim** ─ Alias for `.simulate`\n"
+            "**.sim help** / **.simhelp** ─ Full V1-V4 model breakdown\n"
+            "**.simulate v1** ─ ELO-based team ratings simulation\n"
+            "**.simulate v2** ─ Player attributes simulation (uses FIFA fantasy data)\n"
+            "**.simulate v3** ─ Dynamic state engine with chemistry, form, momentum\n"
+            "**.simulate v4** ─ Tactical Intelligence Engine (manager profiles, defensive styles, match context)\n"
+            "**.simulate animated** ─ Full animation mode (5+ min) with goal-by-goal action\n"
+            "**.simulate debug** ─ Tactical debug reports for first 3 matches (V4)"
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_draft)

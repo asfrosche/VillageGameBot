@@ -9,9 +9,9 @@ SEASON_ID = "285023"
 BASE_URL = "https://api.fifa.com/api/v3/calendar/matches"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MATCHES_FILE = os.path.join(HERE, "matches.json")
-PLAYERS_FILE = os.path.join(HERE, "players.json")
-SQUADS_FILE = os.path.join(HERE, "squads.json")
+MATCHES_FILE = os.path.join(HERE, "data", "matches.json")
+PLAYERS_FILE = os.path.join(HERE, "data", "players.json")
+SQUADS_FILE = os.path.join(HERE, "data", "squads.json")
 
 FANTASY_PLAYERS_URL = "https://play.fifa.com/json/fantasy/players.json"
 FANTASY_SQUADS_URL = "https://play.fifa.com/json/fantasy/squads.json"

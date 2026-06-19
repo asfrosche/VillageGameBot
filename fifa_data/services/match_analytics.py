@@ -22,11 +22,11 @@ def match_to_squad_name(name):
     return FIX_TO_SQUAD.get(name, name)
 
 def load_data():
-    with open(os.path.join(HERE, "matches.json"), "r", encoding="utf-8") as f:
+    with open(os.path.join(HERE, "data", "matches.json"), "r", encoding="utf-8") as f:
         matches = json.load(f)
-    with open(os.path.join(HERE, "players.json"), "r", encoding="utf-8") as f:
+    with open(os.path.join(HERE, "data", "players.json"), "r", encoding="utf-8") as f:
         players = json.load(f)
-    with open(os.path.join(HERE, "squads.json"), "r", encoding="utf-8") as f:
+    with open(os.path.join(HERE, "data", "squads.json"), "r", encoding="utf-8") as f:
         squads_raw = json.load(f)
     squads = {s["id"]: s for s in squads_raw}
     squad_map = {s["id"]: s["name"] for s in squads_raw}

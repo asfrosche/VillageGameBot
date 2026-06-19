@@ -75,8 +75,8 @@ class FantasyService:
             return self._players, self._squads
 
         if local_dir and not force:
-            players_file = os.path.join(local_dir, "players.json")
-            squads_file = os.path.join(local_dir, "squads.json")
+            players_file = os.path.join(local_dir, "data", "players.json")
+            squads_file = os.path.join(local_dir, "data", "squads.json")
             if os.path.exists(players_file):
                 with open(players_file, "r", encoding="utf-8") as f:
                     self._players = json.load(f)

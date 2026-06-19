@@ -7,10 +7,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services.fantasy_service import FantasyService
 
-DRAFT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft_data.json")
-FIFA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
-FIFA_PLAYERS_FILE = os.path.join(FIFA_DIR, "players.json")
-FIFA_SQUADS_FILE = os.path.join(FIFA_DIR, "squads.json")
+BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+DRAFT_FILE = os.path.join(BASE_DIR, "data", "draft_data.json")
+FIFA_DIR = BASE_DIR
+FIFA_PLAYERS_FILE = os.path.join(FIFA_DIR, "data", "players.json")
+FIFA_SQUADS_FILE = os.path.join(FIFA_DIR, "data", "squads.json")
 
 
 def load_local_fifa():
