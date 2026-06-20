@@ -14,6 +14,10 @@ MATCHES_TEAM_MAP = {
     "USA": "United States",
     "Cabo Verde": "Cape Verde",
     "Bosnia and Herzegovina": "Bosnia-Herzegovina",
+    "South Korea": "Korea Republic",
+    "Czech Republic": "Czechia",
+    "Turkey": "Türkiye",
+    "Iran": "IR Iran",
 }
 
 TEAM_METRICS = {}

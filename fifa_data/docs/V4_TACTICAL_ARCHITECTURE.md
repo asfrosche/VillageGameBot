@@ -1,536 +1,510 @@
-# V4 Architecture: Tactical Intelligence Engine (Improved)
+# V4 Architecture: Tactical Intelligence Engine (Deep Technical Architecture)
 
-## V4 Overview
+## Architecture Overview: V1 → V2 → V3 → V4
 
-V4 adds a **Tactical Intelligence** layer on top of V3's dynamic team state system.
-
-**V3 asks:** "How good is this team right now?"
-**V4 asks:** "How do these two teams actually approach this specific match under this specific situation?"
-
-V4 does not replace V1-V3. It is an additional layer that modifies V3 xG based on tactical matchups, manager profiles, possession quality, defensive styles, tactical flexibility, and match context.
+The FIFA simulation engine is a layered architecture where each version builds upon the previous one. All versions share the same core: FC26 player data → Poisson distribution → match scores.
 
 ```
 FC26 Players
     ↓
-V2 Player Strength
+V1: ELO Rating (static team power)
     ↓
-V3 Dynamic State (chemistry, form, momentum, continuity, experience, leadership)
+V2: Player Strength (position-weighted attributes)
     ↓
-V4 Tactical Intelligence Layer  <-- 6 new module categories
+V3: Dynamic State (chemistry, form, momentum, etc.)
     ↓
-Adjusted Expected Goals
+V4: Tactical Intelligence (matchup-specific adjustments)
     ↓
-Poisson Simulation
+Poisson Simulation (goals from expected goals)
 ```
 
-Tactical effects are constrained to ±10% of base xG to ensure elite quality differences remain the primary factor.
+Each layer adds sophistication while preserving lower-layer outputs as inputs.
 
 ---
 
-## Data Sources
+## V1: ELO-Based Engine (`engines/v1_elo_engine.py`)
 
-### Tactical Profiles (`data/tactical_profiles.json`)
+The foundation. Uses pre-computed ELO/Pele ratings to determine match outcomes.
 
-Each of the 48 World Cup teams has a tactical profile with **22 attributes** rated 0-100.
+### Core Algorithm
 
-#### Original 15 Attributes
+1. **Team Rating:** Average of ELO and PELE ratings (1500 baseline)
+   ```python
+   rating = (ELO + PELE) / 2.0
+   ```
 
-| Attribute | Description | Source Tier |
-|-----------|-------------|-------------|
-| possession | Ability and preference to control the ball | Analysis of match statistics |
-| build_up | Ability to progress from defense | Analysis of passing patterns |
-| directness | Preference for quick vertical attacks | Match observation |
-| pressing | Intensity of pressing | Match observation |
-| counter_press | Ability to win ball after losing possession | Match analysis |
-| counter_attack | Threat during transitions | Match analysis |
-| defensive_line | How high the team defends | Match observation |
-| defensive_compactness | Ability to close central spaces | Match analysis |
-| width | Use of wide areas | Formation/tactical analysis |
-| central_play | Ability through midfield combinations | Match analysis |
-| transition_speed | Speed of attacking transitions | Match observation |
-| set_piece_attack | Corners and free-kick threat | Set piece analysis |
-| set_piece_defense | Ability to defend dead balls | Set piece analysis |
-| aerial_strength | Heading and physical presence | Physical metrics |
-| press_resistance | Ability to escape pressure | Build-up analysis |
+2. **Upset Factor:** Balances the Poisson lambdas based on rating delta
+   ```python
+   upset_factor = max(0.4, min(1.6, 1.0 + (r1 - r2) / 800.0))
+   lambda1 = base_goals * upset_factor
+   lambda2 = base_goals * (2.0 - upset_factor)
+   ```
 
-#### New Possession Quality Attributes (FBref / StatsBomb / Opta-based)
+3. **Poisson Draw:** Goal counts drawn from Poisson distributions
+4. **Extra Time/Penalties:** For knockout matches (can_draw=False)
 
-| Attribute | Description | Source Tier |
-|-----------|-------------|-------------|
-| progressive_passes | Passes that move ball 10+ yards toward opponent's goal | FBref, StatsBomb |
-| final_third_entries | Number of times ball enters attacking third | Opta event data |
-| big_chance_creation | Opta-defined 'big chances' created per match | StatsBomb, Opta |
-| shot_quality | Average xG per shot (chance creation efficiency) | StatsBomb, Opta |
-
-#### New Defensive Style Attributes
-
-| Attribute | Description | Source Tier |
-|-----------|-------------|-------------|
-| defensive_style | One of: low_block, mid_block, high_press, man_marking, zonal | FIFA tech reports |
-| man_marking_tendency | Preference for man-oriented marking | Match analysis |
-| zonal_discipline | Ability to maintain zonal shape | Match analysis |
-
-#### New Tactical Attributes
-
-| Attribute | Description | Source Tier |
-|-----------|-------------|-------------|
-| tactical_flexibility | Ability to adapt formation/style mid-match | Manager analysis |
-
-### Manager Profiles (`data/manager_profiles.json`)
-
-Every team has a manager with 4 profile attributes:
-
-| Attribute | Range | Description | Source |
-|-----------|-------|-------------|--------|
-| risk_tolerance | 0-100 | Willingness to take tactical risks | FIFA reports, interviews |
-| tactical_flexibility | 0-100 | Ability to adapt game plan mid-match | The Coaches' Voice |
-| pressing_preference | 0-100 | Natural inclination toward pressing | Tactical analysis |
-| defensive_discipline | 0-100 | Organisation quality of defensive setup | Match observation |
-
-**Notable managers:**
-- **Marcelo Bielsa (Uruguay):** risk=88, pressing=92, flex=75 — extreme risk/pressing
-- **Julian Nagelsmann (Germany):** risk=78, flex=88, pressing=85 — modern high-flexibility
-- **Gareth Southgate (England):** risk=50, discipline=82, flex=65 — cautious, disciplined
-- **Walid Regragui (Morocco):** discipline=82, flex=74 — defensive organisation specialist
-
-### Data Quality
-
-| Tier | Sources | Confidence |
-|------|---------|------------|
-| 1 (Preferred) | FIFA tactical reports, FBref, StatsBomb | High (0.8-1.0) |
-| 2 | The Coaches' Voice, major sports publications | Medium (0.6-0.8) |
-| 3 | Expert commentary and video breakdowns | Low (0.4-0.6) |
+**V1 is stateless** - no tournament context carries forward.
 
 ---
 
-## Formation Intelligence (`services/formation_service.py`)
+## V2: Player Attribute Engine (`engines/v2_player_engine.py`)
 
-Formations are not only shapes. Each formation has characteristics:
+Replaces ELO with actual FC26 player attributes weighted by position.
 
-| Formation | Width | Central Control | Defensive Stability | Pressing | Space Behind FBs |
-|-----------|:-----:|:---------------:|:-------------------:|:--------:|:----------------:|
-| 4-3-3 | 0.80 | 0.55 | 0.50 | 0.80 | 0.60 |
-| 4-2-3-1 | 0.65 | 0.75 | 0.70 | 0.60 | 0.40 |
-| 4-4-2 | 0.70 | 0.50 | 0.65 | 0.55 | 0.35 |
-| 3-4-3 | 0.85 | 0.50 | 0.40 | 0.65 | 0.70 |
-| 3-5-2 | 0.70 | 0.75 | 0.55 | 0.60 | 0.60 |
-| 5-3-2 | 0.50 | 0.60 | 0.85 | 0.35 | 0.25 |
-| 5-4-1 | 0.45 | 0.55 | 0.90 | 0.30 | 0.20 |
-| 4-1-4-1 | 0.65 | 0.65 | 0.75 | 0.55 | 0.35 |
+### Player Role Rating Formulas (`models/team_strength.py`)
 
-Formation matchup advantages are computed by comparing these profiles across width, midfield control, and space-behind-fullbacks dimensions.
+Each position has attribute weights summing to 1.0:
+
+| Role | Attributes |
+|------|------------|
+| ST | finishing (35%), positioning (20%), shot_power (15%), pace (15%), composure (15%) |
+| WINGER | pace (30%), dribbling (25%), crossing (20%), finishing (15%), vision (10%) |
+| CM | passing (30%), vision (20%), dribbling (20%), stamina (15%), defending (15%) |
+| DM | defending (30%), interceptions (25%), passing (20%), physical (15%), stamina (10%) |
+| FB | pace (25%), defending (20%), crossing (20%), stamina (15%), passing (10%), dribbling (10%) |
+| CB | defensive_awareness (30%), tackling (25%), strength (15%), pace (15%), reactions (15%) |
+| GK | reflexes (30%), diving (25%), positioning (20%), handling (15%), kicking (10%) |
+
+### Team Strength Calculation
+
+1. **Role Assignment:** Players mapped to roles via `normalized_positions()` and formation slots
+2. **Average Ratings:** Simple mean of role ratings
+   - Attack = avg(ST, WINGER)
+   - Midfield = avg(CM, DM)
+   - Defense = avg(CB, FB)
+   - Goalkeeper = avg(GK)
+
+3. **Expected Goals:** Non-linear attack ratio with midfield modifier
+   ```python
+   defensive_index = 0.70 * defender_rating + 0.30 * goalkeeper_rating
+   attack_ratio = attacker_rating / max(defensive_index, 1.0)
+   curve_value = attack_ratio ** 3.0  # exponent configurable
+   midfield_modifier = 1.0 + 0.25 * (attacking_mid - defending_mid) / 100.0
+   lambda = 1.1 * curve_value * midfield_modifier
+   ```
+
+**V2 is stateless** - no in-tournament dynamics.
 
 ---
 
-## Tactical Matchup Engine (`services/tactical_matchup_service.py`)
+## V3: Dynamic State Engine (`engines/v3_dynamic_engine.py`)
 
-### Matchup Categories (11 total)
+Adds six dynamic state components that evolve during tournament simulation.
 
-#### Original 7
+### V3 Dynamic State Components (`models/dynamic_state.py`)
 
-##### 1. High Line vs Pace
-If Team A defends high and Team B has fast attackers, Team B's transition xG increases.
-```
-pace_factor = max(0, (avg_attacker_pace + avg_attacker_dribbling) / 2 - 50) / 50.0
-boost = 0.12 * pace_factor
-```
-**FC26 attributes:** pace, dribbling
+Each component produces a percentage modifier (-2% to +3%) combined into a multiplier (0.90x to 1.10x):
 
-##### 2. Pressing vs Build-up
-If Team A presses aggressively and Team B has weak build-up.
-```
-press_gap = (pressing_a - build_up_b) / 100.0
-quality_factor = max(0, 1.0 - (composure_b + passing_b) / 200.0)
-boost = 0.10 * press_gap * quality_factor
-```
-**FC26 attributes:** passing, composure
+| Component | Service | Range | Source |
+|-----------|---------|-------|--------|
+| Chemistry | `chemistry_service.py` | -2% to +5% | Club links, partnerships |
+| Experience | `experience_service.py` | -2% to +3% | International caps, WC appearances |
+| Form | `form_service.py` | -5% to +4% | Fantasy points, form ratings |
+| Momentum | `momentum_service.py` | -3% to +2.5% | Recent results, GD, clean sheets |
+| Continuity | `continuity_service.py` | -1% to +2.5% | Lineup stability |
+| Leadership | `leadership_service.py` | 0% to +2% | Captains, WC veterans |
 
-##### 3. Possession vs Low Block
-If Team A dominates possession and Team B is compact, evaluate creativity.
-```
-creativity = (vision + dribbling + crossing + long_shots) / 4.0
-creativity_factor = max(0, (creativity - 50) / 50.0)
-boost = 0.08 * creativity_factor
-```
-**FC26 attributes:** vision, dribbling, crossing, long_shots
+### Chemistry Calculation (`services/chemistry_service.py`)
 
-##### 4. Set Pieces
-Comparative set-piece threat based on attack vs defense ratings.
-```
-sp_quality = (heading_accuracy + strength + crossing) / 3.0
-gap = (sp_attack - sp_defense) / 100.0
-boost = 0.10 * gap * max(0, (sp_quality - 50) / 50.0)
-```
-**FC26 attributes:** crossing, heading_accuracy, strength
+- **Club Pairings:** Players from same club in same XI get bonus
+  - CB-CB: +1.5%
+  - FB-FB: +1.0%
+  - CM-DM: +1.0%
+  - ST-WINGER: +0.8%
+  - GK-CB: +0.5%
+  - Other pairs: +0.5%
 
-##### 5. Aerial Battles
-Aerial advantage based on team rating gap and player attributes.
-```
-aerial_quality = (jumping + heading_accuracy + strength) / 3.0
-gap = aerial_a - aerial_b
-boost = 0.04 * (gap / 50.0) * max(0, (aerial_quality - 50) / 50.0)
-```
-**FC26 attributes:** jumping, strength, heading_accuracy
+- **Partnerships:** Known player pairs from historical data (+0.5% per pair)
 
-##### 6. Formation Matchup
-Width advantages, midfield numerical superiority, space behind fullbacks.
+### Experience Calculation (`services/experience_service.py`)
 
-##### 7. Player-Tactic Compatibility
-Individual player attributes moderate tactical effects. Mbappe-level pace exploits a high line more than a slow team.
+| Avg Caps | Bonus |
+|----------|-------|
+| ≥80 | +2% |
+| 50-79 | +1% |
+| 30-49 | +0.5% |
+| <30 | -1% |
 
-#### NEW: 8. Possession Quality
++0.5% for WC veterans in knockout/extra time/penalties stages.
 
-Separates possession **volume** from **quality**. Uses FBref/StatsBomb-derived metrics:
+### Form Calculation (`services/form_service.py`)
 
-```
-a_quality = (progressive_passes * 0.25 + final_third_entries * 0.25 + big_chance_creation * 0.30 + shot_quality * 0.20)
-gap = (a_quality - b_quality) / 100.0
-if abs(gap) > 0.08:
-    boost = 0.06 * gap * quality_factor
-```
+| Avg Form | Bonus |
+|----------|-------|
+| ≥4.0 | +4% |
+| 2.0-3.9 | +2% |
+| 0.5-1.9 | +0.5% |
+| -1.0 to -0.5 | -1% |
+| ≤-1.0 | -3% |
 
-A team with 70% sideways possession (low progressive passes) gets less benefit than a team with 55% but high progressive pass rate. This models the difference between:
-- **Spain 2010**: 70% possession, high quality → deserved xG boost
-- **Possession-without-penetration**: high volume, low quality → minimal boost
+### Momentum Calculation (`services/momentum_service.py`)
 
-#### NEW: 9. Defensive Style Interaction
+Rolling 5-match window:
+- Win rate ≥80%: +2.5%
+- Win rate 60-79%: +1.5%
+- Win rate 40-59%: +0.5%
+- Losses ≥2: -2%
+- GD ≥8: +0.5%
+- Clean sheets ≥2: +0.5%
 
-Each team has one of 5 defensive styles. These interact in a 5×7 matrix:
+### Continuity Calculation (`services/continuity_service.py`)
 
-| Style | vs high_press | vs mid_block | vs high_line | vs possession | vs direct | vs man_marking | vs zonal |
-|-------|:-----------:|:----------:|:----------:|:----------:|:--------:|:------------:|:------:|
-| low_block | +0.02 | +0.01 | +0.03 | -0.02 | +0.02 | +0.01 | +0.01 |
-| mid_block | +0.01 | 0.00 | +0.02 | 0.00 | +0.01 | +0.01 | 0.00 |
-| high_press | +0.01 | +0.01 | +0.02 | +0.02 | -0.02 | +0.01 | +0.01 |
-| man_marking | 0.00 | 0.00 | +0.01 | -0.01 | -0.01 | 0.00 | -0.01 |
-| zonal | -0.01 | 0.00 | +0.01 | +0.01 | 0.00 | +0.01 | 0.00 |
+- 0 changes from previous match: +2.5%
+- 1 change: +1.5%
+- 2 changes: +0.5%
+- 3+ changes: -0.5% to -1%
 
-**Example interactions:**
-- Low block vs high line (+0.03): Low block sits deep, exploits space behind pushing fullbacks
-- High press vs direct (-0.02): Direct balls over the press bypass the intensity
-- Low block vs possession (-0.02): Patient possession can break down deep blocks
-- Man marking vs possession (-0.01): Position-swapping attackers can lose markers
+### Leadership Calculation (`services/leadership_service.py`)
 
-#### NEW: 10. Tactical Flexibility
+- 2+ captains: +1%
+- 3+ WC veterans: +0.5%
+- +0.3% for knockout, +0.2% for extra time, +0.5% for penalties
 
-Teams with high tactical flexibility (70+) can partially counter opponent advantages:
-```
-flex_gap = (flex_a - flex_b) / 100.0
-boost = 0.02 * flex_gap  (if abs(flex_gap) > 0.15)
+### V3 Team Strength Formula
+
+```python
+star_attack = weighted_average(role_ratings, {"ST", "WINGER"}, star_weights)
+star_midfield = weighted_average(role_ratings, {"CM", "DM"}, star_weights)
+star_defense = weighted_average(role_ratings, {"CB", "FB"}, star_weights)
+star_goalkeeper = weighted_average(role_ratings, {"GK"}, star_weights)
+
+dyn = DynamicState(chemistry, experience, form, momentum, continuity, leadership)
+v3_mult = dyn.combined_multiplier()  # clamped 0.90-1.10
+
+attack_rating = round(star_attack * (1.0 + nat_mod) * v3_mult, 4)
 ```
 
-Rigid teams (flex < 40) against flexible opponents suffer an additional penalty:
+### National Modifiers (`data/national_strength_modifiers.json`)
+
+Regional bias adjustments (e.g., South American teams at +0.03 in knockouts).
+
+---
+
+## V4: Tactical Intelligence Layer (`engines/v4_tactical_engine.py`)
+
+Wraps V3, adding matchup-specific tactical adjustments.
+
+### Layer Integration
+
 ```
-penalty = -0.015 * (flex_b - flex_a) / 60.0
+V3 Dynamic Engine
+    ↓
+Base xG (1.60 vs 1.20)
+    ↓
+Tactical Matchup Service
+    ↓
+Adjustment: +0.06 xG
+    ↓
+Final xG (1.66 vs 1.26)
+    ↓
+Poisson (goals from xG)
 ```
 
-**Examples:**
-- Spain (flex 88) vs rigid minnow (flex 35): Spain gets +0.01 xG, minnow gets -0.013 xG
-- Germany (flex 85) vs Switzerland (flex 68): Small flexibility edge for Germany
+### V4 Flow
 
-#### NEW: 11. Match Context Effects
+1. **Get V3 Strength & Base xG** via `V3DynamicEngine.get_team_strength()` and `expected_goals()`
+2. **Compute Tactical Matchup** via `compute_tactical_matchup()`:
+   - Load tactical profiles for both teams
+   - Calculate relative strength ratios
+   - Determine game plans via `choose_game_plan()`
+   - Apply 11 matchup effect functions
+   - Clamp total adjustments to ±10% of base xG
+3. **Return Final xG** for Poisson simulation
 
-Different match situations produce different tactical behaviors:
+---
 
-| Context | Effect |
-|---------|--------|
-| **group** (default) | Standard approach, no adjustment |
-| **knockout** | Both teams -0.01 xG (higher stakes, less risk) |
-| **must_win** | Attacking/high press teams get +0.02 xG urgency |
-| **need_draw** | Low block teams get -0.015 xG (defensive focus) |
-| **gd_chase** | Attacking teams get +0.025 xG, -0.015 defensive cost |
+## V4 Tactical Matchup Engine (`services/tactical_matchup_service.py`)
 
-Game plan selection also adapts to context:
-- **knockout**: More conservative thresholds (strength > 1.10 → balanced, not attacking)
-- **must_win**: More aggressive thresholds (strength > 0.95 → attacking)
-- **need_draw**: Defensive thresholds (strength < 0.90 → low block)
+### 11 Matchup Categories
+
+#### Original 7 Matchups
+
+**1. High Line vs Pace** (`_high_line_vs_pace`)
+- Opponent with high defensive line (≥65) exploited by fast attackers
+- Uses attacker pace and dribbling averages
+- Boost = 0.12 * max(0, (avg_pace + avg_drib)/2 - 50) / 50
+
+**2. Pressing vs Build-up** (`_pressing_vs_buildup`)
+- High pressing (≥65) vs weak build-up (<60)
+- Quality factor from opponent composure + passing
+- Boost = 0.10 * press_gap * quality_factor
+
+**3. Possession vs Low Block** (`_possession_vs_low_block`)
+- High possession (≥70) vs compact defense (≥70)
+- Creativity factor from vision, dribbling, crossing, long_shots
+- Boost = 0.08 * creativity_factor
+
+**4. Set Pieces** (`_set_pieces`)
+- Attack vs defense rating mismatch
+- Quality factor from heading, strength, crossing
+- Boost = 0.10 * gap * quality_factor
+
+**5. Aerial Battles** (`_aerial_battles`)
+- Aerial strength gap > 10 points
+- Quality from jumping, heading, strength
+- Boost = 0.04 * (gap/50) * quality_factor
+
+**6. Formation Matchup** (`_formation_matchup`)
+- Width advantage (>10% difference)
+- Central control advantage (>10% difference)
+- Space behind fullbacks exploitation
+
+**7. Player-Tactic Compatibility** (`_player_tactic_compatibility`)
+- High pressing teams exploit low stamina/composure opponents
+- Penalty applied against vulnerable teams
+
+#### NEW: 8. Possession Quality (`_possession_quality`)
+
+Separates possession **volume** from **quality** using 4 metrics:
+
+```
+possession_quality = pp * 0.25 + f3 * 0.25 + bcc * 0.30 + sq * 0.20
+```
+
+Where:
+- `pp` = progressive_passes (FBref/StatsBomb)
+- `f3` = final_third_entries (Opta)
+- `bcc` = big_chance_creation (StatsBomb/Opta)
+- `sq` = shot_quality (average xG per shot)
+
+Boost applied when gap > 8% and attackers have vision/passing quality.
+
+#### NEW: 9. Defensive Style Interaction (`_defensive_style_interaction`)
+
+5 defensive styles in a 5×7 matrix matchup table:
+
+| Style | vs high_press | vs direct | vs possession | vs high_line |
+|-------|--------------|-----------|---------------|--------------|
+| low_block | +0.02 | +0.02 | -0.02 | +0.03 |
+| mid_block | +0.01 | +0.01 | 0.00 | +0.02 |
+| high_press | +0.01 | -0.02 | +0.02 | +0.02 |
+| man_marking | 0.00 | -0.01 | -0.01 | +0.01 |
+| zonal | -0.01 | 0.00 | +0.01 | +0.01 |
+
+The style key is derived from opponent's predominant attribute:
+- pressing > 70 → "high_press"
+- directness > 65 → "direct"
+- possession > 70 → "possession"
+- defensive_line > 65 → "high_line"
+- else → "mid_block"
+
+#### NEW: 10. Tactical Flexibility (`_tactical_flexibility_effects`)
+
+- Flexibility gap > 15% → ±0.02 boost for flexible team
+- Rigid team (<40) vs flexible (>60) → -0.015 penalty
+
+#### NEW: 11. Match Context Effects (`_match_context_effects`)
+
+| Context | Adjustment |
+|---------|------------|
+| knockout | Both teams -0.01 xG (cautious) |
+| must_win | Attacking/high_press teams +0.02 xG |
+| need_draw | Low block teams -0.015 xG |
+| gd_chase | Attacking teams +0.025/-0.015 (risk/reward) |
+
+---
+
+## Game Plan Selection (`services/tactical_matchup_service.py:31-65`)
+
+### Algorithm
+
+```
+if context == "knockout":
+    strength > 1.10 → "balanced"
+    strength < 0.80 → "low_block"
+    else → "balanced"
+
+elif context == "must_win":
+    strength > 0.95 → "attacking"
+    strength < 0.75 → "high_press"
+    else → "attacking"
+
+elif context == "need_draw":
+    strength < 0.90 → "low_block"
+    else → "balanced"
+
+elif context == "gd_chase":
+    pressing > 60 → "high_press"
+    else → "attacking"
+
+else:  # group stage
+    strength > 1.15 → "attacking"
+    strength < 0.85:
+        opponent counter_attack > 70 → "low_block"
+        else → "counter"
+    else → "balanced"
+```
+
+### Game Plan Effects
+
+| Plan | xG Effect | Description |
+|------|-----------|-------------|
+| attacking | +0.03 | More risk, more chances; -0.02 defensive vulnerability |
+| counter | +0.02 | Transition threat; -0.02 possession reduction |
+| low_block | -0.03/-0.02 | Fewer goals conceded; reduced attacking threat |
+| high_press | +0.03 | Ball recoveries; -0.02 defensive risk |
 
 ---
 
 ## Manager Influence (`services/manager_service.py`)
 
-Manager profiles modulate game plan selection and produce context-specific adjustments:
+### Profile Attributes (0-100 range)
 
-### Game Plan Modulation
-```
-manager_game_plan_modifier(team, base_plan, relative_strength)
-```
-- High-risk managers (Bielsa: 88) push "balanced" toward "attacking"
-- Low-risk managers (Southgate: 50) may pull "attacking" toward "balanced" when strength is marginal
-- High pressing-preference managers favor high_press plans
+| Attribute | Effect |
+|-----------|--------|
+| risk_tolerance | Pushes toward attacking/high_press plans |
+| tactical_flexibility | Enables plan adaptation mid-match |
+| pressing_preference | Favors high_press game plan |
+| defensive_discipline | Adds defensive solidity |
 
-### Context Adjustments
-```
-apply_manager_context_adjustment(team, context, plan)
-```
+### Game Plan Modulation (`manager_game_plan_modifier`)
 
-| Manager Trait | Context | Effect |
-|---------------|---------|--------|
-| High risk (>70) | knockout | +0.015 xG (bold approach) |
-| Low risk (<45) | knockout | -0.015 xG (cautious) |
-| High discipline (>70) | knockout | -0.01 xG (defensive solidity) |
-| High risk (>55) | gd_chase | +0.02 xG |
-| Low risk (<=55) | gd_chase | +0.01 xG |
+- High-flex (>70) pushes "balanced" toward attacking
+- Low-flex (<40) keeps conservative plans
+- High-risk (>70) pushes attacking; Low-risk (<40) pulls back
+- High-pressing-preference (<55) reverts high_press to balanced
 
----
+### Context Adjustments (`apply_manager_context_adjustment`)
 
-## Game Plans
-
-Before every match, V4 chooses a strategy based on relative strength, opponent style, match context, and manager profile:
-
-| Plan | Conditions | Effects |
-|------|-----------|---------|
-| Attacking | strength > 1.15x opponent | +0.03 xG, -0.02 defensive |
-| Balanced | Default | No adjustment |
-| Counter | strength < 0.85x opponent | +0.02 xG transitions, -0.02 possession |
-| Low Block | strength < 0.85x + opponent counters | -0.03 conceded, -0.02 attack |
-| High Press | strength > 1.15x | +0.03 recoveries, -0.02 defensive risk |
-
-Context and manager profiles can override these defaults (see sections above).
+| Context | Risk > 70 | Risk < 45 | Discipline > 70 |
+|---------|-----------|-----------|-----------------|
+| knockout | +0.015 | -0.015 | -0.01 |
+| must_win | +0.03 scaled | - | - |
+| gd_chase | +0.02 | +0.01 | - |
 
 ---
 
-## xG Adjustment
+## Data Flow Summary
 
-V4 modifies V3 xG with additive adjustments, clamped to ±10% of base xG (minimum ±0.05).
-
-**Example: France vs Morocco (knockout context)**
-
-| Team | Base xG | Tactical Adjustments | Final xG |
-|------|:-------:|:--------------------:|:--------:|
-| France | 1.60 | +0.03 (game_plan) +0.015 (manager) -0.01 (context) | 1.635 |
-| Morocco | 1.20 | +0.02 (game_plan) +0.01 (defensive style) -0.01 (context) | 1.220 |
-
-Clamping formula:
 ```
-max_adj = max(base_xg * 0.10, 0.05)
-clamped_adj = max(-max_adj, min(max_adj, total_adj))
-final_xg = max(0.01, base_xg + clamped_adj)
+FC26 Player Attributes (pace, shooting, etc.)
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ V2 Player Strength Calculation (build_team_strength)     │
+│   - Role assignment via formation slots                  │
+│   - Weighted attribute formulas                          │
+│   - Attack/Midfield/Defense/GK ratings                   │
+└─────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ V3 Dynamic State (6 components)                         │
+│   - Chemistry (club links)                               │
+│   - Experience (caps, WC appearances)                    │
+│   - Form (fantasy points)                                │
+│   - Momentum (rolling 5-match results)                   │
+│   - Continuity (lineup stability)                        │
+│   - Leadership (captains, veterans)                     │
+│   Combined multiplier (0.90x - 1.10x)                    │
+└─────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ V4 Tactical Intelligence                                │
+│   - Tactical profiles (22 attributes)                    │
+│   - Formation characteristics (7 dimensions)               │
+│   - Manager profiles (4 attributes)                      │
+│   - 11 matchup categories                                │
+│   - Game plan selection                                    │
+│   - Match context awareness                                │
+│   Adjustments clamped to ±10% of base xG                   │
+└─────────────────────────────────────────────────────────┘
+    ↓
+    Poisson(λ = final_xG) → Goals
 ```
-
-If raw adjustments exceed the cap, a `clamp` adjustment is added with explanation.
 
 ---
 
-## FC26 Attribute Mappings
+## Configuration Parameters (`services/tactical_matchup_service.py`)
 
-| Tactical Context | FC26 Attributes Used |
-|------------------|---------------------|
-| Pace exploitation | pace, dribbling |
-| Press vulnerability | stamina, composure, passing |
-| Possession creativity | vision, dribbling, crossing, long_shots |
-| Possession quality | vision, passing |
-| Set-piece threat | crossing, heading_accuracy, strength |
-| Aerial battles | jumping, heading_accuracy, strength |
-
----
-
-## Configuration
-
-All tactical parameters are tunable in `services/tactical_matchup_service.py`:
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `MAX_XG_ADJUSTMENT_PCT` | 0.10 (10%) | Maximum tactical adjustment as fraction of base xG |
-| High-line pace factor | 0.12 | Base boost for pace exploitation |
-| Pressing boost | 0.10 | Base boost for pressing vs weak buildup |
-| Possession creativity | 0.08 | Base boost for creative possession teams |
-| Possession quality factor | 0.06 | Base boost for possession quality advantage |
-| Set-piece gap factor | 0.10 | Base boost for set-piece mismatches |
-| Aerial gap factor | 0.04 | Base boost for aerial dominance |
-| Flexibility factor | 0.02 | Base boost per 0.15 flex gap |
-| Rigidity penalty | 0.015 | Penalty for rigid vs flexible |
-| Attacking game plan | +0.03/-0.02 | Risk/reward for attacking plans |
-| Counter game plan | +0.02/-0.02 | Transition vs possession trade-off |
-| Low block | -0.03/-0.02 | Defensive solidity vs attacking cost |
-| Knockout context | -0.01 | Slight xG suppression in knockouts |
-| Must-win context | +0.02 | Urgency boost when must win |
-| GD chase context | +0.025/-0.015 | High-risk attacking in GD situations |
+| Parameter | Default | Location |
+|-----------|---------|----------|
+| `MAX_XG_ADJUSTMENT_PCT` | 0.10 | Line 68 |
+| High-line pace boost | 0.12 | Line 218 |
+| Pressing vs buildup | 0.10 | Line 247 |
+| Possession creativity | 0.08 | Line 281 |
+| Possession quality | 0.06 | Line 493 |
+| Set-piece gap factor | 0.10 | Line 316 |
+| Aerial gap factor | 0.04 | Line 350 |
+| Flexibility edge | 0.02 | Line 623 |
+| Rigidity penalty | 0.015 | Line 633 |
+| Knockout suppression | -0.01 | Line 657 |
+| Must-win urgency | +0.02 | Line 663 |
+| GD chase risk | +0.025/-0.015 | Line 677 |
 
 ---
 
 ## Key Design Decisions
 
-1. **Additive, not multiplicative**: Tactical effects modify xG as additive adjustments, not multipliers. This prevents compounding between V3 and V4.
+1. **Additive adjustments:** V4 modifies xG additively (not multiplicatively) to maintain linear interpretability and prevent compounding with V3.
 
-2. **±10% cap**: Tactical effects cannot overturn major quality differences. Elite teams remain favorites.
+2. **±10% cap:** Ensures tactical differences cannot overturn major quality gaps. A 2.0 xG favorite remains favorite even with tactical disadvantages.
 
-3. **Player-mediated**: Team-level tactical profiles provide the base, but FC26 player attributes moderate the actual effect size.
+3. **Player-mediated effects:** Team-level tactical profiles provide direction, but FC26 attributes determine actual effect magnitude (pace determines high-line exploit, vision/passing determines possession quality boost).
 
-4. **Explainable**: Every tactical modifier has a category, description, and exact value. Debug mode shows the full chain.
+4. **Composable layers:** V4 wraps V3 without modifying it. V3 can run independently. V2 can run independently. V1 is standalone.
 
-5. **Game plan selection**: Based on relative V3 strength, match context, AND manager profile — multi-factor decision.
+5. **Explainable adjustments:** Every tactical modifier has category, value, and description for debugging.
 
-6. **Possession quality ≠ volume**: Possession quality metrics (progressive passes, final-third entries, big chances) separate meaningful possession from sterile ball circulation.
-
-7. **Defensive styles**: 5 distinct defensive approaches with a matchup matrix — low block isn't just "defend deep," it interacts differently with pressing, direct play, and possession than mid block does.
-
-8. **Match context matters**: A must-win group match produces different tactical behavior than a knockout tie or a GD chase.
+6. **Context-aware game plans:** Game plan selection integrates relative strength (V3), opponent style (tactical profiles), and match context.
 
 ---
 
-## Validation
+## Execution Flow
 
-### Benchmark Tests (38 tests)
-- All 20 original V4 tests pass
-- 18 new tests covering:
-  - Manager profile loading and validation (9 tests)
-  - Updated profile structure (6 tests)
-  - Possession quality adjustments (2 tests)
-  - Defensive style interactions (3 tests)
-  - Tactical flexibility (3 tests)
-  - Match context effects (5 tests)
-  - V4 improved engine integration (5 tests)
-  - Boundary conditions (3 tests)
-  - Model dataclasses (2 tests)
-
-### Verified Properties
-- Elite teams remain favorites in all matchups
-- Tactical adjustments capped at ±10% of base xG
-- All 5 defensive styles appear in profiles
-- All 5 match contexts produce correct behavior
-- Knockout context slightly suppresses xG
-- Must-win and GD chase contexts increase attacking intent
-- Manager profiles load for all 48 teams with valid ranges
-
-### Expected Results
-- Elite teams remain favorites in all matchups
-- Tactical mismatches provide 0.02-0.15 xG swing
-- Upsets remain possible through Poisson variance
-- V4 improved adds realism through context-dependent tactical decisions
-
----
-
-## Debug Mode
-
-```bash
-.fsim v4 --debug
-```
-
-Output includes V3 debug section followed by V4 tactical report with all 11 matchup categories:
-
-```
-=== V3 DEBUG ===
-France vs Morocco
-...
-
-=== V4 TACTICAL INTELLIGENCE ===
-Tactical Matchup Report: France vs Morocco
-Match Context: knockout
-
-Game Plans: France (attacking) vs Morocco (counter)
-
-Base xG (from V3):
-  France: 1.50
-  Morocco: 1.20
-
-Tactical Advantages (France):
-  + Midfield numerical advantage
-  + Possession quality advantage (+0.02 xG)
-  + Defensive style advantage (high_press vs low_block)
-  + Tactical flexibility advantage (+0.01 xG)
-
-Tactical Advantages (Morocco):
-  + High defensive line exploited by pace (+0.10 xG)
-  + Counter game plan: transition threat (+0.02 xG)
-
-V4 Tactical Adjustments:
-  France:
-    game_plan: +0.0300 xG  [Attacking game plan]
-    possession_quality: +0.0200 xG  [Superior possession quality]
-    defensive_style: +0.0100 xG  [high_press vs possession: disrupts build-up]
-    flexibility: +0.0100 xG  [Tactical flexibility edge (78 vs 68)]
-    match_context: -0.0100 xG  [Knockout stage: higher stakes, less risk]
-    Total: +0.0600 xG
-  Morocco:
-    high_line_exploit: +0.1000 xG  [High line exploited by pace]
-    game_plan: +0.0200 xG  [Counter game plan: faster transitions]
-    defensive_style: +0.0100 xG  [low_block vs high_press: absorbs press]
-    match_context: -0.0100 xG  [Knockout stage: higher stakes, less risk]
-    Total: +0.1200 xG
-
-Final xG (V3 + V4 tactical):
-  France: 1.5600
-  Morocco: 1.3000
-
-Final Score: 2-1
-```
-
-Every tactical modifier is explainable with category, value, and description.
-
----
-
-## Files
-
-### New Files
-
-| File | Purpose |
-|------|---------|
-| `models/tactical_state.py` | TacticalAdjustment, TacticalReport, FormationProfile, ManagerProfile, MatchContext dataclasses |
-| `data/tactical_profiles.json` | 48 team tactical profiles (22 attributes each) |
-| `data/manager_profiles.json` | 48 manager profiles (4 attributes each) |
-| `services/formation_service.py` | Formation characteristics and matchup evaluation |
-| `services/tactical_matchup_service.py` | Core matchup engine (11 categories) |
-| `services/manager_service.py` | Manager profile loading and game plan modulation |
-| `engines/v4_tactical_engine.py` | V4 engine wrapping V3 with tactical layer |
-| `tests/test_v4_tactical_engine.py` | 20 original V4 tactical benchmark tests |
-| `tests/test_v4_improved.py` | 38 improved V4 tests |
-| `V4_TACTICAL_ARCHITECTURE.md` | This file |
-| `scripts/generate_tactical_profiles.py` | Script to generate/update tactical profiles |
-| `scripts/generate_v4_improved_data.py` | Script to generate improved V4 data files |
-
-### Modified Files
-
-| File | Change |
-|------|--------|
-| `engines/__init__.py` | Export V4TacticalEngine |
-| `models/__init__.py` | Export tactical state models |
-| `__init__.py` | Export V4TacticalEngine |
-| `services/simulation_service.py` | Handle model="v4" |
-| `engines/v4_tactical_engine.py` | Accept match context parameter |
-
----
-
-## Usage
+### Match Simulation (`V4TacticalEngine.simulate_match_debug`)
 
 ```python
-from fifa_data import run_simulation
+# 1. Increment match counter
+self._match_number += 1
 
-# Run V4 simulation (improved)
-result = run_simulation(model="v4", debug=True)
-print(result["champion"])
+# 2. Determine context
+context = "knockout" if not can_draw else "group"
 
-# View tactical debug output
-for debug in result.get("debug", []):
-    print(debug)
+# 3. Get V3 strength (includes dynamic state)
+strength1 = self._v3.get_team_strength(team1, is_knockout)
+strength2 = self._v3.get_team_strength(team2, is_knockout)
 
-# Direct engine access with context
-from fifa_data.engines import V4TacticalEngine
-engine = V4TacticalEngine(data_dir="fifa_data")
+# 4. Get V3 base xG
+base_lambda1, base_lambda2 = self._v3.expected_goals(strength1, strength2)
 
-# Knockout context with tactical depth
-xg1, xg2 = engine.expected_goals("France", "Morocco", context="knockout")
-score, debug = engine.simulate_match_debug("England", "Germany", can_draw=False, context="knockout")
-```
+# 5. Apply V4 tactical adjustments
+report = compute_tactical_matchup(team1, team2, base_lambda1, base_lambda2, squad1, squad2, context)
 
-### Discord Commands
-```bash
-.sim v1          # ELO-based simulation
-.sim v2          # Player attribute simulation
-.sim v3          # Dynamic state simulation
-.sim v4          # Tactical intelligence simulation (improved)
-.sim v4 debug    # Show tactical breakdowns
-.sim v4 animated # Watch matches in real time
-.sim help        # Show model comparison
+# 6. Poisson simulation with final xG
+g1 = poisson(max(self.minimum_lambda, report.final_xg_a))
+g2 = poisson(max(self.minimum_lambda, report.final_xg_b))
+
+# 7. Extra time / penalties if knockout tie
+# ... (same as V3)
+
+# 8. Update V3 services (momentum, continuity)
+self._v3.momentum_service.record_result(team1, g1, g2, False)
+self._v3.continuity_service.record_lineup(team1, player_names)
+
+# 9. Format debug output
+return score, v4_debug_output
 ```
 
 ---
 
-## Future Extensions
+## Files Reference
 
-- **Dynamic tactical profiles**: Update profiles based on in-tournament performance
-- **In-match adjustments**: Tactic changes at halftime based on score
-- **Set-piece routines**: Specific set-piece patterns from match data
-- **Fatigue effects**: Tactical execution degrading with player fatigue
-- **ML-informed profiles**: Machine learning from Opta/StatsBomb event data
-- **Head-to-head historical context**: Previous meeting results influence game plan
+| Layer | File | Purpose |
+|-------|------|---------|
+| V1 | `engines/v1_elo_engine.py` | ELO-based simulation |
+| V2 | `engines/v2_player_engine.py` | Player attribute simulation |
+| V2 | `models/team_strength.py` | Role formulas, strength calculation |
+| V3 | `engines/v3_dynamic_engine.py` | Dynamic state engine |
+| V3 | `models/dynamic_state.py` | ComponentScore, DynamicState dataclasses |
+| V3 | `services/chemistry_service.py` | Team chemistry calculation |
+| V3 | `services/experience_service.py` | Experience calculation |
+| V3 | `services/form_service.py` | Form calculation |
+| V3 | `services/momentum_service.py` | Momentum tracking |
+| V3 | `services/continuity_service.py` | Continuity calculation |
+| V3 | `services/leadership_service.py` | Leadership calculation |
+| V4 | `engines/v4_tactical_engine.py` | Tactical engine (wraps V3) |
+| V4 | `models/tactical_state.py` | TacticalAdjustment, TacticalReport, FormationProfile, ManagerProfile |
+| V4 | `services/tactical_matchup_service.py` | 11 matchup categories, game plan selection |
+| V4 | `services/formation_service.py` | Formation profiles and matchup evaluation |
+| V4 | `services/manager_service.py` | Manager profile loading and modulation |
+| V4 | `data/tactical_profiles.json` | 22 tactical attributes per team |
+| V4 | `data/manager_profiles.json` | 4 manager attributes per team |

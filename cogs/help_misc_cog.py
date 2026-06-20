@@ -53,7 +53,7 @@ class TimezoneSelectView(discord.ui.View):
     )
     async def tz_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("Not your menu.", ephemeral=True)
+            return                     await interaction.response.send_message("Not your menu.", ephemeral=True)
 
         value = select.values[0]
         if value == "__custom__":
@@ -63,7 +63,14 @@ class TimezoneSelectView(discord.ui.View):
             )
             return
 
-        tz = ZoneInfo(value)
+        try:
+            tz = ZoneInfo(value)
+        except ZoneInfoNotFoundError:
+            await interaction.response.edit_message(
+                content="❌ Invalid timezone. Please try again.",
+                view=None,
+            )
+            return
         dt_local = self.dt.replace(tzinfo=tz)
         ts = int(dt_local.timestamp())
 
@@ -383,7 +390,10 @@ class Other(commands.Cog):
 
     async def _send_narration(self, ctx, text, ping_roles=True):
         text = re.sub(r'@(everyone|here)', '@\u200b\\1', text)
-        text = re.sub(r'<@&(\d+)>', lambda m: f'@\u200b{ctx.guild.get_role(int(m.group(1))).name if ctx.guild.get_role(int(m.group(1))) else "deleted-role"}', text)
+        def _replace_role(m):
+            r = ctx.guild.get_role(int(m.group(1)))
+            return f'@\u200b{r.name if r else "deleted-role"}'
+        text = re.sub(r'<@&(\d+)>', _replace_role, text)
 
         guild_data = load_guild_data(ctx.guild.id)
         color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
@@ -423,13 +433,14 @@ class Other(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             pass
 
+        prefix = ctx.prefix if isinstance(ctx.prefix, str) else (ctx.clean_prefix if hasattr(ctx, 'clean_prefix') else '.')
+        original_text = ctx.message.content[len(prefix) + len(ctx.invoked_with or ""):].strip()
+
         try:
             log_dir = os.path.join("data", "narration_logs")
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, f"{ctx.guild.id}.log")
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            prefix = ctx.prefix if isinstance(ctx.prefix, str) else (ctx.clean_prefix if hasattr(ctx, 'clean_prefix') else '.')
-            original_text = ctx.message.content[len(prefix) + len(ctx.invoked_with or ""):].strip()
             location = f"#{ctx.channel.name}" if ctx.channel else "unknown"
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"[{ts}] {ctx.author.display_name} ({ctx.author.id}) in {location}: {original_text}\n")
@@ -740,7 +751,7 @@ class Other(commands.Cog):
             else:
                 await ctx.send(f"{category} is not a valid category")
 
-    async def send_help_page(self, ctx, embed, callback, options=None):
+    async def send_help_page(self, ctx, embed, _help_method=None, options=None):
         if options is None:
             in_help2 = getattr(self, '_in_help2', False)
             if in_help2:
@@ -785,12 +796,12 @@ class Other(commands.Cog):
             message = await ctx.original_response()
         else:
             message = await ctx.send(embed=embed, view=view)
-        async def callback(interaction):
+        async def on_select(interaction):
             if interaction.message.id == message.id:
                 await message.delete()
                 category = interaction.data["values"][0]
                 await route_fn(category)
-        select.callback = callback
+        select.callback = on_select
 
     async def help_homepage(self, ctx):
         embedh = discord.Embed(title="Village Game - Commands list", color=0xff3fb9)
@@ -1320,7 +1331,7 @@ class Other(commands.Cog):
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_calendar)
 
-async def help_draft(self, ctx):
+    async def help_draft(self, ctx):
         embed = discord.Embed(title="🏆 Draft commands", description="21 commands", color=0xff3fb9)
         embed.add_field(name="Draft Commands", value=(
             "**.draftstart @u1 @u2 ...** ─ Start a snake draft (admin)\n"
@@ -1349,16 +1360,26 @@ async def help_draft(self, ctx):
             "**.trending [position]** / **.form** ─ Players with best form rating\n"
             "**.differentials [N]** / **.diff** ─ Best differential picks (high pts, low ownership)"
         ), inline=False)
-        embed.add_field(name="Simulation", value=(
-            "**.simulate [v1|v2|v3|v4] [fast|animated] [debug]** ─ Run tournament sim\n"
-            "**.fsim** ─ Alias for `.simulate`\n"
-            "**.sim help** / **.simhelp** ─ Full V1-V4 model breakdown\n"
-            "**.simulate v1** ─ ELO-based team ratings simulation\n"
-            "**.simulate v2** ─ Player attributes simulation (uses FIFA fantasy data)\n"
-            "**.simulate v3** ─ Dynamic state engine with chemistry, form, momentum\n"
-            "**.simulate v4** ─ Tactical Intelligence Engine (manager profiles, defensive styles, match context)\n"
-            "**.simulate animated** ─ Full animation mode (5+ min) with goal-by-goal action\n"
-            "**.simulate debug** ─ Tactical debug reports for first 3 matches (V4)"
+        embed.add_field(name="Simulation — Tournament", value=(
+            "**.simulate** / **.sim** / **.fsim** [version] [mode] [debug]\n"
+            "  Versions: **v1** (ELO), **v2** (players), **v3** (dynamic), **v4** (tactical)\n"
+            "  Modes: **fast** (default), **animated** (goal-by-goal)\n"
+            "  Flags: **debug** (V4 tactical breakdown)\n"
+            "  `Ex: .fsim v4 animated`"
+        ), inline=False)
+        embed.add_field(name="Simulation — Head-to-Head", value=(
+            "**.fsim detailed** <version> <Team A> <Team B> [knockout] [N]\n"
+            "  Monte Carlo analysis between two specific teams.\n"
+            "  N = simulations (default 100).\n"
+            "  `Ex: .fsim detailed v4 France Spain`\n"
+            "  `Ex: .fsim detailed v4 France Spain knockout 10000`"
+        ), inline=False)
+        embed.add_field(name="Simulation — Help & Reference", value=(
+            "**.simhelp** / **.sim help** — Full V1-V4 model descriptions\n"
+            "**.simulate v1** — Historical ELO/PELE ratings\n"
+            "**.simulate v2** — FC26 player attributes + formations\n"
+            "**.simulate v3** — Chemistry, form, momentum, leadership\n"
+            "**.simulate v4** — Tactics, managers, styles, contexts"
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_draft)

@@ -1,5 +1,8 @@
+import collections
+import difflib
 import discord
 import json
+import logging
 import os
 import re
 import asyncio
@@ -7,6 +10,8 @@ import aiohttp
 import sys
 from datetime import datetime
 from discord.ext import commands
+
+logger = logging.getLogger(__name__)
 
 # Add fifa_data parent to path so we can import fifa_data.services.*
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,10 +25,10 @@ for p in [
         sys.path.insert(0, p)
         break
 
-from fifa_data.services.simulation_service import run_simulation
-from fifa_data.services.fantasy_service import FantasyService, norm as fs_norm, FIFA_POSITION_MAP
+from fifa_data.services.simulation_service import run_simulation, TEAM_METRICS, GROUPS
+from fifa_data.services.fantasy_service import FantasyService, FIFA_POSITION_MAP
 from fifa_data.services.match_analytics import (
-    get_match_analytics, get_form_players, get_differentials,
+    fetch_and_cache_data, get_match_analytics, get_form_players, get_differentials,
     get_matches_for_team, load_data,
 )
 
@@ -126,6 +131,26 @@ for c_name, _, countries in CONTINENTS:
     for name in countries:
         COUNTRY_CONTINENT[name] = c_name
 
+def empty_team():
+    return {"players": [], "country_counts": {}}
+
+COUNTRY_TO_SIM = {
+    "South Korea": "Korea Republic",
+    "Czech Republic": "Czechia",
+    "Turkey": "Türkiye",
+    "Iran": "IR Iran",
+    "Cabo Verde": "Cape Verde",
+}
+SIM_TO_COUNTRY = {v: k for k, v in COUNTRY_TO_SIM.items()}
+
+
+def country_to_sim(name):
+    return COUNTRY_TO_SIM.get(name, name)
+
+
+def sim_to_country(name):
+    return SIM_TO_COUNTRY.get(name, name)
+
 
 def get_roster_counts(players):
     counts = {p: 0 for p in POSITIONS}
@@ -207,6 +232,8 @@ def make_remaining_str(players):
 
 
 def generate_snake_order(managers):
+    if not managers:
+        return []
     order = []
     for rnd in range(11):
         if rnd % 2 == 0:
@@ -260,7 +287,7 @@ class PlayerNameModal(discord.ui.Modal, title="Enter Player Name"):
         if self.owner_id != get_current_owner(draft):
             return await interaction.response.send_message("Not your turn anymore.", ephemeral=True)
 
-        team = draft["teams"].get(str(self.owner_id), {"players": [], "country_counts": {}})
+        team = draft["teams"].get(str(self.owner_id), empty_team())
 
         if not can_add_position(team["players"], self.position):
             return await interaction.response.send_message(f"Position {self.position} is no longer available.", ephemeral=True)
@@ -308,9 +335,7 @@ class PlayerNameModal(discord.ui.Modal, title="Enter Player Name"):
         try:
             await self.cog._advance_after_pick(self.guild_id, guild_ch, guild)
         except Exception as e:
-            import traceback
-            print(f"[DRAFT] on_submit: _advance_after_pick failed — {e}")
-            traceback.print_exc()
+            logger.exception("on_submit: _advance_after_pick failed — %s", e)
 
 
 class CountrySelect(discord.ui.Select):
@@ -415,7 +440,7 @@ class CountrySelectView(discord.ui.View):
                     pass
 
     async def on_error(self, interaction, error, item):
-        print(f"CountrySelectView error: {error}")
+        logger.warning("CountrySelectView error: %s", error)
 
 
 class PositionButtons(discord.ui.View):
@@ -457,7 +482,7 @@ class PositionButtons(discord.ui.View):
             return await interaction.response.send_message("Not your turn anymore.", ephemeral=True)
 
         prepicks = draft.get("prepicks", {}).get(str(self.owner_id), [])
-        team = draft["teams"].get(str(self.owner_id), {"players": [], "country_counts": {}})
+        team = draft["teams"].get(str(self.owner_id), empty_team())
 
         for pp in prepicks:
             if not can_add_position(team["players"], pp["position"]):
@@ -489,7 +514,7 @@ class PositionButtons(discord.ui.View):
 
             self.cog._cancel_timer(self.guild_id)
 
-            team = draft["teams"].get(str(self.owner_id), {"players": [], "country_counts": {}})
+            team = draft["teams"].get(str(self.owner_id), empty_team())
             if not can_add_position(team["players"], position):
                 return await interaction.response.send_message(f"Position {position} is no longer available.", ephemeral=True)
 
@@ -502,7 +527,7 @@ class PositionButtons(discord.ui.View):
         return callback
 
     async def on_error(self, interaction, error, item):
-        print(f"PositionButtons error: {error}")
+        logger.warning("PositionButtons error: %s", error)
 
 
 class PrepickManageView(discord.ui.View):
@@ -561,7 +586,7 @@ class PrepickManageView(discord.ui.View):
         return callback
 
     async def on_error(self, interaction, error, item):
-        print(f"PrepickManageView error: {error}")
+        logger.warning("PrepickManageView error: %s", error)
 
 
 class PrepickCountrySelect(discord.ui.Select):
@@ -708,7 +733,7 @@ class PrepickNameModal(discord.ui.Modal, title="Prepick Player Name"):
         if len(prepicks) >= 2:
             return await interaction.response.send_message("Max 2 prepicks.", ephemeral=True)
 
-        team = draft["teams"].get(str(self.owner_id), {"players": [], "country_counts": {}})
+        team = draft["teams"].get(str(self.owner_id), empty_team())
         if not can_add_position(team["players"], self.position):
             return await interaction.response.send_message(f"Position {self.position} is no longer available.", ephemeral=True)
 
@@ -778,6 +803,7 @@ class DraftCog(commands.Cog):
         self._fantasy_cache = None
         self._fantasy_cache_time = 0
         self.fantasy = FantasyService()
+        self._api_lock = asyncio.Lock()
         self._load()
 
     def _load(self):
@@ -785,7 +811,15 @@ class DraftCog(commands.Cog):
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning("Corrupt draft data file: %s — resetting", e)
+                backup = DATA_FILE + ".bak"
+                try:
+                    if os.path.exists(DATA_FILE):
+                        os.replace(DATA_FILE, backup)
+                        logger.info("Backed up corrupt file to %s", backup)
+                except OSError:
+                    pass
                 self.data = {}
         else:
             self.data = {}
@@ -796,8 +830,10 @@ class DraftCog(commands.Cog):
 
     def _save(self):
         os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
+        tmp = DATA_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=2)
+        os.replace(tmp, DATA_FILE)
 
     def _get_draft(self, guild_id):
         return self.data.get(str(guild_id))
@@ -815,8 +851,10 @@ class DraftCog(commands.Cog):
                 try:
                     msg = await ch.fetch_message(msg_id)
                     await msg.edit(view=None)
-                except Exception:
+                except (discord.NotFound, discord.Forbidden):
                     pass
+                except Exception as e:
+                    logger.warning("cleanup_turn_message: %s", e)
             draft["turn_message_id"] = None
             self._save()
 
@@ -845,6 +883,12 @@ class DraftCog(commands.Cog):
         if channel is None:
             return
 
+        draft = self._get_draft(guild_id)
+        if draft is None or draft.get("paused") or draft.get("ended"):
+            return
+        if get_current_owner(draft) != owner_id:
+            return
+
         try:
             await channel.send(f"⏰ <@{owner_id}> you've been on the clock for 10 minutes. Please make your pick!")
         except (discord.Forbidden, discord.NotFound):
@@ -859,7 +903,7 @@ class DraftCog(commands.Cog):
         if draft is None:
             return None
 
-        team = draft["teams"].setdefault(str(owner_id), {"players": [], "country_counts": {}})
+        team = draft["teams"].setdefault(str(owner_id), empty_team())
 
         pick_number = len(draft["pick_history"]) + 1
         pick = {
@@ -872,7 +916,7 @@ class DraftCog(commands.Cog):
 
         team["players"].append(pick)
         team["country_counts"] = get_country_counts(team["players"])
-        draft["pick_history"].append(pick)
+        draft["pick_history"].append(pick.copy())
         draft["current_index"] += 1
         self._save()
 
@@ -890,7 +934,7 @@ class DraftCog(commands.Cog):
                 if channel is None:
                     channel = guild.get_channel_or_thread(draft.get("channel_id"))
         if guild is None or channel is None:
-            print(f"[DRAFT] _advance_after_pick: guild={guild} channel={channel} — pausing")
+            logger.warning("_advance_after_pick: guild=%s channel=%s — pausing", guild, channel)
             draft["paused"] = True
             self._save()
             return
@@ -904,19 +948,17 @@ class DraftCog(commands.Cog):
             await self._update_status(guild_id, channel, guild)
             await self._send_turn(guild_id, channel, guild)
         except (discord.Forbidden, discord.NotFound) as e:
-            print(f"[DRAFT] _advance_after_pick: Forbidden/NotFound — {e}")
+            logger.warning("_advance_after_pick: Forbidden/NotFound — %s", e)
             draft["paused"] = True
             self._save()
         except Exception as e:
-            import traceback
-            print(f"[DRAFT] _advance_after_pick: unexpected error — {e}")
-            traceback.print_exc()
+            logger.exception("_advance_after_pick: unexpected error — %s", e)
             draft["paused"] = True
             self._save()
 
     async def _send_turn(self, guild_id, channel, guild):
         draft = self._get_draft(guild_id)
-        if draft is None or draft.get("ended"):
+        if draft is None or draft.get("ended") or draft.get("paused"):
             return
 
         owner_id = get_current_owner(draft)
@@ -967,10 +1009,10 @@ class DraftCog(commands.Cog):
         try:
             msg = await channel.send(content=mention, embed=embed, view=view)
         except (discord.Forbidden, discord.NotFound) as e:
-            print(f"[DRAFT] _send_turn: can't send turn — {e}")
+            logger.warning("_send_turn: can't send turn — %s", e)
             return
         except Exception as e:
-            print(f"[DRAFT] _send_turn: unexpected error — {e}")
+            logger.exception("_send_turn: unexpected error — %s", e)
             return
         draft["turn_message_id"] = msg.id
         self._save()
@@ -1038,10 +1080,10 @@ class DraftCog(commands.Cog):
             try:
                 msg = await target_ch.send(embed=embed)
             except (discord.Forbidden, discord.NotFound) as e:
-                print(f"[DRAFT] _update_status: can't send status — {e}")
+                logger.warning("_update_status: can't send status — %s", e)
                 return
             except Exception as e:
-                print(f"[DRAFT] _update_status: unexpected error — {e}")
+                logger.exception("_update_status: unexpected error — %s", e)
                 return
             draft["status_message_id"] = msg.id
             draft["status_channel_id"] = target_ch.id
@@ -1140,7 +1182,7 @@ class DraftCog(commands.Cog):
         }
 
         for uid in manager_ids:
-            draft["teams"][str(uid)] = {"players": [], "country_counts": {}}
+            draft["teams"][str(uid)] = empty_team()
 
         self.data[gid] = draft
         self._save()
@@ -1216,7 +1258,7 @@ class DraftCog(commands.Cog):
         if team is None:
             return await ctx.send("That user is not in this draft.")
 
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
         resolved = self.fantasy.resolve_players(team["players"])
         total = sum(r["net_points"] for r in resolved)
 
@@ -1373,11 +1415,12 @@ class DraftCog(commands.Cog):
         )
 
         class ForcePickView(discord.ui.View):
-            def __init__(self2):
+            def __init__(self2, cog, msg):
                 super().__init__(timeout=120)
+                self2.cog = cog
                 self2.position = None
                 self2.country = None
-                self2.message = None
+                self2.message = msg
 
                 pos_select = discord.ui.Select(
                     placeholder="Select position...",
@@ -1453,9 +1496,10 @@ class DraftCog(commands.Cog):
                     return await interaction.response.send_message("Draft is paused or ended.", ephemeral=True)
                 if get_current_owner(d) != owner_id:
                     return await interaction.response.send_message("That user is no longer on the clock.", ephemeral=True)
-                if not can_add_position(team["players"], self2.position):
+                current_team = d["teams"].get(str(owner_id), empty_team())
+                if not can_add_position(current_team["players"], self2.position):
                     return await interaction.response.send_message(f"Position {self2.position} is no longer available.", ephemeral=True)
-                if not can_add_country(team["players"], self2.country):
+                if not can_add_country(current_team["players"], self2.country):
                     return await interaction.response.send_message(f"Country limit reached for {self2.country}.", ephemeral=True)
                 if is_player_drafted(d, player_name):
                     return await interaction.response.send_message(f"'{player_name}' already drafted since you started.", ephemeral=True)
@@ -1485,9 +1529,7 @@ class DraftCog(commands.Cog):
                 except Exception:
                     pass
 
-        view = ForcePickView()
-        view.cog = self
-        view.message = msg
+        view = ForcePickView(self, msg)
         await msg.edit(view=view)
 
     # ── Fantasy Points ─────────────────────────────────────────
@@ -1538,7 +1580,7 @@ class DraftCog(commands.Cog):
 
         await ctx.send("⏳ Fetching fantasy points...")
 
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
 
         results = []
         for uid_str, team in draft["teams"].items():
@@ -1594,7 +1636,7 @@ class DraftCog(commands.Cog):
             return await ctx.send("No active draft.")
 
         await ctx.send("⏳ Fetching fantasy points...")
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
         standings = self.fantasy.get_standings(draft, ctx.guild)
 
         embed = discord.Embed(title="🏆 Draft Standings", color=0xff3fb9)
@@ -1617,7 +1659,7 @@ class DraftCog(commands.Cog):
         if not name:
             return await ctx.send("Usage: `.player <player name>`")
 
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
         match = self.fantasy.match_player(name)
         if not match:
             return await ctx.send(f"Player '{name}' not found in FIFA fantasy data.")
@@ -1651,7 +1693,7 @@ class DraftCog(commands.Cog):
             limit = 10
 
         await ctx.send("⏳ Fetching fantasy points...")
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
         top = self.fantasy.get_top_drafted_players(draft, limit)
 
         embed = discord.Embed(
@@ -1679,7 +1721,7 @@ class DraftCog(commands.Cog):
             return await ctx.send("That user is not in this draft.")
 
         await ctx.send("⏳ Fetching fantasy points...")
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
         resolved = self.fantasy.resolve_players(team["players"])
         total = sum(r["net_points"] for r in resolved)
 
@@ -1708,7 +1750,7 @@ class DraftCog(commands.Cog):
             return await ctx.send("No active draft.")
 
         await ctx.send("⏳ Fetching fantasy data...")
-        await self.fantasy.fetch_data(force=True)
+        await self.fantasy.fetch_data()
 
         embed = discord.Embed(
             title="🔍 Scouting Bonus Leaderboard",
@@ -1792,7 +1834,11 @@ class DraftCog(commands.Cog):
     async def matches(self, ctx, *, filter_term: str = None):
         """Show latest match results with fantasy top scorers.
         Optional: group letter (A-L) or team name to filter."""
-        await ctx.send("⏳ Loading match data...")
+        await ctx.send("⏳ Fetching latest match data...")
+        try:
+            await fetch_and_cache_data()
+        except Exception:
+            await ctx.send("⚠️ Could not fetch live data, using cached...")
 
         match_reports, upcoming_reports = get_match_analytics(limit_matches=12)
 
@@ -1932,86 +1978,73 @@ class DraftCog(commands.Cog):
 
     @commands.command(aliases=["simhelp"])
     async def simulate_help(self, ctx):
-        """Detailed explanation of .sim models (V1-V4)."""
-        lines = [
-            "**World Cup Simulation Models**",
-            "",
-            "**`.sim v1` — ELO Rating Engine**",
-            "• Based on classic ELO + PELE rating system",
-            "• Teams rated by historical performance and match results",
-            "• Real WC 2026 results update ELO in real time",
-            "• Goal difference weighted (1 GD = 1x, 2 GD = 1.5x, 3+ GD = 2x)",
-            "• Expected goals derived from rating ratios with non-linear curve",
-            "• Best for: quick simulations where only team quality matters",
-            "",
-            "**`.sim v2` — Player Attribute Engine**",
-            "• Every player rated individually from FC26 data",
-            "• 11 positional roles rated separately (GK, CB, FB, CM, DM, WINGER, ST)",
-            "• Formation-aware: 4-3-3 vs 4-4-2 vs 3-5-2 etc. each evaluated",
-            "• Attack/Defense/Goalkeeper strength computed from role-weighted averages",
-            "• More granular than V1 — a star player can carry a weaker squad",
-            "• Requires up-to-date players.json and squads.json",
-            "",
-            "**`.sim v3` — Dynamic State Engine**",
-            "• Builds on V2 player ratings",
-            "• Adds 6 dynamic modifiers that change match-to-match:",
-            "  - Chemistry: how well the starting XI fits together",
-            "  - Experience: big-match temperament (boosted in KO stages)",
-            "  - Form: recent performance trend",
-            "  - Momentum: winning/losing streak effects",
-            "  - Continuity: how often same XI plays together",
-            "  - Leadership: captain and veteran influence",
-            "• National strength modifiers add patriotic home-field context",
-            "• Each modifier applies ±10% multiplier to base strength",
-            "• Most realistic simulation of a single match",
-            "",
-            "**`.sim v4` — Tactical Intelligence Engine**",
-            "• Advanced tactical layer **on top of V3** (does not replace it)",
-            "• Every team has a tactical profile with 20+ attributes (0-100):",
-            "  - Possession quality: progressive passes, final-third entries,",
-            "    big chance creation, shot quality (FBref/Opta-based)",
-            "  - Defensive style: low block, mid block, high press,",
-            "    man marking, or zonal (each interacts differently)",
-            "  - Tactical flexibility: ability to adapt mid-match",
-            "  - Set-piece threat, aerial strength, pressing intensity",
-            "• Real manager profiles: risk tolerance, pressing preference,",
-            "  defensive discipline, tactical flexibility",
-            "  (Scaloni, Deschamps, Nagelsmann, Bielsa, Southgate, etc.)",
-            "• Match context matters:",
-            "  - Group stage: standard approach",
-            "  - Knockout: slightly more cautious (-0.01 xG)",
-            "  - Must-win: attacking urgency (+0.02 xG)",
-            "  - Need draw: deep defensive focus (-0.015 xG)",
-            "  - GD chase: high-risk attacking (+0.025 xG, -0.015 defensive)",
-            "• 7 tactical matchup categories evaluated per match:",
-            "  1. High line vs pace exploitation",
-            "  2. Pressing vs weak build-up",
-            "  3. Possession vs low block creativity",
-            "  4. Set-piece mismatches",
-            "  5. Aerial dominance",
-            "  6. Formation advantages (width, midfield control)",
-            "  7. Player-tactic compatibility",
-            "• All adjustments capped at ±10% of base xG",
-            "• Elite teams remain favorites; upsets still happen via Poisson",
-            "• Add `debug` flag for full tactical breakdown per match",
-            "",
-            "**Usage:**",
-            "`.sim v4` — Fast V4 simulation (default)",
-            "`.sim v4 animated` — Watch matches play out in real time",
-            "`.sim v4 debug` — Show tactical reports for first 3 matches",
-            "`.fsim v4` — Alias for `.simulate v4`",
-            "",
-            "**Statistics:** 48 World Cup teams | 20+ tactical attributes each",
-            "| 48 manager profiles | 8 formation profiles | 5 match contexts",
-            "| 5 defensive styles | 5 game plans",
-        ]
-        await ctx.send("\n".join(lines))
+        """Detailed explanation of simulation models (V1-V4)."""
+        embed1 = discord.Embed(title="Simulation Commands Overview", color=0xff3fb9)
+        embed1.add_field(name="Tournament Simulation", value=(
+            "`.simulate` / `.fsim` / `.sim` — **full World Cup 2026 sim**\n"
+            "Picks: version → mode → flags\n\n"
+            "**Syntax:** `.simulate [version] [mode] [debug]`\n"
+            "**Short:** `.fsim [version] [mode] [debug]`\n"
+            "**Examples:**\n"
+            "`.fsim` — V1 fast (default)\n"
+            "`.fsim v4` — V4 tactical, fast\n"
+            "`.fsim v4 animated` — V4 goal-by-goal\n"
+            "`.fsim v4 debug` — V4 with tactical breakdown"
+        ), inline=False)
+        embed1.add_field(name="Head-to-Head Analysis", value=(
+            "`.fsim detailed` — **Monte Carlo between 2 teams**\n"
+            "Picks: version → team A → team B → options\n\n"
+            "**Syntax:** `.fsim detailed <version> <Team A> <Team B> [knockout] [N]`\n"
+            "**Examples:**\n"
+            "`.fsim detailed v4 France Spain`\n"
+            "`.fsim detailed v4 France Spain knockout`\n"
+            "`.fsim detailed v4 France Spain 10000`\n"
+            "`.fsim detailed v4 France Spain knockout 10000`"
+        ), inline=False)
+        await ctx.send(embed=embed1)
 
-    @commands.command(aliases=["fsim"])
+        embed2 = discord.Embed(title="Simulation Versions", color=0xff3fb9)
+        embed2.add_field(name="V1 — ELO Rating Engine", value=(
+            "`.simulate v1`\n"
+            "Classic ELO + PELE. Teams rated by historical strength. "
+            "Goal diff weighted (1x / 1.5x / 2x). "
+            "Fastest option — best when only team quality matters."
+        ), inline=False)
+        embed2.add_field(name="V2 — Player Attribute Engine", value=(
+            "`.simulate v2`\n"
+            "Every player rated individually from FC26 + fantasy data. "
+            "7 role formulas (GK, CB, FB, CM, DM, WINGER, ST). "
+            "Formation-aware. Star players can carry weaker teams."
+        ), inline=False)
+        embed2.add_field(name="V3 — Dynamic State Engine", value=(
+            "`.simulate v3`\n"
+            "Builds on V2 + 6 dynamic modifiers: Chemistry, Experience, Form, "
+            "Momentum, Continuity, Leadership. National strength modifiers. "
+            "Most realistic single-match sim."
+        ), inline=False)
+        embed2.add_field(name="V4 — Tactical Intelligence Engine", value=(
+            "`.simulate v4` / `.fsim detailed v4`\n"
+            "Tactical layer on top of V3. "
+            "20+ attributes per team, 62 manager profiles, 5 defensive styles, "
+            "5 game plans, 8 formation profiles. "
+            "Match context affects xG: Group (baseline), Knockout (-0.01), "
+            "Must-win (+0.02), Need draw (-0.015), GD chase (+0.025 xG, -0.015 def)."
+        ), inline=False)
+        embed2.set_footer(text="48 teams | 20+ attributes | 8 formations | 5 contexts")
+        await ctx.send(embed=embed2)
+
+    @commands.command(aliases=["sim", "fsim"])
     async def simulate(self, ctx, *, args: str = None):
-        """Run tournament simulation: `.simulate [v1|v2|v3|v4] [fast|animated] [debug]` or `.fsim ...`."""
+        """Run tournament simulation: `.simulate [v1|v2|v3|v4] [fast|animated|detailed] [debug]` or `.fsim ...`."""
+        if args and args.strip().lower() in ("help", "?"):
+            return await self.simulate_help(ctx)
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("Admin only.")
+
+        tokens = args.split() if args and args.strip() else []
+        if tokens and tokens[0].lower() == "detailed":
+            return await self._simulate_detailed(ctx, tokens[1:])
+
         model, presentation, debug = self._parse_simulation_args(args)
         if model is None:
             return await ctx.send(presentation)
@@ -2039,7 +2072,6 @@ class DraftCog(commands.Cog):
                 ) as r:
                     squads_raw = await r.json()
 
-            from datetime import datetime
             results = match_data.get("Results", [])
             completed = []
             upcoming = []
@@ -2101,6 +2133,273 @@ class DraftCog(commands.Cog):
         else:
             await self._simulate_fast(ctx, status_msg, data, model=model, debug=debug)
 
+    async def _simulate_detailed(self, ctx, tokens: list[str]) -> None:
+        VALID_VERSIONS = {"v1", "v2", "v3", "v4"}
+        VERSION_LABELS = {
+            "v1": "Historical ELO/PELE",
+            "v2": "FC26 Player Intelligence",
+            "v3": "Dynamic Team State",
+            "v4": "Tactical Intelligence",
+        }
+        MATCHES_TEAM_MAP = {
+            "USA": "United States",
+            "Cabo Verde": "Cape Verde",
+            "Bosnia and Herzegovina": "Bosnia-Herzegovina",
+            "South Korea": "Korea Republic",
+            "Czech Republic": "Czechia",
+            "Turkey": "Türkiye",
+            "Iran": "IR Iran",
+        }
+
+        all_teams = set()
+        for group_teams in GROUPS.values():
+            all_teams.update(group_teams)
+
+        flag_map = {}
+        for name, emoji, _ in COUNTRY_LIST:
+            mapped = MATCHES_TEAM_MAP.get(name, name)
+            flag_map[name] = emoji
+            flag_map[mapped] = emoji
+
+        def normalize_team(name: str) -> str:
+            return name.strip().lower().replace("-", " ")
+
+        def resolve_team(raw: str) -> tuple[str | None, str | None]:
+            raw_mapped = MATCHES_TEAM_MAP.get(raw.strip(), raw.strip())
+            q = normalize_team(raw_mapped)
+            for t in all_teams:
+                if normalize_team(t) == q:
+                    return t, None
+            matches = difflib.get_close_matches(q, [normalize_team(t) for t in all_teams], n=1, cutoff=0.6)
+            if matches:
+                for t in all_teams:
+                    if normalize_team(t) == matches[0]:
+                        return t, None
+            suggestions = difflib.get_close_matches(q, [normalize_team(t) for t in all_teams], n=3, cutoff=0.4)
+            resolved = []
+            for s in suggestions:
+                for t in all_teams:
+                    if normalize_team(t) == s:
+                        resolved.append(t)
+            return None, resolved
+
+        if not tokens or len(tokens) < 3:
+            lines = [
+                "❌ **Invalid .fsim detailed syntax.**",
+                "",
+                "Usage:",
+                "`.fsim detailed <version> <Team A> <Team B> [knockout] [simulations]`",
+                "",
+                "Versions:",
+                "`v1` — Historical strength (ELO + PELE)",
+                "`v2` — Player intelligence (FC26 ratings, XI, formations)",
+                "`v3` — Team state (chemistry, form, experience, momentum, leadership)",
+                "`v4` — Tactical intelligence (styles, formations, managers, matchups)",
+                "",
+                "Examples:",
+                "`.fsim detailed v4 France Spain`",
+                "`.fsim detailed v4 France Spain knockout`",
+                "`.fsim detailed v4 France Spain 1000`",
+                "`.fsim detailed v4 France Spain knockout 10000`",
+            ]
+            return await ctx.send("\n".join(lines))
+
+        version = tokens[0].lower()
+        if version not in VALID_VERSIONS:
+            avail = "\n".join(f"`{v}` — {VERSION_LABELS[v]}" for v in ["v1", "v2", "v3", "v4"])
+            return await ctx.send(
+                f"❌ Unknown version: `{version}`\n\nAvailable:\n{avail}"
+            )
+
+        team_a_raw, team_b_raw = tokens[1], tokens[2]
+        team_a, suggestion_a = resolve_team(team_a_raw)
+        team_b, suggestion_b = resolve_team(team_b_raw)
+
+        if not team_a:
+            msg = f"❌ Unknown team: `{team_a_raw}`\n"
+            if suggestion_a:
+                msg += "\nDid you mean:\n" + "\n".join(
+                    f"{flag_map.get(t, '🏳️')} {t}" for t in suggestion_a[:3]
+                )
+            return await ctx.send(msg)
+
+        if not team_b:
+            msg = f"❌ Unknown team: `{team_b_raw}`\n"
+            if suggestion_b:
+                msg += "\nDid you mean:\n" + "\n".join(
+                    f"{flag_map.get(t, '🏳️')} {t}" for t in suggestion_b[:3]
+                )
+            return await ctx.send(msg)
+
+        remaining = tokens[3:]
+        knockout = False
+        simulations = 100
+
+        for tok in remaining:
+            lowered = tok.lower()
+            if lowered == "knockout":
+                knockout = True
+            elif lowered.isdigit() and int(lowered) > 0:
+                simulations = int(lowered)
+            else:
+                return await ctx.send(
+                    f"❌ Unknown option: `{tok}`\n\n"
+                    "Usage: `.fsim detailed <version> <Team A> <Team B> [knockout] [simulations]`"
+                )
+
+        flag_a = flag_map.get(team_a, "🏳️")
+        flag_b = flag_map.get(team_b, "🏳️")
+
+        status = await ctx.send(
+            f"🔬 **{version.upper()} Detailed Analysis**\n"
+            f"{flag_a} **{team_a}** vs {flag_b} **{team_b}**\n"
+            f"{'🏟️ Knockout mode' if knockout else '📊 Group stage'}"
+            f" | {simulations:,} simulations\n⏳ Working..."
+        )
+
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None, self._run_monte_carlo,
+                version, team_a, team_b, knockout, simulations,
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return await ctx.send(f"❌ Simulation error: {e}")
+
+        w1, w2, draws, total = result["wins_a"], result["wins_b"], result["draws"], result["total"]
+        p1 = w1 / total * 100 if total else 0
+        p2 = w2 / total * 100 if total else 0
+        pd = draws / total * 100 if total else 0
+        avg_xg_a = result["avg_xg_a"]
+        avg_xg_b = result["avg_xg_b"]
+
+        embed = discord.Embed(
+            title=f"🔬 {version.upper()} Detailed Match Analysis",
+            color=0xff3fb9,
+        )
+        embed.add_field(
+            name=f"{flag_a} {team_a} vs {flag_b} {team_b}",
+            value=f"`{knockout and 'Knockout' or 'Group Stage'}` | {simulations:,} simulations",
+            inline=False,
+        )
+
+        bar_len = 12
+        w1_bar = "█" * max(1, round(p1 / 100 * bar_len)) if p1 > 0 else ""
+        w2_bar = "█" * max(1, round(p2 / 100 * bar_len)) if p2 > 0 else ""
+        d_bar = "█" * max(1, round(pd / 100 * bar_len)) if pd > 0 else ""
+
+        embed.add_field(
+            name="📊 Match Outcome",
+            value=(
+                f"**{flag_a} {team_a}**  {p1:.1f}%\n`{w1_bar:<{bar_len}}` {w1:,}\n"
+                f"**Draw**          {pd:.1f}%\n`{d_bar:<{bar_len}}` {draws:,}\n"
+                f"**{flag_b} {team_b}**  {p2:.1f}%\n`{w2_bar:<{bar_len}}` {w2:,}"
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="⚽ Expected Goals (avg)",
+            value=f"{flag_a} {team_a}: **{avg_xg_a:.3f}**\n{flag_b} {team_b}: **{avg_xg_b:.3f}**",
+            inline=True,
+        )
+        embed.add_field(
+            name="🏆 Most Common Scorelines",
+            value="\n".join(
+                f"{flag_a} {s[0]}-{s[1]} {flag_b}  — {c:,}× ({c/total*100:.1f}%)"
+                for s, c in result["top_scores"][:5]
+            ) or "N/A",
+            inline=True,
+        )
+
+        if version == "v4":
+            plan_a = result.get("plan_a", "balanced")
+            plan_b = result.get("plan_b", "balanced")
+            embed.add_field(
+                name="🧠 Game Plans",
+                value=f"{flag_a} {team_a}: **{plan_a}**\n{flag_b} {team_b}: **{plan_b}**",
+                inline=False,
+            )
+
+        embed.set_footer(text=f"Model: {version.upper()} | {VERSION_LABELS[version]}")
+        await status.edit(content=None, embed=embed)
+
+    def _run_monte_carlo(
+        self, version: str, team_a: str, team_b: str,
+        knockout: bool, simulations: int,
+    ) -> dict:
+        from fifa_data.engines.v1_elo_engine import V1EloMatchEngine
+        from fifa_data.engines.v2_player_engine import V2PlayerMatchEngine
+        from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
+        from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
+
+        fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+
+        if version == "v1":
+            from fifa_data.services.simulation_service import TEAM_METRICS
+            engine = V1EloMatchEngine(TEAM_METRICS)
+        elif version == "v2":
+            engine = V2PlayerMatchEngine(data_dir=fifa_dir)
+        elif version == "v3":
+            engine = V3DynamicEngine(data_dir=fifa_dir)
+        else:
+            engine = V4TacticalEngine(data_dir=fifa_dir)
+
+        wins_a = 0
+        wins_b = 0
+        draws = 0
+        total_xg_a = 0.0
+        total_xg_b = 0.0
+        score_counter: dict[tuple[int, int], int] = collections.Counter()
+        last_plan_a = "balanced"
+        last_plan_b = "balanced"
+
+        for _ in range(simulations):
+            if version == "v4" and knockout:
+                g1, g2 = engine.simulate_match(team_a, team_b, can_draw=False, context="knockout")
+            elif version == "v4":
+                g1, g2 = engine.simulate_match(team_a, team_b, can_draw=True, context="group")
+            else:
+                g1, g2 = engine.simulate_match(team_a, team_b, can_draw=not knockout)
+
+            if g1 > g2:
+                wins_a += 1
+            elif g2 > g1:
+                wins_b += 1
+            else:
+                draws += 1
+
+            total_xg_a += g1
+            total_xg_b += g2
+            score_counter[(g1, g2)] += 1
+
+            # Capture last game plans from V4
+            if version == "v4":
+                report = getattr(engine, "last_tactical_report", None)
+                if report:
+                    last_plan_a = report.game_plan_a
+                    last_plan_b = report.game_plan_b
+
+        avg_xg_a = total_xg_a / simulations
+        avg_xg_b = total_xg_b / simulations
+        top_scores = score_counter.most_common(10)
+
+        result = {
+            "wins_a": wins_a,
+            "wins_b": wins_b,
+            "draws": draws,
+            "total": simulations,
+            "avg_xg_a": avg_xg_a,
+            "avg_xg_b": avg_xg_b,
+            "top_scores": top_scores,
+        }
+        if version == "v4":
+            result["plan_a"] = last_plan_a
+            result["plan_b"] = last_plan_b
+        return result
+
     def _parse_simulation_args(self, args: str | None) -> tuple[str | None, str, bool]:
         tokens = args.split() if args and args.strip() else []
         model = "v1"
@@ -2117,7 +2416,7 @@ class DraftCog(commands.Cog):
         elif first in {"animated", "fast", "debug"}:
             pass
         else:
-            return None, "Usage: `.sim [v1|v2|v3|v4] [fast|animated] [debug]`", False
+            return None, "Usage: `.simulate [v1|v2|v3|v4] [fast|animated] [debug]`", False
 
         for token in tokens:
             lowered = token.lower()
@@ -2128,9 +2427,19 @@ class DraftCog(commands.Cog):
             elif lowered == "debug":
                 debug = True
             else:
-                return None, "Usage: `.sim [v1|v2|v3|v4] [fast|animated] [debug]`", False
+                return None, "Usage: `.simulate [v1|v2|v3|v4] [fast|animated] [debug]`", False
 
         return model, presentation, debug
+
+    @staticmethod
+    def _build_goal_events(h_goals, a_goals):
+        all_events = []
+        for g in h_goals:
+            all_events.append((g, "H"))
+        for g in a_goals:
+            all_events.append((g, "A"))
+        all_events.sort()
+        return all_events
 
     async def _simulate_animated(self, ctx, status_msg, data, model: str = "v1"):
         await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Live Simulation**\n🔄 Group Stage underway...")
@@ -2154,14 +2463,7 @@ class DraftCog(commands.Cog):
                 else:
                     await asyncio.sleep(1.2)
 
-                    h_goals = m["home_goal_minutes"]
-                    a_goals = m["away_goal_minutes"]
-                    all_events = []
-                    for g in h_goals:
-                        all_events.append((g, "H"))
-                    for g in a_goals:
-                        all_events.append((g, "A"))
-                    all_events.sort()
+                    all_events = self._build_goal_events(m["home_goal_minutes"], m["away_goal_minutes"])
 
                     cur_h = 0
                     cur_a = 0
@@ -2216,14 +2518,7 @@ class DraftCog(commands.Cog):
                 match_msg = await ctx.send(f"⚽ **{h}** vs **{a}**")
                 await asyncio.sleep(1.0)
 
-                h_goals = m["home_goal_minutes"]
-                a_goals = m["away_goal_minutes"]
-                all_events = []
-                for g in h_goals:
-                    all_events.append((g, "H"))
-                for g in a_goals:
-                    all_events.append((g, "A"))
-                all_events.sort()
+                all_events = self._build_goal_events(m["home_goal_minutes"], m["away_goal_minutes"])
 
                 cur_h = 0
                 cur_a = 0
@@ -2254,14 +2549,7 @@ class DraftCog(commands.Cog):
             winner = tp3["winner"]
             tp_msg = await ctx.send(f"⚽ **{h}** vs **{a}**")
             await asyncio.sleep(1.0)
-            h_goals = tp3["home_goal_minutes"]
-            a_goals = tp3["away_goal_minutes"]
-            all_events = []
-            for g in h_goals:
-                all_events.append((g, "H"))
-            for g in a_goals:
-                all_events.append((g, "A"))
-            all_events.sort()
+            all_events = self._build_goal_events(tp3["home_goal_minutes"], tp3["away_goal_minutes"])
             cur_h, cur_a = 0, 0
             for minute, side in all_events:
                 if side == "H":
@@ -2298,7 +2586,7 @@ class DraftCog(commands.Cog):
             gid, t, pts, gd, gf = tp
             mark = "✅" if rank <= 8 else "❌"
             tp_lines.append(f"{mark} Grp {gid} **{t}** — {pts}pts, {gd:+}GD, {gf}GF")
-        await ctx.send("\n".join(tp_lines[:9]))
+        await ctx.send("\n".join(tp_lines[:13]))
 
         # Knockout results
         ko_names = ["Round of 32", "Round of 16", "Quarter-Finals", "Semi-Finals", "Final"]

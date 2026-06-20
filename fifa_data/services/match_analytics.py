@@ -1,8 +1,70 @@
+import asyncio
 import json
 import os
 from collections import defaultdict
+from datetime import datetime, timezone
+
+import aiohttp
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+COMPETITION_ID = "17"
+SEASON_ID = "285023"
+FIFA_API_URL = "https://api.fifa.com/api/v3/calendar/matches"
+FANTASY_PLAYERS_URL = "https://play.fifa.com/json/fantasy/players.json"
+FANTASY_SQUADS_URL = "https://play.fifa.com/json/fantasy/squads.json"
+
+
+async def fetch_and_cache_data():
+    """Fetch live match data from FIFA API and cache to disk."""
+    async with aiohttp.ClientSession() as session:
+        params = {"idCompetition": COMPETITION_ID, "idSeason": SEASON_ID, "count": 200}
+        async with session.get(FIFA_API_URL, params=params, timeout=15) as r:
+            match_data = await r.json()
+        async with session.get(FANTASY_PLAYERS_URL, timeout=15) as r:
+            players = await r.json()
+        async with session.get(FANTASY_SQUADS_URL, timeout=15) as r:
+            squads_raw = await r.json()
+
+    results = match_data.get("Results", [])
+    completed, upcoming = [], []
+    for m in results:
+        status = m.get("MatchStatus")
+        home_data = m.get("Home") or {}
+        away_data = m.get("Away") or {}
+        home = (home_data.get("TeamName") or [{}])[0].get("Description", "?")
+        away = (away_data.get("TeamName") or [{}])[0].get("Description", "?")
+        hs = m.get("HomeTeamScore")
+        aas = m.get("AwayTeamScore")
+        entry = {
+            "id": m.get("IdMatch"),
+            "date": m.get("Date", "?"),
+            "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
+            "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
+            "home": {"name": home, "score": hs, "id": home_data.get("IdTeam")},
+            "away": {"name": away, "score": aas, "id": away_data.get("IdTeam")},
+            "winner": m.get("Winner"),
+            "status": status,
+        }
+        (completed if status == 0 else upcoming).append(entry)
+
+    matches_out = {
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "completed_count": len(completed),
+        "upcoming_count": len(upcoming),
+        "competition": "FIFA World Cup 2026",
+        "completed": completed,
+        "upcoming": upcoming,
+    }
+    data_dir = os.path.join(HERE, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    with open(os.path.join(data_dir, "matches.json"), "w", encoding="utf-8") as f:
+        json.dump(matches_out, f, indent=2, ensure_ascii=False)
+    with open(os.path.join(data_dir, "players.json"), "w", encoding="utf-8") as f:
+        json.dump(players, f, indent=2, ensure_ascii=False)
+    with open(os.path.join(data_dir, "squads.json"), "w", encoding="utf-8") as f:
+        json.dump(squads_raw, f, indent=2, ensure_ascii=False)
+    print(f"Fetched {len(completed)} completed + {len(upcoming)} upcoming matches")
 
 SQUAD_NAME_FIX = {
     "USA": "United States",
@@ -114,7 +176,8 @@ def get_match_analytics(limit_matches=4):
         return None
 
     match_reports = []
-    for m in completed[-limit_matches:]:
+    sorted_completed = sorted(completed, key=lambda x: x.get("date", ""))
+    for m in sorted_completed[-limit_matches:]:
         h_id = resolve_squad_id(m["home"]["name"])
         a_id = resolve_squad_id(m["away"]["name"])
         h_scorers = get_top_scorers_for_squad(squad_players, h_id) if h_id else []

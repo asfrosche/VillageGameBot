@@ -7,6 +7,7 @@ from numpy.random import poisson
 
 from ..models.squad import Squad
 from ..models.tactical_state import TacticalReport
+from ..models.team_strength import TeamStrength
 from ..services.tactical_matchup_service import (
     compute_tactical_matchup,
     format_tactical_report,
@@ -121,10 +122,11 @@ class V4TacticalEngine(MatchEngine):
             team1, team2, strength1, strength2,
             (base_lambda1, base_lambda2),
             report, score,
+            is_knockout, extra_time_used, penalties_used,
         )
         return score, self.last_match_debug
 
-    def get_team_strength(self, team: str) -> object:
+    def get_team_strength(self, team: str) -> TeamStrength:
         return self._v3.get_team_strength(team)
 
     def expected_goals(
@@ -153,16 +155,19 @@ class V4TacticalEngine(MatchEngine):
         self,
         team1: str,
         team2: str,
-        strength1: object,
-        strength2: object,
+        strength1: TeamStrength,
+        strength2: TeamStrength,
         base_xg: tuple[float, float],
         report: TacticalReport,
         score: tuple[int, int],
+        is_knockout: bool = False,
+        extra_time_used: bool = False,
+        penalties_used: bool = False,
     ) -> str:
         v3_debug = self._v3.format_match_debug(
             team1, team2, strength1, strength2,
-            self._v3._compute_dynamic_state(team1),
-            self._v3._compute_dynamic_state(team2),
+            self._v3._compute_dynamic_state(team1, is_knockout, extra_time_used, penalties_used),
+            self._v3._compute_dynamic_state(team2, is_knockout, extra_time_used, penalties_used),
             base_xg, score,
         )
         lines = [

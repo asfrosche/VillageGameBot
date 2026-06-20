@@ -24,9 +24,11 @@ class TournamentOrchestrator:
         self.team_name_map = team_name_map or {}
         self.generate_goal_minutes = generate_goal_minutes or self._generate_goals
         self.last_match_debugs: list[str] = []
+        self._debug: bool = False
 
     def run(self, debug: bool = False) -> dict[str, object]:
         self.last_match_debugs = []
+        self._debug = debug
         matches_data = self._load_matches()
         real_results = self._real_group_results(matches_data)
 
@@ -226,7 +228,7 @@ class TournamentOrchestrator:
                     team2,
                     can_draw=(round_name == "R32"),
                 )
-                self._capture_debug(True)
+                self._capture_debug(self._debug)
                 self.match_engine.notify_match(team1, team2, goals1, goals2, False)
                 winner = team1 if goals1 > goals2 else (team2 if goals2 > goals1 else random.choice([team1, team2]))
                 home_minutes, away_minutes = self.generate_goal_minutes(goals1, goals2)
@@ -263,7 +265,7 @@ class TournamentOrchestrator:
             return None
         team1, team2 = semi_losers
         goals1, goals2 = self.match_engine.simulate_match(team1, team2, can_draw=False)
-        self._capture_debug(True)
+        self._capture_debug(self._debug)
         self.match_engine.notify_match(team1, team2, goals1, goals2, False)
         home_minutes, away_minutes = self.generate_goal_minutes(goals1, goals2)
         winner = team1 if goals1 > goals2 else team2
