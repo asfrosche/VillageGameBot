@@ -66,22 +66,88 @@ async def fetch_and_cache_data():
         json.dump(squads_raw, f, indent=2, ensure_ascii=False)
     print(f"Fetched {len(completed)} completed + {len(upcoming)} upcoming matches")
 
-SQUAD_NAME_FIX = {
-    "USA": "United States",
-    "Cabo Verde": "Cape Verde",
-    "Korea Republic": "Korea Republic",
+KNOWN_NAME_VARIANTS = {
+    "United States": {"USA"},
+    "USA": {"United States"},
+    "Cape Verde": {"Cabo Verde"},
+    "Cabo Verde": {"Cape Verde"},
+    "Korea Republic": {"South Korea"},
+    "South Korea": {"Korea Republic"},
+    "Czechia": {"Czech Republic"},
+    "Czech Republic": {"Czechia"},
+    "Türkiye": {"Turkey"},
+    "Turkey": {"Türkiye"},
+    "IR Iran": {"Iran"},
+    "Iran": {"IR Iran"},
+    "Bosnia-Herzegovina": {"Bosnia and Herzegovina"},
+    "Bosnia and Herzegovina": {"Bosnia-Herzegovina"},
 }
 
-FIX_TO_SQUAD = {
-    "United States": "USA",
-    "Cape Verde": "Cabo Verde",
-}
+
+def expand_name_variants(name):
+    """Return the name plus all known API name variants for this team."""
+    result = {name}
+    direct = KNOWN_NAME_VARIANTS.get(name, set())
+    result.update(direct)
+    for k, v in KNOWN_NAME_VARIANTS.items():
+        if name in v:
+            result.add(k)
+    return result
+
 
 def squad_to_match_name(name):
-    return SQUAD_NAME_FIX.get(name, name)
+    variants = expand_name_variants(name) - {name}
+    return next(iter(variants), name)
+
 
 def match_to_squad_name(name):
-    return FIX_TO_SQUAD.get(name, name)
+    variants = expand_name_variants(name) - {name}
+    return next(iter(variants), name)
+
+
+def get_squad_games_played():
+    """Return (squad_games, max_games) — how many group matches each squad has played."""
+    try:
+        matches, players, squads, name_to_id = load_data()
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}, 0
+    completed = matches.get("completed", [])
+    squad_games = {}
+    for m in completed:
+        stage = m.get("stage", "")
+        if stage != "First Stage":
+            continue
+        for side in ("home", "away"):
+            name = m[side]["name"]
+            for variant in expand_name_variants(name):
+                squad_games[variant] = squad_games.get(variant, 0) + 1
+    for sid, s in squads.items():
+        if s["name"] not in squad_games:
+            squad_games[s["name"]] = 0
+    max_games = max(squad_games.values()) if squad_games else 0
+    return squad_games, max_games
+
+
+def get_squad_remaining():
+    """Return set of squad names that still have games to play."""
+    try:
+        matches, players, squads, name_to_id = load_data()
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+    upcoming = matches.get("upcoming", [])
+
+    remaining = set()
+    for m in upcoming:
+        for side in ("home", "away"):
+            name = m[side]["name"]
+            remaining.update(expand_name_variants(name))
+            # Cross-reference against fantasy squad names
+            name_lower = name.lower()
+            for sid, squad in squads.items():
+                if squad["name"].lower() == name_lower:
+                    remaining.add(squad["name"])
+
+    return remaining
 
 def load_data():
     with open(os.path.join(HERE, "data", "matches.json"), "r", encoding="utf-8") as f:
@@ -281,3 +347,63 @@ def get_matches_for_team(team_name):
         if m["home"]["name"].lower() == team_name.lower() or m["away"]["name"].lower() == team_name.lower():
             team_upcoming.append(m)
     return team_results, team_upcoming
+
+
+def get_group_standings(group_letter):
+    """Return standings table + completed/upcoming matches for a group (A-L)."""
+    matches, players, squads, name_to_id = load_data()
+    completed = matches.get("completed", [])
+    upcoming = matches.get("upcoming", [])
+
+    group_tag = f"Group {group_letter.upper()}"
+
+    team_stats = {}
+    for s in squads.values():
+        if s["group"].upper() == group_letter.upper():
+            team_stats[s["name"]] = {
+                "name": s["name"], "pld": 0, "w": 0, "d": 0, "l": 0,
+                "gf": 0, "ga": 0, "gd": 0, "pts": 0,
+            }
+
+    group_completed = []
+    for m in completed:
+        if m.get("group") != group_tag:
+            continue
+        group_completed.append(m)
+        home = m["home"]["name"]
+        away = m["away"]["name"]
+        hs = m["home"]["score"]
+        aas = m["away"]["score"]
+        if home in team_stats:
+            team_stats[home]["pld"] += 1
+            team_stats[home]["gf"] += hs
+            team_stats[home]["ga"] += aas
+            if hs > aas:
+                team_stats[home]["w"] += 1
+                team_stats[home]["pts"] += 3
+            elif hs == aas:
+                team_stats[home]["d"] += 1
+                team_stats[home]["pts"] += 1
+            else:
+                team_stats[home]["l"] += 1
+        if away in team_stats:
+            team_stats[away]["pld"] += 1
+            team_stats[away]["gf"] += aas
+            team_stats[away]["ga"] += hs
+            if aas > hs:
+                team_stats[away]["w"] += 1
+                team_stats[away]["pts"] += 3
+            elif aas == hs:
+                team_stats[away]["d"] += 1
+                team_stats[away]["pts"] += 1
+            else:
+                team_stats[away]["l"] += 1
+
+    for t in team_stats.values():
+        t["gd"] = t["gf"] - t["ga"]
+
+    standings = sorted(team_stats.values(), key=lambda x: (-x["pts"], -x["gd"], -x["gf"]))
+
+    group_upcoming = [m for m in upcoming if m.get("group") == group_tag]
+
+    return standings, group_completed, group_upcoming

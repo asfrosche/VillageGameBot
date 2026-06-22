@@ -29,7 +29,8 @@ from fifa_data.services.simulation_service import run_simulation, TEAM_METRICS, 
 from fifa_data.services.fantasy_service import FantasyService, FIFA_POSITION_MAP
 from fifa_data.services.match_analytics import (
     fetch_and_cache_data, get_match_analytics, get_form_players, get_differentials,
-    get_matches_for_team, load_data,
+    get_matches_for_team, get_squad_remaining, get_squad_games_played,
+    get_group_standings, load_data,
 )
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data", "data", "draft_data.json")
@@ -253,6 +254,132 @@ def get_country_options(current_players, continent=None):
         options.append(discord.SelectOption(label=f"{flag} {code}", value=name, emoji=flag))
     return options
 
+
+
+# ── World Cup Interactive Panel ──────────────────────────
+
+def _standings_table(standings):
+    lines = [f"`{'#':2s} {'Team':20s} {'Pld':3s} {'W':3s} {'D':3s} {'L':3s} {'GF':3s} {'GA':3s} {'GD':4s} {'Pts':3s}`"]
+    for i, t in enumerate(standings, 1):
+        lines.append(
+            f"`{i:2d} {t['name']:20s} {t['pld']:3d} {t['w']:3d} {t['d']:3d} "
+            f"{t['l']:3d} {t['gf']:3d} {t['ga']:3d} {t['gd']:+3d} {t['pts']:3d}`"
+        )
+    return "\n".join(lines)
+
+
+def _tiebreaker_text(standings, completed):
+    from collections import defaultdict
+    pts_groups = defaultdict(list)
+    for t in standings:
+        pts_groups[t['pts']].append(t)
+
+    lines = []
+    for pts, teams in pts_groups.items():
+        if len(teams) < 2:
+            continue
+        team_names = [t['name'] for t in teams]
+        h2h = {t: {'pts': 0, 'gd': 0, 'gf': 0, 'ga': 0} for t in team_names}
+        for m in completed:
+            home, away = m['home']['name'], m['away']['name']
+            if home in team_names and away in team_names:
+                hs, aas = m['home']['score'], m['away']['score']
+                h2h[home]['gf'] += hs; h2h[home]['ga'] += aas
+                h2h[away]['gf'] += aas; h2h[away]['ga'] += hs
+                if hs > aas:
+                    h2h[home]['pts'] += 3
+                elif hs == aas:
+                    h2h[home]['pts'] += 1; h2h[away]['pts'] += 1
+                else:
+                    h2h[away]['pts'] += 3
+        for t in team_names:
+            h2h[t]['gd'] = h2h[t]['gf'] - h2h[t]['ga']
+
+        sorted_h2h = sorted(team_names, key=lambda t: (-h2h[t]['pts'], -h2h[t]['gd'], -h2h[t]['gf']))
+        lines.append(f"\n**Tied on {pts}pts — Head-to-Head:**")
+        for t in sorted_h2h:
+            lines.append(f"  {t}: {h2h[t]['pts']}pts, GD {h2h[t]['gd']:+d}, GF {h2h[t]['gf']}")
+
+    return "\n".join(lines)
+
+
+def _build_group_embed(letter):
+    standings, completed, upcoming = get_group_standings(letter)
+    if not standings:
+        return None
+
+    embed = discord.Embed(
+        title=f"🌍 World Cup 2026 — Group {letter}",
+        color=0xff3fb9,
+    )
+    embed.add_field(name="📊 Standings", value=_standings_table(standings), inline=False)
+
+    tb = _tiebreaker_text(standings, completed)
+    if tb:
+        embed.add_field(name="⚖️ Tiebreakers", value=tb, inline=False)
+
+    if completed:
+        match_lines = []
+        for m in sorted(completed, key=lambda x: x.get("date", "")):
+            match_lines.append(
+                f"**{m['home']['name']}** {m['home']['score']} — {m['away']['score']} **{m['away']['name']}**"
+            )
+        embed.add_field(name=f"✅ Results ({len(completed)})", value="\n".join(match_lines), inline=False)
+
+    if upcoming:
+        match_lines = []
+        for m in upcoming:
+            match_lines.append(f"**{m['home']['name']}** vs **{m['away']['name']}**")
+        embed.add_field(name=f"🔜 Upcoming ({len(upcoming)})", value="\n".join(match_lines), inline=False)
+
+    return embed
+
+
+class GroupSelect(discord.ui.Select):
+    def __init__(self, disabled=False):
+        options = [
+            discord.SelectOption(label=f"Group {l}", value=l, description=f"View standings for Group {l}")
+            for l in "ABCDEFGHIJKL"
+        ]
+        super().__init__(placeholder="Select a group for standings + tiebreakers...", options=options, disabled=disabled)
+
+    async def callback(self, interaction):
+        await interaction.response.defer()
+        letter = self.values[0]
+        status = await interaction.followup.send("⏳ Fetching data...", ephemeral=True)
+        try:
+            await fetch_and_cache_data()
+        except Exception:
+            pass
+        embed = _build_group_embed(letter)
+        if embed is None:
+            return await status.edit(content=f"No data for Group {letter}.")
+        await status.delete()
+        view = StandingsView(letter)
+        await interaction.edit_original_response(embed=embed, view=view)
+
+
+class StandingsView(discord.ui.View):
+    def __init__(self, letter):
+        super().__init__(timeout=300)
+        self.letter = letter
+
+    @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+    async def refresh(self, interaction, button):
+        await interaction.response.defer()
+        try:
+            await fetch_and_cache_data()
+        except Exception:
+            pass
+        embed = _build_group_embed(self.letter)
+        if embed:
+            await interaction.edit_original_response(embed=embed, view=self)
+
+
+class GroupSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(GroupSelect())
 
 
 class PlayerNameModal(discord.ui.Modal, title="Enter Player Name"):
@@ -1259,22 +1386,43 @@ class DraftCog(commands.Cog):
             return await ctx.send("That user is not in this draft.")
 
         await self.fantasy.fetch_data()
+        try:
+            await fetch_and_cache_data()
+        except Exception:
+            pass
         resolved = self.fantasy.resolve_players(team["players"])
         total = sum(r["net_points"] for r in resolved)
 
+        squad_games, max_games = get_squad_games_played()
+        squad_remaining = get_squad_remaining()
+
+        def _behind(sn):
+            """True if this squad hasn't played the current round yet."""
+            if not sn:
+                return False
+            gp = squad_games.get(sn, 0)
+            if gp < max_games:
+                return True
+            if max_games >= 3 and sn in squad_remaining:
+                return True
+            return False
+
+        remaining = sum(1 for r in resolved if _behind(r["squad_name"]))
         member = ctx.guild.get_member(user.id)
         name = member.display_name if member else f"<@{user.id}>"
-        embed = discord.Embed(
-            title=f"Team {name}",
-            color=0xff3fb9,
-        )
+        title = f"Team {name}"
+        if remaining:
+            title += f" — ({remaining} not played ⏳)"
+
+        embed = discord.Embed(title=title, color=0xff3fb9)
         lines = []
         for pos in POSITIONS:
             pos_players = [r for r in resolved if r["position"] == pos]
             if pos_players:
                 for r in pos_players:
                     pts_str = f"{r['net_points']}pts" if r['match'] else "N/A"
-                    lines.append(f"{POSITION_EMOJIS[pos]} **{r['name']}** — {pts_str}")
+                    icon = "⏳ " if _behind(r["squad_name"]) else ""
+                    lines.append(f"{POSITION_EMOJIS[pos]} {icon}**{r['name']}** — {pts_str}")
             else:
                 lines.append(f"{POSITION_EMOJIS[pos]} {pos}: --")
         embed.description = "\n".join(lines)
@@ -1581,6 +1729,22 @@ class DraftCog(commands.Cog):
         await ctx.send("⏳ Fetching fantasy points...")
 
         await self.fantasy.fetch_data()
+        try:
+            await fetch_and_cache_data()
+        except Exception:
+            pass
+        squad_games, max_games = get_squad_games_played()
+        squad_remaining = get_squad_remaining()
+
+        def _behind(sn):
+            if not sn:
+                return False
+            gp = squad_games.get(sn, 0)
+            if gp < max_games:
+                return True
+            if max_games >= 3 and sn in squad_remaining:
+                return True
+            return False
 
         results = []
         for uid_str, team in draft["teams"].items():
@@ -1589,17 +1753,26 @@ class DraftCog(commands.Cog):
             manager = member.display_name if member else f"<@{uid}>"
             resolved = self.fantasy.resolve_players(team["players"])
             total = sum(r["net_points"] for r in resolved)
-            details = [(r["name"], r["net_points"], r["position"]) for r in resolved]
-            results.append((total, manager, details))
+            not_played = sum(1 for r in resolved if _behind(r["squad_name"]))
+            details = [
+                (r["name"], r["net_points"], r["position"], r["squad_name"])
+                for r in resolved
+            ]
+            results.append((total, manager, details, not_played))
 
         results.sort(key=lambda x: x[0], reverse=True)
 
         embed = discord.Embed(title="🏆 Draft Fantasy Points", color=0xff3fb9)
-        for rank, (total, manager, details) in enumerate(results, 1):
-            lines = [f"{n}: {p}pts ({pos})" for n, p, pos in details]
+        for rank, (total, manager, details, not_played) in enumerate(results, 1):
+            lines = []
+            for n, p, pos, squad_name in details:
+                icon = "⏳ " if _behind(squad_name) else ""
+                pts_str = f"{p}pts"
+                lines.append(f"{icon}{n}: {pts_str} ({pos})")
             val = "\n".join(lines) if lines else "No players drafted"
             val += f"\n**Total: {total} pts**"
-            embed.add_field(name=f"#{rank} {manager}", value=val[:1024], inline=False)
+            suffix = f" — ({not_played} not played ⏳)" if not_played else ""
+            embed.add_field(name=f"#{rank} {manager}{suffix}", value=val[:1024], inline=False)
 
         await ctx.send(embed=embed)
 
@@ -1680,6 +1853,28 @@ class DraftCog(commands.Cog):
         embed.add_field(name="Total Points", value=net, inline=True)
         embed.add_field(name="Last Round", value=last, inline=True)
         embed.add_field(name="Games Played", value=gp, inline=True)
+
+        all_rounds = round_pts.copy() if round_pts else {}
+        rounds_sel = match.get("roundsSelected", {})
+        if rounds_sel:
+            for rnd in rounds_sel:
+                if rnd not in all_rounds:
+                    all_rounds[rnd] = None
+
+        if all_rounds:
+            sorted_rounds = sorted(all_rounds.items(), key=lambda x: int(x[0]))
+            round_lines = []
+            for r, pts in sorted_rounds:
+                if pts is not None:
+                    round_lines.append(f"**M{r}:** {pts} pts")
+                else:
+                    round_lines.append(f"**M{r}:** ⏳ not played yet")
+            embed.add_field(
+                name="📅 Round Breakdown",
+                value="\n".join(round_lines),
+                inline=False
+            )
+
         await ctx.send(embed=embed)
 
     @commands.command()
@@ -1832,69 +2027,66 @@ class DraftCog(commands.Cog):
 
     @commands.command(aliases=["matchinfo"])
     async def matches(self, ctx, *, filter_term: str = None):
-        """Show latest match results with fantasy top scorers.
-        Optional: group letter (A-L) or team name to filter."""
-        await ctx.send("⏳ Fetching latest match data...")
-        try:
-            await fetch_and_cache_data()
-        except Exception:
-            await ctx.send("⚠️ Could not fetch live data, using cached...")
-
-        match_reports, upcoming_reports = get_match_analytics(limit_matches=12)
-
+        """Show match results, group standings with tiebreakers, and upcoming fixtures. Interactive."""
         if filter_term:
             group_filter = filter_term.upper().replace("GROUP ", "")
             team_filter = filter_term.lower()
+            if group_filter in "ABCDEFGHIJKL":
+                await ctx.send("⏳ Fetching data...")
+                try:
+                    await fetch_and_cache_data()
+                except Exception:
+                    pass
+                embed = _build_group_embed(group_filter)
+                if embed is None:
+                    return await ctx.send(f"No data for Group {group_filter}.")
+                view = StandingsView(group_filter)
+                return await ctx.send(embed=embed, view=view)
+
+            await ctx.send("⏳ Fetching latest match data...")
+            try:
+                await fetch_and_cache_data()
+            except Exception:
+                await ctx.send("⚠️ Could not fetch live data, using cached...")
+
+            match_reports, upcoming_reports = get_match_analytics(limit_matches=12)
             match_reports = [
                 m for m in match_reports
-                if m["group"].replace("Group ", "") == group_filter
-                or team_filter in m["home"].lower() or team_filter in m["away"].lower()
+                if team_filter in m["home"].lower() or team_filter in m["away"].lower()
             ]
             upcoming_reports = [
                 m for m in upcoming_reports
-                if m["group"].replace("Group ", "") == group_filter
-                or team_filter in m["home"].lower() or team_filter in m["away"].lower()
+                if team_filter in m["home"].lower() or team_filter in m["away"].lower()
             ]
-
-        if not match_reports and not upcoming_reports:
-            return await ctx.send("No matches found for that filter.")
+            if not match_reports and not upcoming_reports:
+                return await ctx.send("No matches found for that filter.")
+            embed = discord.Embed(title="⚽ World Cup 2026 — Match Report", color=0xff3fb9)
+            if match_reports:
+                lines = []
+                for mr in match_reports:
+                    scoreline = f"**{mr['home']}** {mr['home_score']} — {mr['away_score']} **{mr['away']}**"
+                    lines.append(f"`{mr['group']:8s}` {scoreline}")
+                    h_top = mr["home_scorers"][:2]
+                    a_top = mr["away_scorers"][:2]
+                    if h_top:
+                        h_str = ", ".join(f"{n} ({p}pts)" for p, n, _, _, _, _ in h_top)
+                        lines.append(f"         ⬆ {h_str}")
+                    if a_top:
+                        a_str = ", ".join(f"{n} ({p}pts)" for p, n, _, _, _, _ in a_top)
+                        lines.append(f"         ⬇ {a_str}")
+                    lines.append("")
+                embed.add_field(name=f"📊 Results ({len(match_reports)} matches)", value="\n".join(lines)[:1024], inline=False)
+            if upcoming_reports:
+                lines = [f"`{ur['group']:8s}` {ur['home']} vs {ur['away']}" for ur in upcoming_reports]
+                embed.add_field(name=f"🔜 Upcoming ({len(upcoming_reports)} matches)", value="\n".join(lines), inline=False)
+            return await ctx.send(embed=embed)
 
         embed = discord.Embed(
-            title="⚽ World Cup 2026 — Match Report",
+            title="🌍 World Cup 2026",
+            description="Select a group below to view standings, match results, and tiebreakers.",
             color=0xff3fb9,
         )
-
-        if match_reports:
-            lines = []
-            for mr in match_reports:
-                scoreline = f"**{mr['home']}** {mr['home_score']} — {mr['away_score']} **{mr['away']}**"
-                lines.append(f"`{mr['group']:8s}` {scoreline}")
-                h_top = mr["home_scorers"][:2]
-                a_top = mr["away_scorers"][:2]
-                if h_top:
-                    h_str = ", ".join(f"{n} ({p}pts)" for p, n, _, _, _, _ in h_top)
-                    lines.append(f"         ⬆ {h_str}")
-                if a_top:
-                    a_str = ", ".join(f"{n} ({p}pts)" for p, n, _, _, _, _ in a_top)
-                    lines.append(f"         ⬇ {a_str}")
-                lines.append("")
-            embed.add_field(
-                name=f"📊 Latest Results ({len(match_reports)} matches)",
-                value="\n".join(lines)[:1024],
-                inline=False,
-            )
-
-        if upcoming_reports:
-            lines = []
-            for ur in upcoming_reports:
-                lines.append(f"`{ur['group']:8s}` {ur['home']} vs {ur['away']}")
-            embed.add_field(
-                name=f"🔜 Upcoming ({len(upcoming_reports)} matches)",
-                value="\n".join(lines),
-                inline=False,
-            )
-
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=GroupSelectView())
 
     @commands.command(aliases=["form"])
     async def trending(self, ctx, position: str = None):
@@ -2259,7 +2451,7 @@ class DraftCog(commands.Cog):
 
         loop = asyncio.get_event_loop()
         try:
-            result = await loop.run_in_executor(
+            report = await loop.run_in_executor(
                 None, self._run_monte_carlo,
                 version, team_a, team_b, knockout, simulations,
             )
@@ -2268,99 +2460,470 @@ class DraftCog(commands.Cog):
             traceback.print_exc()
             return await ctx.send(f"❌ Simulation error: {e}")
 
-        w1, w2, draws, total = result["wins_a"], result["wins_b"], result["draws"], result["total"]
-        p1 = w1 / total * 100 if total else 0
-        p2 = w2 / total * 100 if total else 0
-        pd = draws / total * 100 if total else 0
-        avg_xg_a = result["avg_xg_a"]
-        avg_xg_b = result["avg_xg_b"]
+        report.flag_a = flag_a
+        report.flag_b = flag_b
 
-        embed = discord.Embed(
-            title=f"🔬 {version.upper()} Detailed Match Analysis",
-            color=0xff3fb9,
-        )
+        pages = self._build_report_pages(report)
+        view = _ReportView(pages, ctx.author.id)
+        await status.edit(content=None, embed=pages[0], view=view)
+        view.message = status
+
+    def _build_report_pages(self, report: "SimulationReport") -> list[discord.Embed]:
+        raw: list[discord.Embed] = []
+        raw.append(self._page_prediction(report))
+        raw.append(self._page_model_edge(report))
+        if report.v2:
+            raw.append(self._page_squad_quality(report))
+            raw.append(self._page_player_battles(report))
+        if report.v3:
+            raw.append(self._page_dynamic_state(report))
+        if report.v4:
+            raw.append(self._page_tactical_identity(report))
+            raw.append(self._page_tactical_battles(report))
+        raw.append(self._page_simulation_insights(report))
+
+        total = len(raw)
+        for i, embed in enumerate(raw):
+            embed.title = f"{i+1}/{total} {embed.title}"
+        return raw
+
+    def _page_header(self, report: "SimulationReport", title: str) -> discord.Embed:
+        embed = discord.Embed(title=title, color=0xff3fb9)
+        embed.set_author(name=f"{report.flag_a} {report.team_a} vs {report.flag_b} {report.team_b}")
+        return embed
+
+    def _page_prediction(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Match Prediction")
+        mc = report.mc
         embed.add_field(
-            name=f"{flag_a} {team_a} vs {flag_b} {team_b}",
-            value=f"`{knockout and 'Knockout' or 'Group Stage'}` | {simulations:,} simulations",
+            name=f"{report.flag_a} {report.team_a} vs {report.flag_b} {report.team_b}",
+            value=f"`{'Knockout' if report.knockout else 'Group Stage'}` | {report.simulations:,} simulations",
             inline=False,
         )
-
         bar_len = 12
-        w1_bar = "█" * max(1, round(p1 / 100 * bar_len)) if p1 > 0 else ""
-        w2_bar = "█" * max(1, round(p2 / 100 * bar_len)) if p2 > 0 else ""
-        d_bar = "█" * max(1, round(pd / 100 * bar_len)) if pd > 0 else ""
-
+        w1_bar = "█" * max(1, round(mc.win_prob_a / 100 * bar_len)) if mc.win_prob_a > 0 else ""
+        w2_bar = "█" * max(1, round(mc.win_prob_b / 100 * bar_len)) if mc.win_prob_b > 0 else ""
+        d_bar = "█" * max(1, round(mc.draw_prob / 100 * bar_len)) if mc.draw_prob > 0 else ""
         embed.add_field(
             name="📊 Match Outcome",
             value=(
-                f"**{flag_a} {team_a}**  {p1:.1f}%\n`{w1_bar:<{bar_len}}` {w1:,}\n"
-                f"**Draw**          {pd:.1f}%\n`{d_bar:<{bar_len}}` {draws:,}\n"
-                f"**{flag_b} {team_b}**  {p2:.1f}%\n`{w2_bar:<{bar_len}}` {w2:,}"
+                f"**{report.flag_a} {report.team_a}**  {mc.win_prob_a:.1f}%\n`{w1_bar:<{bar_len}}` {mc.wins_a:,}\n"
+                f"**Draw**          {mc.draw_prob:.1f}%\n`{d_bar:<{bar_len}}` {mc.draws:,}\n"
+                f"**{report.flag_b} {report.team_b}**  {mc.win_prob_b:.1f}%\n`{w2_bar:<{bar_len}}` {mc.wins_b:,}"
             ),
             inline=False,
         )
-
         embed.add_field(
             name="⚽ Expected Goals (avg)",
-            value=f"{flag_a} {team_a}: **{avg_xg_a:.3f}**\n{flag_b} {team_b}: **{avg_xg_b:.3f}**",
+            value=f"{report.flag_a} {report.team_a}: **{mc.avg_xg_a:.3f}**\n{report.flag_b} {report.team_b}: **{mc.avg_xg_b:.3f}**",
             inline=True,
         )
         embed.add_field(
             name="🏆 Most Common Scorelines",
             value="\n".join(
-                f"{flag_a} {s[0]}-{s[1]} {flag_b}  — {c:,}× ({c/total*100:.1f}%)"
-                for s, c in result["top_scores"][:5]
+                f"{report.flag_a} {s[0]}-{s[1]} {report.flag_b}  — {c:,}× ({c/mc.total*100:.1f}%)"
+                for s, c in mc.top_scores[:5]
             ) or "N/A",
             inline=True,
         )
+        embed.set_footer(text=f"Model: {report.version.upper()} | {report.version_label}")
+        return embed
 
-        if version == "v4":
-            plan_a = result.get("plan_a", "balanced")
-            plan_b = result.get("plan_b", "balanced")
+    def _page_model_edge(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Model Edge")
+
+        if report.v1:
+            v1 = report.v1
+            embed.add_field(name="📈 ELO Rating", value=f"{report.flag_a} {report.team_a}: **{v1.elo_a:.0f}**\n{report.flag_b} {report.team_b}: **{v1.elo_b:.0f}**\nDiff: `{v1.elo_diff:+.0f}`", inline=True)
+            embed.add_field(name="📊 PELE Rating", value=f"{report.flag_a} {report.team_a}: **{v1.pele_a:.0f}**\n{report.flag_b} {report.team_b}: **{v1.pele_b:.0f}**\nDiff: `{v1.pele_diff:+.0f}`", inline=True)
+            embed.add_field(name="🎯 Combined Rating", value=f"{report.flag_a} {report.team_a}: **{v1.combined_a:.0f}**\n{report.flag_b} {report.team_b}: **{v1.combined_b:.0f}**\nDiff: `{v1.combined_diff:+.0f}`", inline=True)
+            embed.add_field(name="⚡ Upset Factor", value=f"`{v1.upset_factor:.2f}` (1.0 = even, <1 = {report.team_b} favored, >1 = {report.team_a} favored)", inline=False)
+            embed.set_footer(text=f"Model: {report.version.upper()} | Base goals: 1.1/match")
+            return embed
+
+        if report.v4:
+            v4 = report.v4
+            adj_line_a = f"Base: {v4.base_xg_a:.3f} → Final: **{v4.final_xg_a:.3f}** ({v4.xg_shift_a:+.3f})"
+            adj_line_b = f"Base: {v4.base_xg_b:.3f} → Final: **{v4.final_xg_b:.3f}** ({v4.xg_shift_b:+.3f})"
+            plans_line = f"{report.flag_a} **{v4.game_plan_a}** vs {report.flag_b} **{v4.game_plan_b}**"
+            embed.add_field(name="🧮 xG Adjustment", value=adj_line_a + "\n" + adj_line_b, inline=False)
+            embed.add_field(name="🧠 Game Plans", value=plans_line, inline=False)
+            embed.add_field(name="📉 Total Adjustment", value=f"{report.flag_a}: `{v4.total_adjustment_a:+.4f}` xG\n{report.flag_b}: `{v4.total_adjustment_b:+.4f}` xG", inline=False)
+
+        if report.v2:
+            v2 = report.v2
+            a_line = f"{report.flag_a} {report.team_a}: A={v2.attack_a:.1f} M={v2.midfield_a:.1f} D={v2.defense_a:.1f} GK={v2.goalkeeper_a:.1f}"
+            b_line = f"{report.flag_b} {report.team_b}: A={v2.attack_b:.1f} M={v2.midfield_b:.1f} D={v2.defense_b:.1f} GK={v2.goalkeeper_b:.1f}"
+            embed.add_field(name="⭐ Squad Ratings", value=a_line + "\n" + b_line, inline=False)
+
+        if report.v3:
+            v3 = report.v3
+            dyn_a = v3.combined_mult_a
+            dyn_b = v3.combined_mult_b
+            embed.add_field(name="🔄 Dynamic Multiplier", value=f"{report.flag_a} {report.team_a}: **{dyn_a:.4f}×** ({v3.net_dynamic_a:+.2%})\n{report.flag_b} {report.team_b}: **{dyn_b:.4f}×** ({v3.net_dynamic_b:+.2%})", inline=False)
+            if report.v1 is None and not report.v4:
+                lines_a = []
+                lines_b = []
+                for c in v3.components:
+                    lines_a.append(f"{c.name}: {c.value_a:+.2%}")
+                    lines_b.append(f"{c.name}: {c.value_b:+.2%}")
+                embed.add_field(name=f"{report.flag_a} {report.team_a} Components", value="\n".join(lines_a) or "None", inline=True)
+                embed.add_field(name=f"{report.flag_b} {report.team_b} Components", value="\n".join(lines_b) or "None", inline=True)
+
+        if not embed.fields:
+            embed.description = f"{report.flag_a} {report.team_a} vs {report.flag_b} {report.team_b} — No additional model edge data available"
+
+        embed.set_footer(text=f"Model: {report.version.upper()} | {report.version_label}")
+        return embed
+
+    def _page_squad_quality(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Squad Quality")
+        if not report.v2:
+            embed.description = "Squad data not available for this version"
+            return embed
+        v2 = report.v2
+
+        def fmt_xi(ratings, names, formation):
+            by_pos = {"GK": [], "DEF": [], "MID": [], "AT": []}
+            for rr in ratings:
+                if rr.role == "GK":
+                    by_pos["GK"].append(f"{rr.player_name} ({rr.rating:.1f})")
+                elif rr.role in ("CB", "FB"):
+                    by_pos["DEF"].append(f"{rr.player_name} ({rr.rating:.1f})")
+                elif rr.role in ("CM", "DM"):
+                    by_pos["MID"].append(f"{rr.player_name} ({rr.rating:.1f})")
+                else:
+                    by_pos["AT"].append(f"{rr.player_name} ({rr.rating:.1f})")
+            lines = [f"Formation: {formation}"]
+            for label, key in [("GK", "GK"), ("Defense", "DEF"), ("Midfield", "MID"), ("Attack", "AT")]:
+                if by_pos[key]:
+                    lines.append(f"\n{label}:")
+                    lines.extend(f"  {p}" for p in by_pos[key])
+            return "\n".join(lines)
+
+        sorted_a = sorted(v2.role_ratings_a, key=lambda r: r.rating, reverse=True)
+        sorted_b = sorted(v2.role_ratings_b, key=lambda r: r.rating, reverse=True)
+        best_a = "\n".join(f"{r.player_name} ({r.role}): {r.rating:.1f}" for r in sorted_a[:3])
+        worst_a = "\n".join(f"{r.player_name} ({r.role}): {r.rating:.1f}" for r in sorted_a[-3:])
+        best_b = "\n".join(f"{r.player_name} ({r.role}): {r.rating:.1f}" for r in sorted_b[:3])
+        worst_b = "\n".join(f"{r.player_name} ({r.role}): {r.rating:.1f}" for r in sorted_b[-3:])
+
+        embed.add_field(name=f"{report.flag_a} {report.team_a} — Starting XI", value=fmt_xi(v2.role_ratings_a, v2.xi_names_a, v2.formation_a), inline=True)
+        embed.add_field(name=f"{report.flag_b} {report.team_b} — Starting XI", value=fmt_xi(v2.role_ratings_b, v2.xi_names_b, v2.formation_b), inline=True)
+        embed.add_field(name=f"⭐ Best {report.team_a}", value=best_a or "N/A", inline=True)
+        embed.add_field(name=f"⚠️ Weakest {report.team_a}", value=worst_a or "N/A", inline=True)
+        embed.add_field(name=f"⭐ Best {report.team_b}", value=best_b or "N/A", inline=True)
+        embed.add_field(name=f"⚠️ Weakest {report.team_b}", value=worst_b or "N/A", inline=True)
+        return embed
+
+    def _page_player_battles(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Player Battles")
+        if not report.v2:
+            embed.description = "Squad data not available for this version"
+            return embed
+        v2 = report.v2
+
+        def best_at(ratings, roles):
+            candidates = [r for r in ratings if r.role in roles]
+            return max(candidates, key=lambda r: r.rating) if candidates else None
+
+        duels = [
+            ("🥅 Goalkeepers", ["GK"], ["GK"]),
+            ("🛡️ ST vs CBs", ["ST"], ["CB"]),
+            ("🏃 Wingers vs FBs", ["WINGER"], ["FB"]),
+            ("⚔️ Midfield Battle", ["CM", "DM"], ["CM", "DM"]),
+        ]
+        for title, roles_a, roles_b in duels:
+            pa = best_at(v2.role_ratings_a, set(roles_a))
+            pb = best_at(v2.role_ratings_b, set(roles_b))
+            line_a = f"{pa.player_name} ({pa.rating:.1f})" if pa else "N/A"
+            line_b = f"{pb.player_name} ({pb.rating:.1f})" if pb else "N/A"
+            diff = (pa.rating if pa else 70) - (pb.rating if pb else 70)
+            edge = f"{report.flag_a} +{diff:.1f}" if diff > 0 else (f"{report.flag_b} +{-diff:.1f}" if diff < 0 else "Even")
+            embed.add_field(name=title, value=f"{report.flag_a}: {line_a}\n{report.flag_b}: {line_b}\nEdge: {edge}", inline=True)
+
+        embed.set_footer(text=f"Model: {report.version.upper()} | Ratings based on position formulas")
+        return embed
+
+    def _page_dynamic_state(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Dynamic State")
+        if not report.v3:
+            embed.description = "Dynamic state not available for this version"
+            return embed
+        v3 = report.v3
+
+        for c in v3.components:
+            emoji_map = {
+                "chemistry": "🧪", "experience": "🎓", "form": "🔥",
+                "momentum": "📈", "continuity": "🔗", "leadership": "👑",
+            }
+            emoji = emoji_map.get(c.name, "•")
+            a_val = f"{c.value_a:+.2%}" if c.value_a != 0 else "0%"
+            b_val = f"{c.value_b:+.2%}" if c.value_b != 0 else "0%"
+            diff = (c.value_a - c.value_b)
+            edge = f"({report.flag_a} edge: {diff:+.2%})" if abs(diff) > 0.001 else "(even)"
             embed.add_field(
-                name="🧠 Game Plans",
-                value=f"{flag_a} {team_a}: **{plan_a}**\n{flag_b} {team_b}: **{plan_b}**",
+                name=f"{emoji} {c.name.title()}",
+                value=f"{report.flag_a}: `{a_val}` {c.source_a[:50]}\n{report.flag_b}: `{b_val}` {c.source_b[:50]}\n{edge}",
                 inline=False,
             )
 
-        embed.set_footer(text=f"Model: {version.upper()} | {VERSION_LABELS[version]}")
-        await status.edit(content=None, embed=embed)
+        embed.add_field(
+            name="📊 Combined Effect",
+            value=f"{report.flag_a} {report.team_a}: **{v3.combined_mult_a:.4f}×** ({v3.net_dynamic_a:+.2%})\n"
+                   f"{report.flag_b} {report.team_b}: **{v3.combined_mult_b:.4f}×** ({v3.net_dynamic_b:+.2%})\n"
+                   f"Nat'l modifiers: {report.flag_a} `{v3.nationality_modifier_a:+.3f}` vs {report.flag_b} `{v3.nationality_modifier_b:+.3f}`",
+            inline=False,
+        )
+        embed.set_footer(text=f"Model: {report.version.upper()} | Range: 0.90×–1.10×")
+        return embed
+
+    def _page_tactical_identity(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Tactical Identity")
+        if not report.v4:
+            embed.description = "Tactical data only available for V4"
+            return embed
+        v4 = report.v4
+        v2 = report.v2
+
+        embed.add_field(
+            name=f"{report.flag_a} {report.team_a}",
+            value=f"**Formation:** {v2.formation_a if v2 else 'N/A'}\n"
+                   f"**Manager:** {v4.manager_a}\n"
+                   f"**Game Plan:** {v4.game_plan_a}\n"
+                   f"**Role:** {'Favorite' if v4.final_xg_a >= v4.final_xg_b else 'Underdog'}",
+            inline=True,
+        )
+        embed.add_field(
+            name=f"{report.flag_b} {report.team_b}",
+            value=f"**Formation:** {v2.formation_b if v2 else 'N/A'}\n"
+                   f"**Manager:** {v4.manager_b}\n"
+                   f"**Game Plan:** {v4.game_plan_b}\n"
+                   f"**Role:** {'Favorite' if v4.final_xg_b >= v4.final_xg_a else 'Underdog'}",
+            inline=True,
+        )
+        embed.set_footer(text="Game plan chosen based on relative strength, context, and tactics")
+        return embed
+
+    def _page_tactical_battles(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Tactical Battles")
+        if not report.v4:
+            embed.description = "Tactical data only available for V4"
+            return embed
+        v4 = report.v4
+
+        if v4.advantages_a:
+            embed.add_field(
+                name=f"{report.flag_a} {report.team_a} Advantages",
+                value="\n".join(f"• {a}" for a in v4.advantages_a[:5]) or "None",
+                inline=True,
+            )
+        if v4.advantages_b:
+            embed.add_field(
+                name=f"{report.flag_b} {report.team_b} Advantages",
+                value="\n".join(f"• {a}" for a in v4.advantages_b[:5]) or "None",
+                inline=True,
+            )
+
+        if v4.adjustments_a:
+            adj_lines_a = [f"{a.category}: {a.description[:50]} ({a.value:+.4f})" for a in v4.adjustments_a[:5]]
+            embed.add_field(name=f"{report.flag_a} Key Adjustments", value="\n".join(adj_lines_a) or "None", inline=False)
+        if v4.adjustments_b:
+            adj_lines_b = [f"{a.category}: {a.description[:50]} ({a.value:+.4f})" for a in v4.adjustments_b[:5]]
+            embed.add_field(name=f"{report.flag_b} Key Adjustments", value="\n".join(adj_lines_b) or "None", inline=False)
+
+        embed.add_field(
+            name="📊 Net xG Effect",
+            value=f"{report.flag_a}: `{v4.total_adjustment_a:+.4f}` → **{v4.final_xg_a:.3f}**\n"
+                   f"{report.flag_b}: `{v4.total_adjustment_b:+.4f}` → **{v4.final_xg_b:.3f}**",
+            inline=False,
+        )
+        embed.set_footer(text="Adjustments capped at ±10% of base xG per team")
+        return embed
+
+    def _page_simulation_insights(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Simulation Insights")
+        mc = report.mc
+
+        embed.add_field(name="📉 Goal Extremes", value=f"{report.flag_a}: {mc.min_goals_a}–{mc.max_goals_a} goals\n{report.flag_b}: {mc.min_goals_b}–{mc.max_goals_b} goals", inline=True)
+
+        upset_prob = 0.0
+        if mc.wins_a > 0 and mc.avg_xg_b > mc.avg_xg_a:
+            upset_prob = mc.wins_a / mc.total * 100
+        elif mc.wins_b > 0 and mc.avg_xg_a > mc.avg_xg_b:
+            upset_prob = mc.wins_b / mc.total * 100
+        embed.add_field(name="⚡ Upset Probability", value=f"**{upset_prob:.1f}%**" if upset_prob > 0 else "No upset detected", inline=True)
+
+        eta_val = max(mc.avg_xg_a, mc.avg_xg_b) / max(min(mc.avg_xg_a, mc.avg_xg_b), 0.001)
+        favored = report.flag_a if mc.avg_xg_a >= mc.avg_xg_b else report.flag_b
+        embed.add_field(name="📊 xG Ratio", value=f"**{eta_val:.2f}×** ({favored} favored)", inline=True)
+
+        embed.add_field(name="🔬 Methodology", value=f"**{report.version_label}**\n{report.simulations:,} Monte Carlo simulations\n{'🏟️ Knockout tiebreaker rules' if report.knockout else '📊 Group stage rules'}", inline=False)
+
+        embed.set_footer(text=f"Data confidence increases with simulation count (recommend 1,000+)")
+        return embed
+
+
 
     def _run_monte_carlo(
         self, version: str, team_a: str, team_b: str,
         knockout: bool, simulations: int,
-    ) -> dict:
+    ) -> "SimulationReport":
         from fifa_data.engines.v1_elo_engine import V1EloMatchEngine
         from fifa_data.engines.v2_player_engine import V2PlayerMatchEngine
         from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
         from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
+        from fifa_data.services.simulation_report import (
+            SimulationReport, MonteCarloResult, V1ReportData, V2ReportData,
+            V3ReportData, V4ReportData, V3ComponentData, RoleRatingData,
+            TacticalAdjustmentData,
+        )
 
         fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+        report = SimulationReport(version=version, team_a=team_a, team_b=team_b, knockout=knockout, simulations=simulations)
 
+        # === Pre-match analysis: capture engine state before any simulations ===
         if version == "v1":
             from fifa_data.services.simulation_service import TEAM_METRICS
             engine = V1EloMatchEngine(TEAM_METRICS)
+            r_a = engine.get_team_ratings(team_a)
+            r_b = engine.get_team_ratings(team_b)
+            raw_delta = r_a["combined"] - r_b["combined"]
+            upset = max(0.4, min(1.6, 1.0 + (raw_delta / 800.0)))
+            report.v1 = V1ReportData(
+                elo_a=r_a["elo"], elo_b=r_b["elo"],
+                pele_a=r_a["pele"], pele_b=r_b["pele"],
+                combined_a=r_a["combined"], combined_b=r_b["combined"],
+                upset_factor=upset,
+            )
+
         elif version == "v2":
             engine = V2PlayerMatchEngine(data_dir=fifa_dir)
+            sa = engine.get_team_strength(team_a)
+            sb = engine.get_team_strength(team_b)
+            report.v2 = V2ReportData(
+                role_ratings_a=[RoleRatingData(r.player_name, r.role, r.rating) for r in sa.role_ratings],
+                role_ratings_b=[RoleRatingData(r.player_name, r.role, r.rating) for r in sb.role_ratings],
+                attack_a=sa.attack_rating, midfield_a=sa.midfield_rating,
+                defense_a=sa.defense_rating, goalkeeper_a=sa.goalkeeper_rating,
+                attack_b=sb.attack_rating, midfield_b=sb.midfield_rating,
+                defense_b=sb.defense_rating, goalkeeper_b=sb.goalkeeper_rating,
+                formation_a=sa.formation, formation_b=sb.formation,
+                xi_names_a=[p.name for p in engine.squads[team_a].current_starting_xi],
+                xi_names_b=[p.name for p in engine.squads[team_b].current_starting_xi],
+            )
+
         elif version == "v3":
             engine = V3DynamicEngine(data_dir=fifa_dir)
-        else:
-            engine = V4TacticalEngine(data_dir=fifa_dir)
+            sa = engine.get_team_strength(team_a, is_knockout=knockout)
+            sb = engine.get_team_strength(team_b, is_knockout=knockout)
+            da = engine.get_dynamic_state(team_a, is_knockout=knockout)
+            db = engine.get_dynamic_state(team_b, is_knockout=knockout)
+            report.v2 = V2ReportData(
+                role_ratings_a=[RoleRatingData(r.player_name, r.role, r.rating) for r in sa.role_ratings],
+                role_ratings_b=[RoleRatingData(r.player_name, r.role, r.rating) for r in sb.role_ratings],
+                attack_a=sa.attack_rating, midfield_a=sa.midfield_rating,
+                defense_a=sa.defense_rating, goalkeeper_a=sa.goalkeeper_rating,
+                attack_b=sb.attack_rating, midfield_b=sb.midfield_rating,
+                defense_b=sb.defense_rating, goalkeeper_b=sb.goalkeeper_rating,
+                formation_a=sa.formation, formation_b=sb.formation,
+                xi_names_a=[p.name for p in engine.squads[team_a].current_starting_xi],
+                xi_names_b=[p.name for p in engine.squads[team_b].current_starting_xi],
+            )
+            components = []
+            for cn in ["chemistry", "experience", "form", "momentum", "continuity", "leadership"]:
+                ca = next(c for c in da.components() if c.component == cn)
+                cb = next(c for c in db.components() if c.component == cn)
+                components.append(V3ComponentData(cn, ca.value, cb.value, ca.source, cb.source, ca.confidence, cb.confidence))
+            form_a = [{"name": p.name, "form": (p.stats.get("form", 0) if isinstance(p.stats, dict) else 0)} for p in engine.squads[team_a].current_starting_xi]
+            form_b = [{"name": p.name, "form": (p.stats.get("form", 0) if isinstance(p.stats, dict) else 0)} for p in engine.squads[team_b].current_starting_xi]
+            report.v3 = V3ReportData(
+                components=components,
+                combined_mult_a=da.combined_multiplier(),
+                combined_mult_b=db.combined_multiplier(),
+                form_details_a=form_a, form_details_b=form_b,
+                experience_details_a=engine.experience_service.get_player_details(engine.squads[team_a].current_starting_xi),
+                experience_details_b=engine.experience_service.get_player_details(engine.squads[team_b].current_starting_xi),
+                leadership_a=engine.leadership_service.get_leadership_details(engine.squads[team_a].current_starting_xi),
+                leadership_b=engine.leadership_service.get_leadership_details(engine.squads[team_b].current_starting_xi),
+                chemistry_a=engine.chemistry_service.get_club_groupings(team_a, engine.squads[team_a].current_starting_xi, engine.squads[team_a].formation),
+                chemistry_b=engine.chemistry_service.get_club_groupings(team_b, engine.squads[team_b].current_starting_xi, engine.squads[team_b].formation),
+                nationality_modifier_a=engine.national_modifiers.get(team_a, 0.0),
+                nationality_modifier_b=engine.national_modifiers.get(team_b, 0.0),
+            )
 
+        else:  # v4
+            engine = V4TacticalEngine(data_dir=fifa_dir)
+            v3 = engine._v3
+            sa = v3.get_team_strength(team_a, is_knockout=knockout)
+            sb = v3.get_team_strength(team_b, is_knockout=knockout)
+            da = v3.get_dynamic_state(team_a, is_knockout=knockout)
+            db = v3.get_dynamic_state(team_b, is_knockout=knockout)
+            report.v2 = V2ReportData(
+                role_ratings_a=[RoleRatingData(r.player_name, r.role, r.rating) for r in sa.role_ratings],
+                role_ratings_b=[RoleRatingData(r.player_name, r.role, r.rating) for r in sb.role_ratings],
+                attack_a=sa.attack_rating, midfield_a=sa.midfield_rating,
+                defense_a=sa.defense_rating, goalkeeper_a=sa.goalkeeper_rating,
+                attack_b=sb.attack_rating, midfield_b=sb.midfield_rating,
+                defense_b=sb.defense_rating, goalkeeper_b=sb.goalkeeper_rating,
+                formation_a=sa.formation, formation_b=sb.formation,
+                xi_names_a=[p.name for p in engine.squads[team_a].current_starting_xi],
+                xi_names_b=[p.name for p in engine.squads[team_b].current_starting_xi],
+            )
+            components = []
+            for cn in ["chemistry", "experience", "form", "momentum", "continuity", "leadership"]:
+                ca = next(c for c in da.components() if c.component == cn)
+                cb = next(c for c in db.components() if c.component == cn)
+                components.append(V3ComponentData(cn, ca.value, cb.value, ca.source, cb.source, ca.confidence, cb.confidence))
+            form_a = [{"name": p.name, "form": (p.stats.get("form", 0) if isinstance(p.stats, dict) else 0)} for p in engine.squads[team_a].current_starting_xi]
+            form_b = [{"name": p.name, "form": (p.stats.get("form", 0) if isinstance(p.stats, dict) else 0)} for p in engine.squads[team_b].current_starting_xi]
+            report.v3 = V3ReportData(
+                components=components,
+                combined_mult_a=da.combined_multiplier(),
+                combined_mult_b=db.combined_multiplier(),
+                form_details_a=form_a, form_details_b=form_b,
+                experience_details_a=v3.experience_service.get_player_details(engine.squads[team_a].current_starting_xi),
+                experience_details_b=v3.experience_service.get_player_details(engine.squads[team_b].current_starting_xi),
+                leadership_a=v3.leadership_service.get_leadership_details(engine.squads[team_a].current_starting_xi),
+                leadership_b=v3.leadership_service.get_leadership_details(engine.squads[team_b].current_starting_xi),
+                chemistry_a=v3.chemistry_service.get_club_groupings(team_a, engine.squads[team_a].current_starting_xi, engine.squads[team_a].formation),
+                chemistry_b=v3.chemistry_service.get_club_groupings(team_b, engine.squads[team_b].current_starting_xi, engine.squads[team_b].formation),
+                nationality_modifier_a=v3.national_modifiers.get(team_a, 0.0),
+                nationality_modifier_b=v3.national_modifiers.get(team_b, 0.0),
+            )
+            context = "knockout" if knockout else "group"
+            from fifa_data.services.tactical_matchup_service import compute_tactical_matchup
+            from fifa_data.services.manager_service import get_manager
+            base_l1, base_l2 = v3.expected_goals(sa, sb)
+            tactical = compute_tactical_matchup(
+                team_a, team_b, base_l1, base_l2,
+                engine.squads[team_a], engine.squads[team_b], context=context,
+            )
+            mgr_a = get_manager(team_a)
+            mgr_b = get_manager(team_b)
+            report.v4 = V4ReportData(
+                base_xg_a=tactical.base_xg_a, base_xg_b=tactical.base_xg_b,
+                final_xg_a=tactical.final_xg_a, final_xg_b=tactical.final_xg_b,
+                game_plan_a=tactical.game_plan_a, game_plan_b=tactical.game_plan_b,
+                advantages_a=list(tactical.advantages_a), advantages_b=list(tactical.advantages_b),
+                adjustments_a=[TacticalAdjustmentData(a.category, a.description, a.value, a.confidence) for a in tactical.adjustments_a],
+                adjustments_b=[TacticalAdjustmentData(a.category, a.description, a.value, a.confidence) for a in tactical.adjustments_b],
+                manager_a=mgr_a.name if mgr_a else "Unknown",
+                manager_b=mgr_b.name if mgr_b else "Unknown",
+            )
+
+        # === Monte Carlo simulation loop ===
         wins_a = 0
         wins_b = 0
         draws = 0
         total_xg_a = 0.0
         total_xg_b = 0.0
         score_counter: dict[tuple[int, int], int] = collections.Counter()
-        last_plan_a = "balanced"
-        last_plan_b = "balanced"
 
         for _ in range(simulations):
-            if version == "v4" and knockout:
-                g1, g2 = engine.simulate_match(team_a, team_b, can_draw=False, context="knockout")
-            elif version == "v4":
-                g1, g2 = engine.simulate_match(team_a, team_b, can_draw=True, context="group")
+            if version == "v4":
+                ctx_str = "knockout" if knockout else "group"
+                g1, g2 = engine.simulate_match(team_a, team_b, can_draw=not knockout, context=ctx_str)
             else:
                 g1, g2 = engine.simulate_match(team_a, team_b, can_draw=not knockout)
 
@@ -2375,30 +2938,23 @@ class DraftCog(commands.Cog):
             total_xg_b += g2
             score_counter[(g1, g2)] += 1
 
-            # Capture last game plans from V4
-            if version == "v4":
-                report = getattr(engine, "last_tactical_report", None)
-                if report:
-                    last_plan_a = report.game_plan_a
-                    last_plan_b = report.game_plan_b
-
         avg_xg_a = total_xg_a / simulations
         avg_xg_b = total_xg_b / simulations
         top_scores = score_counter.most_common(10)
+        min_a = min(g for g, _ in score_counter.keys()) if score_counter else 0
+        max_a = max(g for g, _ in score_counter.keys()) if score_counter else 0
+        min_b = min(g for _, g in score_counter.keys()) if score_counter else 0
+        max_b = max(g for _, g in score_counter.keys()) if score_counter else 0
 
-        result = {
-            "wins_a": wins_a,
-            "wins_b": wins_b,
-            "draws": draws,
-            "total": simulations,
-            "avg_xg_a": avg_xg_a,
-            "avg_xg_b": avg_xg_b,
-            "top_scores": top_scores,
-        }
-        if version == "v4":
-            result["plan_a"] = last_plan_a
-            result["plan_b"] = last_plan_b
-        return result
+        report.mc = MonteCarloResult(
+            wins_a=wins_a, wins_b=wins_b, draws=draws, total=simulations,
+            avg_xg_a=avg_xg_a, avg_xg_b=avg_xg_b,
+            top_scores=top_scores,
+            min_goals_a=min_a, max_goals_a=max_a,
+            min_goals_b=min_b, max_goals_b=max_b,
+        )
+
+        return report
 
     def _parse_simulation_args(self, args: str | None) -> tuple[str | None, str, bool]:
         tokens = args.split() if args and args.strip() else []
@@ -2615,6 +3171,57 @@ class DraftCog(commands.Cog):
                     await ctx.send(f"```{safe[:1800]}```")
         await ctx.send(f"🏆🏆🏆 **{champ.upper()}** ARE WORLD CUP 2026 CHAMPIONS! 🏆🏆🏆")
         await ctx.send(f"📊 Model: {model.upper()} | Matches: {data['stats']['real_count']} real + {data['stats']['total_group_matches'] - data['stats']['real_count']} simulated group + {data['stats']['knockout_matches'] + data['stats']['third_place']} KO = {data['stats']['total_group_matches'] + data['stats']['knockout_matches'] + data['stats']['third_place']} total")
+
+
+class _ReportView(discord.ui.View):
+    def __init__(self, pages: list[discord.Embed], author_id: int) -> None:
+        super().__init__(timeout=120)
+        self.pages = pages
+        self.author_id = author_id
+        self.current = 0
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Only the command author can navigate.", ephemeral=True)
+            return False
+        return True
+
+    def _update_buttons(self) -> None:
+        self._prev.disabled = self.current == 0
+        self._next.disabled = self.current == len(self.pages) - 1
+
+    async def _show_page(self, interaction: discord.Interaction) -> None:
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def _prev(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self.current > 0:
+            self.current -= 1
+            await self._show_page(interaction)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def _next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self.current < len(self.pages) - 1:
+            self.current += 1
+            await self._show_page(interaction)
+
+    @discord.ui.button(label="✕", style=discord.ButtonStyle.danger)
+    async def _close(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.defer()
+        await interaction.message.delete()
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        if self.message:
+            for item in self.children:
+                item.disabled = True
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        self.stop()
 
 
 async def setup(bot):
