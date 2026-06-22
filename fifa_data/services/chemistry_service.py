@@ -98,6 +98,31 @@ class ChemistryService:
             min(0.5 + len(sources) * 0.15, 0.95),
         )
 
+    def get_club_groupings(
+        self,
+        team: str,
+        starting_xi: list[Player],
+        formation: str,
+    ) -> dict[str, object]:
+        role_assignments = assign_roles(starting_xi, formation)
+        club_groups: dict[str, list[tuple[str, str]]] = {}
+        for player, role in role_assignments:
+            club = self.club_links.get(_normalize(player.name), "")
+            if club:
+                club_groups.setdefault(club, []).append((player.name, role))
+        xi_names = {p.name for p in starting_xi}
+        relationships = self.relationships.get(team, [])
+        partnerships = [
+            p for p in relationships
+            if len(p.split(",")) == 2
+            and p.split(",")[0].strip() in xi_names
+            and p.split(",")[1].strip() in xi_names
+        ]
+        return {
+            "club_groups": club_groups,
+            "partnerships": partnerships,
+        }
+
     @staticmethod
     def _pair_bonus(role1: str, role2: str) -> float:
         cb_pair = {"CB", "FB"}

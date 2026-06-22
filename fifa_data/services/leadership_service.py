@@ -31,6 +31,27 @@ class LeadershipService:
             for name, data in raw.items():
                 self.exp_norm[_normalize(name)] = data
 
+    def get_leadership_details(self, xi: list[Player]) -> dict[str, object]:
+        captains = 0
+        veteran_count = 0
+        wc_veterans = 0
+        captain_names = []
+        for player in xi:
+            exp = self.exp_norm.get(_normalize(player.name), {})
+            if exp.get("is_captain"):
+                captains += 1
+                captain_names.append(player.name)
+            if exp.get("international_caps", 0) >= 80:
+                veteran_count += 1
+            if exp.get("world_cups", 0) >= 2:
+                wc_veterans += 1
+        return {
+            "captain_count": captains,
+            "captain_names": captain_names,
+            "veteran_count": veteran_count,
+            "wc_veterans": wc_veterans,
+        }
+
     def evaluate(
         self,
         team: str,

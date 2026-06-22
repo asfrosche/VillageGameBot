@@ -34,6 +34,12 @@ class V1EloMatchEngine(MatchEngine):
         metrics = self.team_metrics.get(team, {"ELO": 1500, "PELE": 1500})
         return (float(metrics.get("ELO", 1500)) + float(metrics.get("PELE", 1500))) / 2.0
 
+    def get_team_ratings(self, team: str) -> dict[str, float]:
+        metrics = self.team_metrics.get(team, {})
+        elo = float(metrics.get("ELO", 1500))
+        pele = float(metrics.get("PELE", 1500))
+        return {"elo": elo, "pele": pele, "combined": (elo + pele) / 2.0}
+
     def simulate_match(
         self,
         team1: str,

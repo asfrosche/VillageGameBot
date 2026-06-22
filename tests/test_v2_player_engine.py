@@ -66,7 +66,7 @@ class PlayerRatingTests(unittest.TestCase):
 class SquadLoadingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.squads = load_v2_squads("fifa_data")
+        cls.squads = load_v2_squads("may/fifa_data")
 
     def test_all_world_cup_teams_have_valid_squads_and_starting_xi(self):
         self.assertEqual(len(self.squads), 48)
@@ -82,7 +82,7 @@ class SquadLoadingTests(unittest.TestCase):
 
 class LineupLogicTests(unittest.TestCase):
     def test_replacement_logic_selects_appropriate_substitute_without_duplicates(self):
-        squads = load_v2_squads("fifa_data")
+        squads = load_v2_squads("may/fifa_data")
         squad = squads["France"]
         original_names = {player.name for player in squad.current_starting_xi}
         attacker = next(player for player in squad.current_starting_xi if role_for_player(player, squad.formation) in {"ST", "WINGER"})

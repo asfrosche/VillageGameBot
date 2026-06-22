@@ -32,6 +32,18 @@ class ExperienceService:
             for name, data in raw.items():
                 self.exp_norm[_normalize(name)] = data
 
+    def get_player_details(self, xi: list[Player]) -> list[dict[str, object]]:
+        result = []
+        for player in xi:
+            exp = self.exp_norm.get(_normalize(player.name), {})
+            result.append({
+                "name": player.name,
+                "caps": exp.get("international_caps", 0),
+                "world_cups": exp.get("world_cups", 0),
+                "is_captain": exp.get("is_captain", False),
+            })
+        return result
+
     def evaluate(
         self,
         team: str,

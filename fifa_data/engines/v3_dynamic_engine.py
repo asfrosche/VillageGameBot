@@ -280,6 +280,15 @@ class V3DynamicEngine(MatchEngine):
         if squad2:
             self.continuity_service.record_lineup(team2, [p.name for p in squad2.current_starting_xi])
 
+    def get_dynamic_state(
+        self,
+        team: str,
+        is_knockout: bool = False,
+        is_extra_time: bool = False,
+        is_penalties: bool = False,
+    ) -> DynamicState:
+        return self._compute_dynamic_state(team, is_knockout, is_extra_time, is_penalties)
+
     def _compute_dynamic_state(
         self,
         team: str,
