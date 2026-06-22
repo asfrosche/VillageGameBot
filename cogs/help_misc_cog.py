@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import wcwidth
 import discord
 import asyncio
 import datetime
@@ -10,6 +11,306 @@ from discord import AllowedMentions
 from discord.ui import Select, View, Button
 from cogs.data_utils import load_guild_data, save_guild_data
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+COMMAND_INDEX = [
+    (".setup <num>", "Setup roles, channels & categories", "Setup", ["init", "configure", "server", "channel"]),
+    (".roleset <key> @role", "Assign a role for the bot", "Setup", ["config", "permission"]),
+    (".channelset <key> #ch", "Assign a channel for the bot", "Setup", ["config", "channel"]),
+    (".categoryset <key> <name>", "Assign a category", "Setup", ["config", "category"]),
+    (".houseprefix <pfx>", "Set house name prefix", "Setup", ["house", "naming", "prefix"]),
+    (".knockduration <sec>", "Set knock timeout duration", "Setup", ["knock", "timeout", "timer"]),
+    (".maxpinh <num>", "Max players per house", "Setup", ["house", "limit", "capacity"]),
+    (".refuseresponse 1/2/3", "Knock refuse behavior", "Setup", ["knock", "refuse", "behaviour"]),
+    (".settings", "View current settings", "Setup", ["config", "view", "current"]),
+    (".resetdb", "Reset all setup", "Setup", ["clear", "wipe", "reset"]),
+    (".showwhispersender", "Show/hide whisper sender", "Setup", ["whisper", "toggle", "anonymous"]),
+    (".ajifempty", "Auto-join if house is empty", "Setup", ["auto", "join", "empty"]),
+    (".ajknockexpire", "Auto-join when knock expires", "Setup", ["auto", "join", "expire"]),
+    (".deadcount", "Deads count for AJ/MaxPlayers", "Setup", ["dead", "autojoin", "count"]),
+    (".altcount", "Alts count for AJ/MaxPlayers", "Setup", ["alt", "autojoin", "count"]),
+    (".showdeadsonrefuse", "Show deads on knock refuse", "Setup", ["dead", "refuse", "show"]),
+    (".showaltsonrefuse", "Show alts on knock refuse", "Setup", ["alt", "refuse", "show"]),
+    (".candeadsinteract", "Deads can open/refuse", "Setup", ["dead", "interact", "open", "refuse"]),
+    (".canaltsinteract", "Alts can open/refuse", "Setup", ["alt", "interact", "open", "refuse"]),
+    (".move <#>", "Move player to house (leaves current)", "Moving", ["move", "house", "relocate"]),
+    (".renmove #House", "Move to renamed house", "Moving", ["move", "renamed", "house"]),
+    (".add <#>", "Add player to house (keeps current)", "Moving", ["add", "house", "join"]),
+    (".remove <#>", "Remove player from house", "Moving", ["remove", "house", "kick"]),
+    (".knock <#>", "Knock on a house door", "Moving", ["knock", "door", "enter"]),
+    (".pendingknock / .showknocks", "True/False if any knock is pending + oldest age", "Moving", ["knock", "pending", "status"]),
+    (".renknock #House", "Knock on renamed house", "Moving", ["knock", "renamed", "house"]),
+    (".pcadd #PC", "Add player to PC/renamed house", "Moving", ["pc", "add", "private"]),
+    (".pcremove #PC", "Remove from PC/renamed house", "Moving", ["pc", "remove", "private"]),
+    (".addhere #RC", "Add RC's player to this channel", "Moving", ["rc", "add", "channel"]),
+    (".home", "Bring the player home", "Home", ["home", "return", "location"]),
+    (".home return", "Bring all players home", "Home", ["home", "all", "return"]),
+    (".owner", "List house owners", "Home", ["owner", "house", "list"]),
+    (".home initialize", "Assign RC + house to alive players", "Home", ["home", "init", "assign", "admin"]),
+    (".home setup", "Move sponsors to their player's house", "Home", ["home", "sponsor", "admin"]),
+    (".home set @player #house", "Set a player's home", "Home", ["home", "set", "admin"]),
+    (".home mset", "Auto-set all current locations as home", "Home", ["home", "auto", "mass", "admin"]),
+    (".home list", "List all players' homes", "Home", ["home", "list", "admin"]),
+    (".home delete @player", "Make a player homeless", "Home", ["home", "delete", "remove", "admin"]),
+    (".rolechat initialize", "Assign RCs only (no houses)", "Home", ["rc", "rolechat", "init", "admin"]),
+    (".rolechat check", "List all RCs and their players", "Home", ["rc", "rolechat", "list", "admin"]),
+    (".destroy #house", "Move to inaccessible, remove members, announce", "Handling", ["destroy", "house", "delete"]),
+    (".fdestroy #house", "Force destroy instantly", "Handling", ["destroy", "force", "instant"]),
+    (".decay #house", "Move to inaccessible, narrate in map", "Handling", ["decay", "house", "inactive"]),
+    (".rebuild #house", "Rebuild a destroyed house", "Handling", ["rebuild", "restore", "house"]),
+    (".decayinactive", "List/decay houses with 24h inactivity", "Handling", ["decay", "inactive", "idle"]),
+    (".setowner #PC #RC", "Set a player as PC owner", "Handling", ["owner", "pc", "set"]),
+    (".end #PC", "Remove all but the owner from a PC", "Handling", ["pc", "end", "clear", "owner"]),
+    (".newpc Public/Private <name> #RC", "Create a PC", "Handling", ["pc", "create", "new", "private"]),
+    (".close #PC", "Move PC to Old PCs, remove members", "Handling", ["pc", "close", "archive"]),
+    (".public #ch", "Make channel public", "Handling", ["public", "channel", "visibility"]),
+    (".private #ch", "Make channel private", "Handling", ["private", "channel", "visibility"]),
+    (".channels", "Visual map of all PCs", "Handling", ["map", "pc", "visual", "channels"]),
+    (".publicmap", "Map of public channels only", "Handling", ["map", "public", "channels"]),
+    (".privatemap", "Map of private channels only", "Handling", ["map", "private", "channels"]),
+    (".estatehelp", "Estate map functions help", "Handling", ["estate", "map", "help"]),
+    (".estate init #ch", "Init/update estate map", "Handling", ["estate", "init", "map"]),
+    (".info #ch", "Show channel info", "Infos", ["info", "channel", "details"]),
+    (".info add #ch <text>", "Add info to a channel", "Infos", ["info", "add", "note"]),
+    (".info remove #ch <n>", "Remove info by number", "Infos", ["info", "remove", "delete"]),
+    (".info reset", "Reset all infos", "Infos", ["info", "reset", "clear"]),
+    (".preset", "Add/remove/edit presets with optional ability category", "Presets", ["preset", "ability", "template"]),
+    (".ospreset", "View/reorder/remove all presets", "Presets", ["preset", "os", "admin", "manage"]),
+    (".ospresetsort", "Reorder preset display categories", "Presets", ["preset", "sort", "order", "admin"]),
+    (".vote @player", "Vote or change your vote", "Voting", ["vote", "cast", "change"]),
+    (".abstain", "Abstain from voting", "Voting", ["abstain", "skip", "vote"]),
+    (".manipulate @target @vote", "Manipulate a player's vote", "Voting", ["manipulate", "control", "force"]),
+    (".removevote @player", "Remove a player's vote", "Voting", ["remove", "vote", "clear"]),
+    (".skipnight <min_votes>", "Start skip-night vote", "Voting", ["skip", "night", "vote"]),
+    (".votelist", "Show all current votes", "Voting", ["vote", "list", "current"]),
+    (".resetvotes", "Reset all votes", "Voting", ["reset", "vote", "clear"]),
+    (".votehistory/vh [mode]", "Scan vote history", "Voting", ["history", "vote", "log"]),
+    (".voteinrc true/false", "Enable voting in RoleChats", "Voting", ["rc", "rolechat", "vote", "toggle"]),
+    (".accuse @player #RC", "Accuse (costs 2 tokens, creates channel)", "Nominations", ["accuse", "nominate", "token"]),
+    (".intervene #nom-ch", "Pay 1 token to speak in nomination", "Nominations", ["intervene", "speak", "token"]),
+    (".voten #nom-ch yes/no", "Vote guilty or not guilty", "Nominations", ["vote", "guilty", "not", "nomination"]),
+    (".tokens", "Check your token balance", "Nominations", ["token", "balance", "check"]),
+    (".addtokens @user <qty>", "Add tokens", "Nominations", ["token", "add", "admin"]),
+    (".removetokens @user <qty>", "Remove tokens", "Nominations", ["token", "remove", "admin"]),
+    (".showvotesn #nom-ch", "View nomination votes", "Nominations", ["vote", "show", "nomination", "admin"]),
+    (".stopvotes #nom-ch", "Stop nomination (locks channel)", "Nominations", ["stop", "lock", "nomination", "admin"]),
+    (".resumevotes #nom-ch", "Resume nomination", "Nominations", ["resume", "unlock", "nomination", "admin"]),
+    (".clearvotes", "Clear all nomination votes", "Nominations", ["clear", "vote", "nomination", "admin"]),
+    (".playerlist", "List alive members", "Lists", ["player", "alive", "list"]),
+    (".sponsorlist", "List sponsor members", "Lists", ["sponsor", "list"]),
+    (".houselist", "List visitable houses", "Lists", ["house", "list", "visitable"]),
+    (".deadlist", "List dead players and their roles", "Lists", ["dead", "list", "role"]),
+    (".setuphouselist", "Init houselist from existing houses", "Lists", ["house", "list", "init", "admin"]),
+    (".houselistadd #house", "Add a house to the list", "Lists", ["house", "list", "add", "admin"]),
+    (".houselistremove #house", "Remove a house from list", "Lists", ["house", "list", "remove", "admin"]),
+    (".deadlist add @player <team> <role>", "Add to deadlist", "Lists", ["dead", "list", "add", "admin"]),
+    (".deadlist remove @player", "Remove from deadlist", "Lists", ["dead", "list", "remove", "admin"]),
+    (".settarget <channel_id>", "Set target channel (ID, not mention)", "Send Role", ["target", "channel", "set"]),
+    (".sendrole/sr <players>", "Reply to a msg, sends role to target", "Send Role", ["send", "role", "forward"]),
+    (".teamroll <n1> \"msg1\" <n2> \"msg2\" ...", "Randomly assigns quoted roles (Admin)", "Send Role", ["team", "roll", "random", "assign", "admin"]),
+    (".day", "Unlock all day channels", "Utility", ["day", "unlock", "phase"]),
+    (".night", "Lock all day channels", "Utility", ["night", "lock", "phase"]),
+    (".broom", "Delete replied-to messages (logs kept)", "Utility", ["broom", "delete", "clean", "message"]),
+    (".log", "Log message range (count/source/send)", "Utility", ["log", "message", "export"]),
+    (".housecheck [hours]", "List quiet houses", "Utility", ["house", "quiet", "check", "inactive"]),
+    (".whisper #RC <msg>", "Send anonymous whisper", "Utility", ["whisper", "anonymous", "message"]),
+    (".switch", "Toggle Player/Sponsor role", "Utility", ["switch", "role", "toggle", "sponsor"]),
+    (".dead", "Move RC to Dead category", "Utility", ["dead", "rc", "move"]),
+    (".deadrole", "Mark dead, remove house, pin corpse", "Utility", ["dead", "role", "mark", "corpse"]),
+    (".deadc", "Move RC to Dead (admin)", "Utility", ["dead", "rc", "admin"]),
+    (".addrole @role @users...", "Give role to members", "Utility", ["role", "add", "give", "admin"]),
+    (".removerole <role> <member>", "Remove role (admin)", "Utility", ["role", "remove", "admin"]),
+    (".addcategoryperms @role <cat> <perm>", "R=Read, S=Send", "Utility", ["perm", "category", "read", "send", "admin"]),
+    (".addchannelperms @role #ch <perm>", "R=Read, S=Send", "Utility", ["perm", "channel", "read", "send", "admin"]),
+    (".endgame", "Unlock all channels post-game", "Utility", ["game", "end", "unlock", "admin"]),
+    (".statss", "Message counts by role priority", "Utility", ["stats", "message", "count", "admin"]),
+    (".setmessagetracking", "Enable/disable tracking", "Utility", ["tracking", "message", "toggle", "admin"]),
+    (".start_tracking", "Start message tracking", "Utility", ["tracking", "start", "admin"]),
+    (".stop_tracking", "Stop/pause tracking", "Utility", ["tracking", "stop", "pause", "admin"]),
+    (".reset_tracking", "Reset message counts", "Utility", ["tracking", "reset", "admin"]),
+    (".autovisits", "Toggle auto-visit system", "Utility", ["auto", "visit", "toggle"]),
+    (".autorcset", "Set RC for auto-visit", "Utility", ["auto", "rc", "visit", "set"]),
+    (".autorcadd @user", "Add user to auto-visit", "Utility", ["auto", "visit", "add", "user"]),
+    (".autorcreset", "Reset all auto-visit configs", "Utility", ["auto", "visit", "reset"]),
+    (".autoknock", "Toggle auto-knock", "Utility", ["auto", "knock", "toggle"]),
+    (".automove", "Toggle auto-move", "Utility", ["auto", "move", "toggle"]),
+    (".autostealth", "Toggle stealth mode for auto-visits", "Utility", ["auto", "stealth", "toggle"]),
+    (".help [category]", "Show this help menu", "Other", ["help", "menu", "command"]),
+    (".who #ch", "List players in a channel", "Other", ["who", "list", "players", "channel"]),
+    (".where #RC", "Show a player's current location", "Other", ["where", "location", "find"]),
+    (".map", "Show the game map", "Other", ["map", "game", "overview"]),
+    (".role /.firstpinned", "Show first pinned in RC", "Other", ["role", "pinned", "first", "pin"]),
+    (".roll @role <n>", "Random players from a role", "Other", ["roll", "random", "pick"]),
+    (".ping", "Bot online check", "Other", ["ping", "bot", "online", "check"]),
+    (".ding", "Dong!", "Other", ["ding", "fun", "easter"]),
+    (".narrate #ch <msg>", "Send narration to channels", "Other", ["narrate", "announce", "admin"]),
+    (".narration/.n <text>", "Storybook embed (admin, pings)", "Other", ["narration", "story", "embed", "admin"]),
+    (".anarration/.na <text>", "Silent narration (admin)", "Other", ["narration", "silent", "admin"]),
+    (".narrationcolor", "Pick embed color (admin)", "Other", ["narration", "color", "embed", "admin"]),
+    (".dice <n>", "Roll 1-N", "Other", ["dice", "roll", "random", "number"]),
+    (".dice <opt1> <opt2> ...", "Random pick from options", "Other", ["dice", "choose", "pick", "random"]),
+    (".loc", "Show all houses and occupants", "Other", ["loc", "location", "houses", "occupants"]),
+    (".gettag <link>", "Get mentioned users from a message", "Other", ["tag", "mention", "get"]),
+    (".timer <time> [tag] [#ch]", "Set a timer", "Other", ["timer", "remind", "countdown"]),
+    (".deletechannel", "Delete this channel (admin)", "Other", ["delete", "channel", "admin"]),
+    (".deletecategory", "Delete this category (admin)", "Other", ["delete", "category", "admin"]),
+    (".timestamp <DD-MM> <HH:MM>", "Gen timestamp with timezone picker", "Other", ["timestamp", "time", "timezone", "convert"]),
+    (".time", "Get sent time of replied-to message", "Other", ["time", "message", "sent"]),
+    (".dropitem", "Drop interactive item (see docs)", "Other", ["drop", "item", "interactive"]),
+    (".revive", "Revive dead players (admin)", "Other", ["revive", "dead", "resurrect", "admin"]),
+    (".setupmeetupmatrix", "Toggle automated meetup tracking", "Meetup Matrix", ["meetup", "tracking", "toggle", "admin"]),
+    (".setphase day/night", "Trigger phase change (admin)", "Meetup Matrix", ["phase", "day", "night", "change", "admin"]),
+    (".forcemeet @p1 @p2", "Force a meetup record (admin)", "Meetup Matrix", ["meet", "force", "record", "admin"]),
+    (".allmeets @player", "Show who they've met this phase", "Meetup Matrix", ["meet", "list", "phase"]),
+    (".meetupmatrix", "Show full meetup matrix", "Meetup Matrix", ["meetup", "matrix", "grid"]),
+    (".meeting", "Request a meeting (max 5 players)", "Meetup Matrix", ["meeting", "request", "schedule"]),
+    (".endmeeting", "End your active meeting", "Meetup Matrix", ["meeting", "end", "stop"]),
+    (".checkcooldown [@user]", "Check meeting cooldown", "Meetup Matrix", ["meeting", "cooldown", "check"]),
+    (".meetingenable", "Enable/disable the meeting system", "Meetup Matrix", ["meeting", "enable", "toggle", "admin"]),
+    (".setmeetingchannel #ch", "Set request channel", "Meetup Matrix", ["meeting", "channel", "set", "admin"]),
+    (".setmeetingtargetguild <id>", "Set meeting server", "Meetup Matrix", ["meeting", "guild", "server", "admin"]),
+    (".setmeetingcategory <cat>", "Set meeting category", "Meetup Matrix", ["meeting", "category", "set", "admin"]),
+    (".meetingconfig", "Show current config", "Meetup Matrix", ["meeting", "config", "show", "admin"]),
+    (".blockmeeting @user", "Block user from meetings", "Meetup Matrix", ["meeting", "block", "ban", "admin"]),
+    (".unblockmeeting @user", "Unblock user", "Meetup Matrix", ["meeting", "unblock", "admin"]),
+    (".removecooldown @user", "Remove cooldown", "Meetup Matrix", ["meeting", "cooldown", "remove", "admin"]),
+    (".forcemeeting @u1 @u2 ...", "Create forced meeting", "Meetup Matrix", ["meeting", "force", "admin"]),
+    (".listblocked", "List blocked users", "Meetup Matrix", ["blocked", "list", "admin"]),
+    (".listcooldowns", "List users on cooldown", "Meetup Matrix", ["cooldown", "list", "admin"]),
+    (".cancelmeeting", "Cancel pending meeting", "Meetup Matrix", ["meeting", "cancel", "admin"]),
+    (".meetingstats", "Show meeting statistics", "Meetup Matrix", ["meeting", "stats", "statistics"]),
+    (".bal /.balance", "Show RC balance", "Economy", ["balance", "money", "coins", "rc"]),
+    (".shop", "View shop with interactive buttons", "Economy", ["shop", "store", "buy", "items"]),
+    (".buy <item> [qty]", "Buy from shop (to RC inventory)", "Economy", ["buy", "purchase", "shop"]),
+    (".sell /.sell-item <item>", "Sell for 50% refund", "Economy", ["sell", "refund", "item"]),
+    (".inv /.inventory [#ch]", "View RC inventory", "Economy", ["inventory", "items", "rc"]),
+    (".give @user <amt>", "Give RC coins (in houses)", "Economy", ["give", "coins", "transfer"]),
+    (".give-money @user <amt>", "Transfer from wallet", "Economy", ["money", "transfer", "wallet"]),
+    (".use <item>", "Use an item from inventory", "Economy", ["use", "item", "activate"]),
+    (".additem <price> <name>", "Add new shop item", "Economy", ["item", "add", "shop", "admin"]),
+    (".removeitem /.rmitem #ch <item> [qty]", "Remove from RC", "Economy", ["item", "remove", "rc", "admin"]),
+    (".edititem <field> <name> <val>", "Edit shop item", "Economy", ["item", "edit", "shop", "admin"]),
+    (".delitem <name>", "Delete item from shop", "Economy", ["item", "delete", "shop", "admin"]),
+    (".addmoney #ch <amt>", "Add coins to RC", "Economy", ["money", "add", "coins", "rc", "admin"]),
+    (".removemoney #ch <amt>", "Remove coins from RC", "Economy", ["money", "remove", "coins", "rc", "admin"]),
+    (".add-money-role @role <amt>", "Add wallet coins by role", "Economy", ["money", "role", "wallet", "admin"]),
+    (".additemrole @role <item> <qty>", "Give items by role", "Economy", ["item", "role", "give", "admin"]),
+    (".reseteconomy [amt]", "Reset all balances", "Economy", ["economy", "reset", "balance", "admin"]),
+    (".clearinventory", "Clear all inventories", "Economy", ["inventory", "clear", "admin"]),
+    (".collect", "Add collect amt to every RC", "Economy", ["collect", "money", "rc", "admin"]),
+    (".setcollect <val>", "Set collect amount (max 10k)", "Economy", ["collect", "amount", "set", "admin"]),
+    (".leaderboard /.lb /.top [n]", "Richest RCs", "Economy", ["leaderboard", "top", "richest", "rcs"]),
+    (".mysetloc <location>", "Set your location", "Location", ["location", "set", "timezone"]),
+    (".myremoveloc", "Remove your location", "Location", ["location", "remove", "clear"]),
+    (".localtime /.lt [@user]", "View local time", "Location", ["time", "local", "timezone"]),
+    (".near [@user]", "Find 5 closest members", "Location", ["near", "close", "proximity"]),
+    (".locations", "Browse all locations by continent", "Location", ["locations", "browse", "continent"]),
+    (".locstats", "Location statistics", "Location", ["location", "stats", "statistics"]),
+    (".lochelp /.hloc", "Detailed location help", "Location", ["location", "help"]),
+    (".whentime @u1 @u2 ...", "See time for multiple users", "Location", ["time", "multiple", "when"]),
+    (".setloc @user <location>", "Set a user's location", "Location", ["location", "set", "admin"]),
+    (".remloc @user", "Remove a user's location", "Location", ["location", "remove", "admin"]),
+    (".setcontinent @user <cont>", "Assign continent", "Location", ["continent", "set", "admin"]),
+    (".listunknown", "List users with unknown continent", "Location", ["unknown", "continent", "list", "admin"]),
+    (".refreshtz", "Refresh all timezones", "Location", ["timezone", "refresh", "admin"]),
+    (".forceremloc /.forceremoveloc <name/id>", "Force remove", "Location", ["location", "force", "remove", "admin"]),
+    (".test_geocoder", "Test geocoder connectivity", "Location", ["geocoder", "test", "admin"]),
+    (".mapp", "World map of registered users", "Location", ["map", "world", "users"]),
+    (".mapheat", "Heatmap of registered users", "Location", ["heatmap", "density", "map"]),
+    (".locsnotset", "Members who haven't set location", "Location", ["location", "not", "set", "missing"]),
+    (".dashboard", "Open the role dashboard", "Dashboard", ["dashboard", "role", "ui"]),
+    (".dashboardtoggle", "Enable/disable dashboard", "Dashboard", ["dashboard", "toggle", "admin"]),
+    (".setrole @role", "Set dashboard role", "Dashboard", ["dashboard", "role", "set", "admin"]),
+    (".addpassiveability <name> <desc>", "Add passive ability", "Dashboard", ["ability", "passive", "add", "admin"]),
+    (".removepassiveability <name>", "Remove passive", "Dashboard", ["ability", "passive", "remove", "admin"]),
+    (".addactiveability <name> <desc> <uses>", "Add active ability", "Dashboard", ["ability", "active", "add", "admin"]),
+    (".removeactiveability <name>", "Remove active", "Dashboard", ["ability", "active", "remove", "admin"]),
+    (".vb", "View your vote balance", "Dashboard", ["vote", "balance", "vb"]),
+    (".checkvb [@user]", "Check vote balance", "Dashboard", ["vote", "balance", "check"]),
+    (".setvisits @user <amt>", "Set visit count", "Dashboard", ["visit", "set", "admin"]),
+    (".addvisits @user <amt>", "Add visits", "Dashboard", ["visit", "add", "admin"]),
+    (".removevisits @user <amt>", "Remove visits", "Dashboard", ["visit", "remove", "admin"]),
+    (".actionlog [@user]", "View action log", "Dashboard", ["action", "log", "audit"]),
+    (".setboard", "Set up the OS info board", "Dashboard", ["board", "info", "os", "admin"]),
+    (".setinfophase <phase>", "Set current phase info", "Dashboard", ["phase", "info", "set", "admin"]),
+    (".addcard", "Add an info card", "Dashboard", ["card", "info", "add", "admin"]),
+    (".refreshcards", "Refresh all info cards", "Dashboard", ["card", "refresh", "info", "admin"]),
+    (".startgame /.sg <slots> @host <name>", "Start a lobby", "Game Manager", ["game", "start", "lobby", "admin"]),
+    (".addplayer /.ap <slot> @player [name]", "Fill a slot", "Game Manager", ["player", "add", "slot", "admin"]),
+    (".removeplayer /.rp <slot> [name]", "Remove from slot", "Game Manager", ["player", "remove", "slot", "admin"]),
+    (".closegame /.cg [name]", "Close & archive game", "Game Manager", ["game", "close", "archive", "admin"]),
+    (".stats [@player]", "View player statistics", "Library & Stats", ["stats", "player", "statistics"]),
+    (".winrate", "Winrate stats by team", "Library & Stats", ["winrate", "stats", "team"]),
+    (".relations [@user]", "Allies and nemeses", "Library & Stats", ["relations", "ally", "nemesis"]),
+    (".lib", "Browse the game library", "Library & Stats", ["library", "browse", "games"]),
+    (".lib add", "Add a new game", "Library & Stats", ["library", "add", "game", "admin"]),
+    (".lib summary", "Summary of all games", "Library & Stats", ["library", "summary", "overview"]),
+    (".lib edit <#> <field> <val>", "Edit a game field", "Library & Stats", ["library", "edit", "admin"]),
+    (".lib delete <#>", "Delete a game", "Library & Stats", ["library", "delete", "admin"]),
+    (".lib deletegame <#>", "Delete a game (alt)", "Library & Stats", ["library", "delete", "admin"]),
+    (".lib setwin <#> <team>", "Set winning team", "Library & Stats", ["library", "win", "set", "admin"]),
+    (".lib search <term>", "Search by name or player", "Library & Stats", ["library", "search", "find"]),
+    (".lib idsearch <id>", "Search by game ID", "Library & Stats", ["library", "search", "id"]),
+    (".lib migrateaccount", "Move stats to new account", "Library & Stats", ["library", "migrate", "account"]),
+    (".lib mergeaccount", "Merge two accounts' stats", "Library & Stats", ["library", "merge", "account"]),
+    (".lib syncname", "Sync display name", "Library & Stats", ["library", "sync", "name"]),
+    (".lib bulksyncnames", "Bulk sync all names", "Library & Stats", ["library", "sync", "bulk", "admin"]),
+    (".lib help", "Show library help", "Library & Stats", ["library", "help"]),
+    (".libit help", "Italian library help", "Library & Stats", ["library", "italian", "help"]),
+    (".missingids", "Games with missing player IDs", "Library & Stats", ["missing", "ids", "players", "admin"]),
+    (".auxbattle /.aux", "Main Aux Battle command", "Games", ["aux", "battle", "tournament"]),
+    (".auxbattle signup", "Sign up for Aux Battle", "Games", ["aux", "signup", "register"]),
+    (".auxbattle opensignup", "Open signups (admin)", "Games", ["aux", "signup", "open", "admin"]),
+    (".auxbattle closesignup", "Close signups (admin)", "Games", ["aux", "signup", "close", "admin"]),
+    (".auxbattle bracket", "View bracket", "Games", ["aux", "bracket", "view"]),
+    (".auxbattle reset", "Reset tournament (admin)", "Games", ["aux", "reset", "admin"]),
+    (".auxbattle start", "Start tournament (admin)", "Games", ["aux", "start", "admin"]),
+    (".auxbattle submit", "Submit battle entry", "Games", ["aux", "submit", "entry"]),
+    (".senet help", "Show Senet rules", "Games", ["senet", "rules", "help"]),
+    (".senet challenge / sfida @user", "Challenge someone to Senet", "Games", ["senet", "challenge", "duel"]),
+    (".senet accept / accetta @user", "Accept a Senet challenge", "Games", ["senet", "accept", "duel"]),
+    (".senet roll / lancia", "Roll the dice in Senet", "Games", ["senet", "roll", "dice"]),
+    (".senet move / muovi <piece>", "Move a piece in Senet", "Games", ["senet", "move", "piece"]),
+    (".senet skip / passo", "Skip your turn in Senet", "Games", ["senet", "skip", "pass"]),
+    (".senet status / board", "View the Senet board", "Games", ["senet", "board", "status"]),
+    (".senet forfeit / abbandona", "Forfeit the Senet game", "Games", ["senet", "forfeit", "quit"]),
+    (".senet rules / regole", "Show the Senet rules", "Games", ["senet", "rules", "regole"]),
+    (".birthdays", "List all registered birthdays", "Birthdays", ["birthday", "list", "all"]),
+    (".nextbirthdays", "Upcoming birthdays", "Birthdays", ["birthday", "upcoming", "next"]),
+    (".helpbday", "Birthday help", "Birthdays", ["birthday", "help"]),
+    (".birthday add @user MM-DD", "Add/set a birthday for a user", "Birthdays", ["birthday", "add", "set", "admin"]),
+    (".birthday remove @user", "Remove a user's birthday", "Birthdays", ["birthday", "remove", "delete", "admin"]),
+    (".bdaystatus", "Check birthday loop status", "Birthdays", ["birthday", "status", "admin"]),
+    (".testbday @user", "Test birthday announcement", "Birthdays", ["birthday", "test", "admin"]),
+    (".calendar", "English Village Games schedule", "Calendar", ["calendar", "schedule", "english"]),
+    (".calendario", "Italian Village Games schedule", "Calendar", ["calendar", "schedule", "italian"]),
+    (".vgintro /.vgi", "Village Games intro (EN)", "Calendar", ["intro", "village", "games", "english"]),
+    (".vgintro_it /.vgii", "Village Games intro (IT)", "Calendar", ["intro", "village", "games", "italian"]),
+    (".draftstart @u1 @u2 ...", "Start a snake draft (admin)", "Draft", ["draft", "start", "snake", "admin"]),
+    (".prepick", "Manage your prepicks (max 2)", "Draft", ["draft", "prepick", "pick"]),
+    (".draftboard", "Show all teams", "Draft", ["draft", "board", "teams"]),
+    (".myteam", "Show your team", "Draft", ["draft", "team", "my"]),
+    (".team @user", "Show a user's team with fantasy points", "Draft", ["draft", "team", "fantasy"]),
+    (".forcepick <name>", "Force a pick for the current user (admin)", "Draft", ["draft", "force", "pick", "admin"]),
+    (".undo", "Undo the most recent pick (admin)", "Draft", ["draft", "undo", "admin"]),
+    (".pause", "Pause the draft (admin)", "Draft", ["draft", "pause", "admin"]),
+    (".resume", "Resume the draft (admin)", "Draft", ["draft", "resume", "admin"]),
+    (".enddraft", "End the draft (admin)", "Draft", ["draft", "end", "admin"]),
+    (".draftpoints", "Live fantasy points leaderboard", "Draft", ["draft", "points", "leaderboard"]),
+    (".standings", "Standings with avg & best points", "Draft", ["draft", "standings", "rankings"]),
+    (".player <name> / .pp", "Look up FIFA fantasy points", "Draft", ["player", "fantasy", "fifa", "points"]),
+    (".playerpoints <name>", "FIFA player detail", "Draft", ["player", "points", "detail", "fifa"]),
+    (".scoutingboard", "Scouting bonus leaderboard", "Draft", ["scouting", "ownership", "leaderboard"]),
+    (".topplayers [N]", "Top N drafted players by points", "Draft", ["top", "players", "rankings"]),
+    (".teamvalue @user", "Point breakdown per player on a team", "Draft", ["team", "value", "breakdown"]),
+    (".refreshpoints", "Fetch fresh FIFA data (admin)", "Draft", ["fifa", "refresh", "data", "admin"]),
+    (".matches [filter] / .matchinfo", "Group standings, tiebreakers & matches via dropdown, or filter by team name", "Draft", ["matches", "results", "fixtures", "standings", "groups"]),
+    (".trending [position] / .form", "Players with best form rating", "Draft", ["trending", "form", "players"]),
+    (".differentials [N] / .diff", "Best differential picks", "Draft", ["differential", "diff", "value"]),
+    (".simulate / .sim / .fsim", "Simulate tournament (ELO/players/dynamic/tactical)", "Draft", ["simulate", "sim", "fsim", "tournament"]),
+    (".fsim detailed", "Head-to-head Monte Carlo analysis", "Draft", ["simulate", "detailed", "head", "head"]),
+    (".simhelp / .sim help", "Simulation model descriptions", "Draft", ["simulate", "help", "models"]),
+]
 
 
 COMMON_TIMEZONES = [
@@ -83,6 +384,39 @@ class TimezoneSelectView(discord.ui.View):
         embed.set_footer(text=f"{dt_local.strftime('%d-%m %H:%M')} {value}")
 
         await interaction.response.edit_message(content=None, embed=embed, view=None)
+
+
+class ConfirmDeleteView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=30)
+        self.ctx = ctx
+        self.confirmed = False
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✔ Yes", style=discord.ButtonStyle.green)
+    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = True
+        self.stop()
+        await interaction.response.edit_message(content="Deleting...", embed=None, view=None)
+
+    @discord.ui.button(label="❌ No", style=discord.ButtonStyle.red)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            await self.message.edit(content="Confirmation timed out.", embed=None, view=None)
+        except Exception:
+            pass
 
 
 class Other(commands.Cog):
@@ -296,23 +630,48 @@ class Other(commands.Cog):
             if len(desc) > 4000:
                 desc = desc[:3997] + "..."
         else:
-            num_width = len(str(len(random_users))) + 1
-            entries = [f"{f'{i}.':>{num_width}} {user.display_name}" for i, user in enumerate(random_users, 1)]
+            n = len(random_users)
             col = 1
-            if len(entries) > 10:
+            if n > 10:
                 col = 2
-            if len(entries) > 20:
+            if n > 20:
                 col = 3
-            if len(entries) > 30:
+            if n > 30:
                 col = 4
 
-            width = max(len(e) for e in entries) + 2
-            rows = []
-            for i in range(0, len(entries), col):
-                row = "".join(f"{e:<{width}}" for e in entries[i:i + col])
-                rows.append(row)
+            SAFE_WIDTH = 78
+            if col > 1:
+                max_name = max(6, (SAFE_WIDTH // col) - 2)
+            else:
+                max_name = 40
 
-            grid = "\n".join(rows)
+            names = []
+            for user in random_users:
+                name = user.display_name
+                if wcwidth.wcswidth(name) > max_name:
+                    while name and wcwidth.wcswidth(name) > max_name - 3:
+                        name = name[:-1]
+                    name += "..."
+                names.append(name)
+
+            col_widths = [0] * col
+            for i, name in enumerate(names):
+                c = i % col
+                w = wcwidth.wcswidth(name)
+                if w > col_widths[c]:
+                    col_widths[c] = w
+            col_widths = [w + 2 for w in col_widths]
+
+            lines = []
+            for i in range(0, n, col):
+                row_names = names[i:i + col]
+                parts = []
+                for c, name in enumerate(row_names):
+                    pad = col_widths[c] - wcwidth.wcswidth(name)
+                    parts.append(name + " " * pad)
+                lines.append("".join(parts))
+
+            grid = "\n".join(lines)
             if len(grid) > 4086:
                 grid = grid[:4083] + "..."
             desc = "```\n" + grid + "\n```"
@@ -546,7 +905,13 @@ class Other(commands.Cog):
     @commands.command()
     async def deletechannel(self, ctx):
         if ctx.author.guild_permissions.administrator:
-            await ctx.channel.delete()
+            view = ConfirmDeleteView(ctx)
+            embed = discord.Embed(description="Are you sure you want to delete this channel?", color=0xff0000)
+            msg = await ctx.send(embed=embed, view=view)
+            view.message = msg
+            await view.wait()
+            if view.confirmed:
+                await ctx.channel.delete()
         else:
             await ctx.send("You don't have enough perms to use this command")
 
@@ -555,9 +920,15 @@ class Other(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             if ctx.channel.category:
                 category = ctx.channel.category
-                for channel in category.channels:
-                    await channel.delete()
-                await category.delete()
+                view = ConfirmDeleteView(ctx)
+                embed = discord.Embed(description=f"Are you sure you want to delete the category **{category.name}** and all its channels?", color=0xff0000)
+                msg = await ctx.send(embed=embed, view=view)
+                view.message = msg
+                await view.wait()
+                if view.confirmed:
+                    for channel in category.channels:
+                        await channel.delete()
+                    await category.delete()
             else:
                 await ctx.send("This channel doesn't have a category")
         else:
@@ -714,6 +1085,57 @@ class Other(commands.Cog):
         embed.add_field(name="📅 - Calendar & Intro", value="4 Commands\n`.help2 calendar`", inline=True)
         embed.set_footer(text="Village Game • Use `.help2 {category}` for details")
         await self.send_help_page(ctx, embed, self.help2)
+
+    @commands.command(name="searchhelp", aliases=["sh"])
+    async def searchhelp(self, ctx, *, keyword: str):
+        """Search all commands by keyword or regex pattern."""
+        if not keyword:
+            return await ctx.send(
+                "Usage: `.searchhelp <keyword>` or `.sh <keyword>`\n"
+                "Searches command names, descriptions, and tags. Supports regex.\n"
+                "Example: `.sh private` — finds all commands about private channels"
+            )
+
+        try:
+            pattern = re.compile(keyword, re.IGNORECASE)
+        except re.error:
+            return await ctx.send(f"❌ Invalid regex: `{keyword}`")
+
+        matches = []
+        seen = set()
+        for cmd, desc, cat, tags in COMMAND_INDEX:
+            searchable = f"{cmd} {desc} {' '.join(tags)}"
+            if pattern.search(searchable):
+                key = (cmd, cat)
+                if key not in seen:
+                    seen.add(key)
+                    matches.append((cmd, desc, cat))
+
+        if not matches:
+            return await ctx.send(f"❌ No commands found matching `{keyword}`.")
+
+        matches.sort(key=lambda x: (x[2], x[0]))
+
+        embed = discord.Embed(
+            title=f"🔍 Search results for `{keyword}`",
+            description=f"Found **{len(matches)}** matching command{'s' if len(matches) != 1 else ''}",
+            color=0xff3fb9
+        )
+
+        current_cat = None
+        lines = []
+        for cmd, desc, cat in matches:
+            if cat != current_cat:
+                if lines:
+                    embed.add_field(name=f"📁 {current_cat}", value="\n".join(lines), inline=False)
+                current_cat = cat
+                lines = []
+            lines.append(f"**`{cmd}`** ─ {desc}")
+        if lines:
+            embed.add_field(name=f"📁 {current_cat}", value="\n".join(lines), inline=False)
+
+        embed.set_footer(text="Village Game • Use `.help <category>` for the full category")
+        await ctx.send(embed=embed)
 
     @commands.command()
     async def help(self, ctx, category: str = None):
@@ -951,12 +1373,13 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedpres, self.help_presets)
 
     async def help_voting(self, ctx):
-        embedv = discord.Embed(title="🗳️ - Voting commands", description="8 commands", color=0xff3fb9)
+        embedv = discord.Embed(title="🗳️ - Voting commands", description="9 commands", color=0xff3fb9)
         embedv.add_field(name="Voting", value=(
             "**`.vote @player`** ─ Vote or change your vote\n"
             "**`.abstain`** ─ Abstain from voting\n"
             "**`.manipulate @target @vote`** ─ Manipulate a player's vote\n"
             "**`.removevote @player`** ─ Remove a player's vote\n"
+            "**`.skipnight <min_votes>`** ─ Start skip-night vote\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.votelist`** ─ Show all current votes\n"
             "**`.resetvotes`** ─ Reset all votes\n"
@@ -1032,7 +1455,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedsendrole, self.help_sendrole)
 
     async def help_utility(self, ctx):
-        embedu = discord.Embed(title="⚙️ - Utility", description="21 commands", color=0xff3fb9)
+        embedu = discord.Embed(title="⚙️ - Utility", description="28 commands", color=0xff3fb9)
         embedu.add_field(name="General", value=(
             "**`.day`** ─ Unlock all day channels\n"
             "**`.night`** ─ Lock all day channels\n"
@@ -1051,7 +1474,6 @@ class Other(commands.Cog):
         embedu.add_field(name="Admin — Roles & Perms", value=(
             "**`.addrole @role @users...`** ─ Give role to members\n"
             "**`.removerole <role> <member>`** ─ Remove role (admin)\n"
-            "**`.skipnight <min_votes>`** ─ Start skip-night vote\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.addcategoryperms @role <cat> <perm>`** ─ R=Read, S=Send\n"
             "**`.addchannelperms @role #ch <perm>`** ─ R=Read, S=Send"
@@ -1064,6 +1486,15 @@ class Other(commands.Cog):
             "**`.start_tracking`** ─ Start message tracking\n"
             "**`.stop_tracking`** ─ Stop/pause tracking\n"
             "**`.reset_tracking`** ─ Reset message counts"
+        ), inline=False)
+        embedu.add_field(name="Auto-Visit", value=(
+            "**`.autovisits`** ─ Toggle auto-visit system\n"
+            "**`.autorcset`** ─ Set RC for auto-visit\n"
+            "**`.autorcadd @user`** ─ Add user to auto-visit\n"
+            "**`.autorcreset`** ─ Reset all auto-visit configs\n"
+            "**`.autoknock`** ─ Toggle auto-knock\n"
+            "**`.automove`** ─ Toggle auto-move\n"
+            "**`.autostealth`** ─ Toggle stealth mode for auto-visits"
         ), inline=False)
         embedu.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedu, self.help_utility)
@@ -1279,8 +1710,7 @@ class Other(commands.Cog):
     async def help_games(self, ctx):
         embed = discord.Embed(title="⚔️ Games (Aux Battle & Senet)", description="18 commands", color=0xff3fb9)
         embed.add_field(name="🎯 Aux Battle", value=(
-            "**`.auxbattle`/`.aux`** ─ Main command\n"
-            "**`.help_aux`** ─ Detailed aux battle help\n"
+            "**`.auxbattle`/`.aux`** ─ Main command (subcommands below)\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.auxbattle signup`** ─ Sign up\n"
             "**`.auxbattle opensignup`** ─ Open signups (admin)\n"
@@ -1308,14 +1738,15 @@ class Other(commands.Cog):
     async def help_birthdays(self, ctx):
         embed = discord.Embed(title="🎂 Birthday commands", description="6 commands", color=0xff3fb9)
         embed.add_field(name="Player Commands", value=(
-            "**`.birthday <DD-MM>`** ─ Set your birthday\n"
-            "**`.bdaystatus`** ─ Check your birthday status\n"
-            "**`.nextbirthdays`** ─ Upcoming birthdays\n"
             "**`.birthdays`** ─ List all registered birthdays\n"
+            "**`.nextbirthdays`** ─ Upcoming birthdays\n"
             "**`.helpbday`** ─ Birthday help"
         ), inline=False)
         embed.add_field(name="Admin Commands", value=(
-            "**`.testbday`** ─ Test birthday announcement"
+            "**`.birthday add @user MM-DD`** ─ Add/set a birthday for a user\n"
+            "**`.birthday remove @user`** ─ Remove a user's birthday\n"
+            "**`.bdaystatus`** ─ Check birthday loop status\n"
+            "**`.testbday @user`** ─ Test birthday announcement"
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_birthdays)
@@ -1356,7 +1787,7 @@ class Other(commands.Cog):
             "**.refreshpoints** ─ Fetch fresh FIFA data & save to cache (admin)"
         ), inline=False)
         embed.add_field(name="Match Analytics", value=(
-            "**.matches [filter]** / **.matchinfo** ─ All match results & upcoming\n"
+            "**.matches [filter]** / **.matchinfo** ─ Group standings & tiebreakers via dropdown, or filter by team\n"
             "**.trending [position]** / **.form** ─ Players with best form rating\n"
             "**.differentials [N]** / **.diff** ─ Best differential picks (high pts, low ownership)"
         ), inline=False)

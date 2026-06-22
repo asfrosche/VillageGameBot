@@ -1,4 +1,5 @@
 folium==0.19.4
+wcwidth==0.2.13
 geopy==2.4.1
 numpy==2.2.3
 pandas==2.3.1
