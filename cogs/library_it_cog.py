@@ -40,6 +40,30 @@ class ItalianLibraryDatabase(LibraryDatabase):
         super().__init__(db_path=db_path)
 
 
+class MigrateConfirmView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=30)
+        self.ctx = ctx
+        self.value = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("❌ This is not your confirmation.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✔ Yes", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="❌ No", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        self.stop()
+        await interaction.response.defer()
+
 # ============================================================================
 # ITALIAN COMMANDS COG
 # ============================================================================
@@ -575,6 +599,28 @@ class GameLibraryIT(commands.Cog):
             await ctx.send("⚠️ L'account destinazione ha già delle statistiche.\nUsa `.libit mergeaccount`.")
             return
 
+        button_preview = (
+            "⚠️ **CONFERMA MIGRAZIONE ACCOUNT** ⚠️\n\n"
+            "**SORGENTE (Perderà il riferimento alle statistiche)**\n"
+            f"`{old_id}`\n"
+            f"{old_player_rows} partite giocatore | {old_sponsor_rows} partite sponsor\n\n"
+            "**DESTINAZIONE (Riceverà le statistiche)**\n"
+            f"{new_member.display_name} (`{new_member.id}`)\n\n"
+            "Clicca **✔ Yes** per procedere, o **❌ No** per annullare."
+        )
+        view = MigrateConfirmView(ctx)
+        msg = await ctx.send(button_preview, view=view)
+        await view.wait()
+
+        if view.value is None:
+            await msg.edit(content="⌛ Conferma migrazione scaduta.", view=None)
+            return
+        if not view.value:
+            await msg.edit(content="❌ Migrazione annullata.", view=None)
+            return
+
+        await msg.edit(view=None)
+
         preview = (
             "⚠️ **CONFERMA MIGRAZIONE ACCOUNT** ⚠️\n\n"
             "**SORGENTE (Perderà il riferimento alle statistiche)**\n"
@@ -652,6 +698,29 @@ class GameLibraryIT(commands.Cog):
 
         src_player, src_sponsor = db.get_account_stat_counts(source_id)
         tgt_player, tgt_sponsor = db.get_account_stat_counts(target_id)
+
+        button_preview = (
+            "⚠️ **CONFERMA UNIONE** ⚠️\n\n"
+            "**SORGENTE (Verrà assorbito)**\n"
+            f"{source_name} (`{source_id}`)\n"
+            f"{src_player} partite giocatore | {src_sponsor} partite sponsor\n\n"
+            "**DESTINAZIONE (Manterrà tutto)**\n"
+            f"{target_name} (`{target_id}`)\n"
+            f"{tgt_player} partite giocatore | {tgt_sponsor} partite sponsor\n\n"
+            "Clicca **✔ Yes** per procedere, o **❌ No** per annullare."
+        )
+        view = MigrateConfirmView(ctx)
+        msg = await ctx.send(button_preview, view=view)
+        await view.wait()
+
+        if view.value is None:
+            await msg.edit(content="⌛ Conferma unione scaduta.", view=None)
+            return
+        if not view.value:
+            await msg.edit(content="❌ Unione annullata.", view=None)
+            return
+
+        await msg.edit(view=None)
 
         preview = (
             "⚠️ **CONFERMA UNIONE** ⚠️\n\n"

@@ -14,6 +14,30 @@ class Setup(commands.Cog):
     @commands.command()
     async def setup(self, ctx, num_channels: int):
         if ctx.author.guild_permissions.administrator:
+            confirm_view = View(timeout=30)
+            confirmed = {"value": False}
+            async def confirm_cb(interaction):
+                if interaction.user == ctx.author:
+                    confirmed["value"] = True
+                    await interaction.response.edit_message(content="Setting up server...", embed=None, view=None)
+            async def cancel_cb(interaction):
+                if interaction.user == ctx.author:
+                    await interaction.response.edit_message(content="Setup cancelled.", embed=None, view=None)
+            confirm_button = Button(label="✔ Yes", style=discord.ButtonStyle.green)
+            confirm_button.callback = confirm_cb
+            cancel_button = Button(label="❌ No", style=discord.ButtonStyle.red)
+            cancel_button.callback = cancel_cb
+            confirm_view.add_item(confirm_button)
+            confirm_view.add_item(cancel_button)
+            embed = discord.Embed(title="⚠️ Confirm Server Setup", description="Are you sure you want to create the FULL server setup? This will create 6 roles, 14 categories, and many channels.", color=0xff3fb9)
+            msg = await ctx.send(embed=embed, view=confirm_view)
+            await confirm_view.wait()
+            if not confirmed["value"]:
+                try:
+                    await msg.edit(content="Setup cancelled.", embed=None, view=None)
+                except:
+                    pass
+                return
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
                 overseer_role_name = guild_data.get("overseer_role_name")

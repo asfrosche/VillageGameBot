@@ -134,12 +134,40 @@ class AuxBattle(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def reset_tournament(self, ctx):
         """Reset the current tournament"""
-        self.current_tournament = None
-        self.matches = {}
-        self.participants = []
-        self.is_signup_open = False
-        self.save_data()
-        await ctx.send("Tournament has been reset!")
+        view = discord.ui.View(timeout=30)
+
+        async def confirm_cb(interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("This is not your confirmation.", ephemeral=True)
+                return
+            self.current_tournament = None
+            self.matches = {}
+            self.participants = []
+            self.is_signup_open = False
+            self.save_data()
+            await interaction.response.edit_message(content="Tournament has been reset!", view=None)
+
+        async def cancel_cb(interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("This is not your confirmation.", ephemeral=True)
+                return
+            await interaction.response.edit_message(content="Cancelled.", view=None)
+
+        confirm_btn = discord.ui.Button(label="✔ Yes", style=discord.ButtonStyle.green)
+        cancel_btn = discord.ui.Button(label="❌ No", style=discord.ButtonStyle.red)
+        confirm_btn.callback = confirm_cb
+        cancel_btn.callback = cancel_cb
+        view.add_item(confirm_btn)
+        view.add_item(cancel_btn)
+
+        async def on_timeout():
+            try:
+                await msg.edit(content="Timed out.", view=None)
+            except:
+                pass
+
+        view.on_timeout = on_timeout
+        msg = await ctx.send("Are you sure you want to reset the tournament?", view=view)
 
     
 

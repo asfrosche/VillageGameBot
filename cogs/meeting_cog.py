@@ -17,6 +17,44 @@ from utils.bot_db import (
     set_meeting_cooldown,
 )
 
+class ConfirmView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=30)
+        self.ctx = ctx
+        self.value = None
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user != self.ctx.author:
+            await interaction.response.send_message("You cannot use this.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✔ Yes", style=discord.ButtonStyle.green)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    @discord.ui.button(label="❌ No", style=discord.ButtonStyle.red)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="Cancelled.", embed=None, view=self)
+        self.stop()
+
+    async def on_timeout(self):
+        if self.message:
+            for child in self.children:
+                child.disabled = True
+            try:
+                await self.message.edit(content="Timed out.", embed=None, view=self)
+            except:
+                pass
+
 class MeetingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -822,6 +860,16 @@ class MeetingCog(commands.Cog):
         if not cfg["meeting_enabled"] or not cfg.get("target_guild_id") or not cfg.get("meeting_category_id"):
             await ctx.send("❌ Meeting system is not configured. Use `.setmeetingchannel`, `.setmeetingtargetguild`, `.setmeetingcategory`, then `.meetingenable true`.")
             return
+
+        member_names = ", ".join([m.display_name for m in members])
+        embed = discord.Embed(description=f"⚠️ Are you sure you want to force a meeting for {member_names}? This bypasses voting and cooldowns.", color=0xff3fb9)
+        view = ConfirmView(ctx)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+        if view.value is not True:
+            return
+
         try:
             await ctx.message.delete()
             target_guild = self.bot.get_guild(int(cfg["target_guild_id"]))

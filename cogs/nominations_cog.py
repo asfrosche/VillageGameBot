@@ -9,6 +9,44 @@ import re
 def _digits(s: str) -> str:
     return "".join(ch for ch in s if ch.isdigit())
 
+class ConfirmView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=30)
+        self.ctx = ctx
+        self.value = None
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user != self.ctx.author:
+            await interaction.response.send_message("You cannot use this.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✔ Yes", style=discord.ButtonStyle.green)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    @discord.ui.button(label="❌ No", style=discord.ButtonStyle.red)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="Cancelled.", embed=None, view=self)
+        self.stop()
+
+    async def on_timeout(self):
+        if self.message:
+            for child in self.children:
+                child.disabled = True
+            try:
+                await self.message.edit(content="Timed out.", embed=None, view=self)
+            except:
+                pass
+
 class Nominations(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -289,6 +327,14 @@ class Nominations(commands.Cog):
         if hidden_role:
             overwrites[hidden_role] = discord.PermissionOverwrite(read_messages=False)
 
+        embed = discord.Embed(description=f"⚠️ Are you sure you want to create a nomination channel for **{accused.name}**? This will cost 1 token.", color=0xff3fb9)
+        view = ConfirmView(ctx)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+        if view.value is not True:
+            return
+
         channel = await ctx.guild.create_text_channel(f'👉│{accused.name}', overwrites=overwrites, category=category)
         await ctx.send(f'Nomination channel created: {channel.mention}')
         await channel.send(
@@ -437,6 +483,14 @@ class Nominations(commands.Cog):
         category = discord.utils.get(guild.categories, name=guild_data["nominations_category_name"])
         if not category:
             return await ctx.send("Nominations category not found in this server.")
+
+        embed = discord.Embed(description=f"⚠️ Are you sure you want to delete ALL vote records for nomination channels in **{guild.name}**? This cannot be undone.", color=0xff3fb9)
+        view = ConfirmView(ctx)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+        if view.value is not True:
+            return
 
         for channel in category.channels:
             await self.conn.execute('DELETE FROM votes WHERE channel_id = ?', (channel.id,))

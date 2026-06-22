@@ -764,18 +764,46 @@ class Presets(commands.Cog):
                     pass
 
         async def reset_cb(i: discord.Interaction):
-            try:
-                await self._remove_all_for_guild(guild_id)
-                await i.response.defer()
-                await refresh()
-            except Exception as e:
+            confirm_view = View(timeout=30)
+
+            async def confirm_btn_cb(ci: discord.Interaction):
+                if ci.user.id != ctx.author.id:
+                    await ci.response.send_message("This is not your confirmation.", ephemeral=True)
+                    return
                 try:
-                    if not i.response.is_done():
-                        await i.response.send_message("Error resetting presets.", ephemeral=True)
-                    else:
-                        await i.followup.send("Error resetting presets.", ephemeral=True)
+                    await self._remove_all_for_guild(guild_id)
+                    await ci.response.defer()
+                    await refresh()
+                except Exception as e:
+                    try:
+                        if not ci.response.is_done():
+                            await ci.response.send_message("Error resetting presets.", ephemeral=True)
+                        else:
+                            await ci.followup.send("Error resetting presets.", ephemeral=True)
+                    except:
+                        pass
+
+            async def cancel_btn_cb(ci: discord.Interaction):
+                if ci.user.id != ctx.author.id:
+                    await ci.response.send_message("This is not your confirmation.", ephemeral=True)
+                    return
+                await ci.response.edit_message(content="Cancelled.", view=None)
+
+            confirm_btn = Button(label="✔ Yes", style=discord.ButtonStyle.green)
+            cancel_btn = Button(label="❌ No", style=discord.ButtonStyle.red)
+            confirm_btn.callback = confirm_btn_cb
+            cancel_btn.callback = cancel_btn_cb
+            confirm_view.add_item(confirm_btn)
+            confirm_view.add_item(cancel_btn)
+
+            async def on_timeout():
+                try:
+                    await i.edit_original_response(content="Timed out.", view=None)
                 except:
                     pass
+
+            confirm_view.on_timeout = on_timeout
+            await i.response.send_message("Are you sure you want to reset all presets?", view=confirm_view, ephemeral=True)
 
         prev_btn.callback = prev_cb
         next_btn.callback = next_cb

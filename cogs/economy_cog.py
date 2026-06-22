@@ -681,6 +681,40 @@ class LeaderboardView(View):
 # Cog
 # ─────────────────────────────────────────────
 
+
+class ConfirmView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=30)
+        self.ctx = ctx
+        self.confirmed = False
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("This confirmation isn't for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✔ Yes", style=discord.ButtonStyle.green)
+    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = True
+        self.stop()
+        await interaction.response.edit_message(content=None, embed=None, view=None)
+
+    @discord.ui.button(label="❌ No", style=discord.ButtonStyle.red)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            await self.message.edit(content="Confirmation timed out.", embed=None, view=None)
+        except Exception:
+            pass
+
+
 class Economy(commands.Cog):
     """Rolechat-based economy: balance and inventory per rolechat."""
 
@@ -1036,6 +1070,14 @@ class Economy(commands.Cog):
                         return c
             return None
 
+        view = ConfirmView(ctx)
+        embed = discord.Embed(description=f"⚠️ Are you sure you want to reset ALL alive rolechat balances to **{amount:,}** coins?", color=0xff0000)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+        if not view.confirmed:
+            return
+
         count = 0
         for member in alive_role.members:
             if member.bot:
@@ -1088,6 +1130,14 @@ class Economy(commands.Cog):
                     if c.permissions_for(member).send_messages:
                         return c
             return None
+
+        view = ConfirmView(ctx)
+        embed = discord.Embed(description="⚠️ Are you sure you want to remove ALL items from ALL alive rolechat inventories?", color=0xff0000)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+        if not view.confirmed:
+            return
 
         total_deleted = 0
         channels_cleared = 0

@@ -2210,6 +2210,30 @@ class RelationsView(discord.ui.View):
             view=self
         )
 
+class MigrateConfirmView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=30)
+        self.ctx = ctx
+        self.value = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("❌ This is not your confirmation.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✔ Yes", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="❌ No", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = False
+        self.stop()
+        await interaction.response.defer()
+
 # ============================================================================
 # COMMANDS COG
 # ============================================================================
@@ -2731,6 +2755,28 @@ class GameLibrary(commands.Cog):
             await ctx.send("⚠️ Target account already has stats.\nUse `.lib mergeaccount` instead.")
             return
 
+        button_preview = (
+            "⚠️ **ACCOUNT MIGRATION CONFIRMATION** ⚠️\n\n"
+            "**SOURCE (Will lose stats reference)**\n"
+            f"`{old_id}`\n"
+            f"{old_player_rows} player games | {old_sponsor_rows} sponsor games\n\n"
+            "**TARGET (Will receive stats)**\n"
+            f"{new_member.display_name} (`{new_member.id}`)\n\n"
+            "Click **✔ Yes** to proceed, or **❌ No** to cancel."
+        )
+        view = MigrateConfirmView(ctx)
+        msg = await ctx.send(button_preview, view=view)
+        await view.wait()
+
+        if view.value is None:
+            await msg.edit(content="⌛ Migration confirmation timed out.", view=None)
+            return
+        if not view.value:
+            await msg.edit(content="❌ Migration cancelled.", view=None)
+            return
+
+        await msg.edit(view=None)
+
         preview = (
             "⚠️ **ACCOUNT MIGRATION CONFIRMATION** ⚠️\n\n"
             "**SOURCE (Will lose stats reference)**\n"
@@ -2808,6 +2854,29 @@ class GameLibrary(commands.Cog):
 
         src_player, src_sponsor = db.get_account_stat_counts(source_id)
         tgt_player, tgt_sponsor = db.get_account_stat_counts(target_id)
+
+        button_preview = (
+            "⚠️ **MERGE CONFIRMATION** ⚠️\n\n"
+            "**SOURCE (Will be absorbed)**\n"
+            f"{source_name} (`{source_id}`)\n"
+            f"{src_player} player games | {src_sponsor} sponsor games\n\n"
+            "**TARGET (Will keep everything)**\n"
+            f"{target_name} (`{target_id}`)\n"
+            f"{tgt_player} player games | {tgt_sponsor} sponsor games\n\n"
+            "Click **✔ Yes** to proceed, or **❌ No** to cancel."
+        )
+        view = MigrateConfirmView(ctx)
+        msg = await ctx.send(button_preview, view=view)
+        await view.wait()
+
+        if view.value is None:
+            await msg.edit(content="⌛ Merge confirmation timed out.", view=None)
+            return
+        if not view.value:
+            await msg.edit(content="❌ Merge cancelled.", view=None)
+            return
+
+        await msg.edit(view=None)
 
         preview = (
             "⚠️ **MERGE CONFIRMATION** ⚠️\n\n"
