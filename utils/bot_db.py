@@ -40,6 +40,33 @@ def init_db() -> None:
         cur = conn.cursor()
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS auto_visit_rc_allocation (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                day_normal INTEGER NOT NULL DEFAULT 0,
+                day_forced INTEGER NOT NULL DEFAULT 0,
+                day_stealth INTEGER NOT NULL DEFAULT 0,
+                night_normal INTEGER NOT NULL DEFAULT 0,
+                night_forced INTEGER NOT NULL DEFAULT 0,
+                night_stealth INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (guild_id, channel_id)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_visit_rc_usage (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                normal_used INTEGER NOT NULL DEFAULT 0,
+                forced_used INTEGER NOT NULL DEFAULT 0,
+                stealth_used INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (guild_id, channel_id)
+            )
+            """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS guild_data (
                 guild_id INTEGER PRIMARY KEY,
                 data_json TEXT NOT NULL,
@@ -960,7 +987,7 @@ def transfer_channel_balance(guild_id: int, from_channel_id: int, to_channel_id:
 # Shop by name (partial match, strip emoji)
 def _normalize_name_for_match(name: str) -> str:
     import re
-    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", name)).strip().lower()
+    return re.sub(r"\s+", "", re.sub(r"[^\w\s]", "", name)).lower()
 
 
 def get_shop_item_by_name(guild_id: int, name_substring: str) -> dict | None:
@@ -1359,6 +1386,244 @@ def insert_action_log(
             ),
         )
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Auto-visit RC allocation helpers
+# ---------------------------------------------------------------------------
+
+
+def get_auto_visit_rc_allocation(guild_id: int, channel_id: int) -> dict | None:
+    _ensure_ready()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT day_normal, day_forced, day_stealth,
+                   night_normal, night_forced, night_stealth
+            FROM auto_visit_rc_allocation
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (guild_id, channel_id),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "day_normal": int(row["day_normal"]),
+            "day_forced": int(row["day_forced"]),
+            "day_stealth": int(row["day_stealth"]),
+            "night_normal": int(row["night_normal"]),
+            "night_forced": int(row["night_forced"]),
+            "night_stealth": int(row["night_stealth"]),
+        }
+
+
+def upsert_auto_visit_rc_allocation(
+    guild_id: int,
+    channel_id: int,
+    *,
+    day_normal: int = 0,
+    day_forced: int = 0,
+    day_stealth: int = 0,
+    night_normal: int = 0,
+    night_forced: int = 0,
+    night_stealth: int = 0,
+) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO auto_visit_rc_allocation (
+                guild_id, channel_id,
+                day_normal, day_forced, day_stealth,
+                night_normal, night_forced, night_stealth
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                day_normal = excluded.day_normal,
+                day_forced = excluded.day_forced,
+                day_stealth = excluded.day_stealth,
+                night_normal = excluded.night_normal,
+                night_forced = excluded.night_forced,
+                night_stealth = excluded.night_stealth
+            """,
+            (
+                guild_id, channel_id,
+                max(0, int(day_normal)),
+                max(0, int(day_forced)),
+                max(0, int(day_stealth)),
+                max(0, int(night_normal)),
+                max(0, int(night_forced)),
+                max(0, int(night_stealth)),
+            ),
+        )
+        conn.commit()
+
+
+def add_to_auto_visit_rc_allocation(
+    guild_id: int,
+    channel_id: int,
+    *,
+    day_normal: int = 0,
+    day_forced: int = 0,
+    day_stealth: int = 0,
+    night_normal: int = 0,
+    night_forced: int = 0,
+    night_stealth: int = 0,
+) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO auto_visit_rc_allocation (
+                guild_id, channel_id,
+                day_normal, day_forced, day_stealth,
+                night_normal, night_forced, night_stealth
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET
+                day_normal = MAX(0, auto_visit_rc_allocation.day_normal + excluded.day_normal),
+                day_forced = MAX(0, auto_visit_rc_allocation.day_forced + excluded.day_forced),
+                day_stealth = MAX(0, auto_visit_rc_allocation.day_stealth + excluded.day_stealth),
+                night_normal = MAX(0, auto_visit_rc_allocation.night_normal + excluded.night_normal),
+                night_forced = MAX(0, auto_visit_rc_allocation.night_forced + excluded.night_forced),
+                night_stealth = MAX(0, auto_visit_rc_allocation.night_stealth + excluded.night_stealth)
+            """,
+            (
+                guild_id, channel_id,
+                max(0, int(day_normal)),
+                max(0, int(day_forced)),
+                max(0, int(day_stealth)),
+                max(0, int(night_normal)),
+                max(0, int(night_forced)),
+                max(0, int(night_stealth)),
+            ),
+        )
+        conn.commit()
+
+
+def delete_auto_visit_rc_allocation(guild_id: int, channel_id: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM auto_visit_rc_allocation WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        conn.commit()
+
+
+def list_auto_visit_rc_allocations(guild_id: int) -> list[dict]:
+    _ensure_ready()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT channel_id, day_normal, day_forced, day_stealth,
+                   night_normal, night_forced, night_stealth
+            FROM auto_visit_rc_allocation
+            WHERE guild_id = ?
+            ORDER BY channel_id ASC
+            """,
+            (guild_id,),
+        ).fetchall()
+        return [
+            {
+                "channel_id": int(r["channel_id"]),
+                "day_normal": int(r["day_normal"]),
+                "day_forced": int(r["day_forced"]),
+                "day_stealth": int(r["day_stealth"]),
+                "night_normal": int(r["night_normal"]),
+                "night_forced": int(r["night_forced"]),
+                "night_stealth": int(r["night_stealth"]),
+            }
+            for r in rows
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Auto-visit RC usage helpers
+# ---------------------------------------------------------------------------
+
+
+def get_auto_visit_rc_usage(guild_id: int, channel_id: int) -> dict | None:
+    _ensure_ready()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT normal_used, forced_used, stealth_used
+            FROM auto_visit_rc_usage
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (guild_id, channel_id),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "normal_used": int(row["normal_used"]),
+            "forced_used": int(row["forced_used"]),
+            "stealth_used": int(row["stealth_used"]),
+        }
+
+
+def increment_auto_visit_rc_usage(
+    guild_id: int,
+    channel_id: int,
+    *,
+    delta_normal: int = 0,
+    delta_forced: int = 0,
+    delta_stealth: int = 0,
+) -> dict:
+    _ensure_ready()
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO auto_visit_rc_usage (guild_id, channel_id, normal_used, forced_used, stealth_used)
+            VALUES (?, ?, 0, 0, 0)
+            ON CONFLICT(guild_id, channel_id) DO NOTHING
+            """,
+            (guild_id, channel_id),
+        )
+        cur.execute(
+            """
+            UPDATE auto_visit_rc_usage
+            SET normal_used = MAX(0, normal_used + ?),
+                forced_used = MAX(0, forced_used + ?),
+                stealth_used = MAX(0, stealth_used + ?)
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (delta_normal, delta_forced, delta_stealth, guild_id, channel_id),
+        )
+        conn.commit()
+        row = cur.execute(
+            "SELECT normal_used, forced_used, stealth_used FROM auto_visit_rc_usage WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        ).fetchone()
+        return {
+            "normal_used": int(row["normal_used"]),
+            "forced_used": int(row["forced_used"]),
+            "stealth_used": int(row["stealth_used"]),
+        }
+
+
+def reset_all_auto_visit_rc_usage(guild_id: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute("DELETE FROM auto_visit_rc_usage WHERE guild_id = ?", (guild_id,))
+        conn.commit()
+
+
+def reset_auto_visit_rc_usage(guild_id: int, channel_id: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM auto_visit_rc_usage WHERE guild_id = ? AND channel_id = ?",
+            (guild_id, channel_id),
+        )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Actions log helpers
+# ---------------------------------------------------------------------------
 
 
 def get_actions_for_channel(
