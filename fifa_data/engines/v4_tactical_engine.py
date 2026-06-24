@@ -8,7 +8,7 @@ from numpy.random import poisson
 from ..models.squad import Squad
 from ..models.tactical_state import TacticalReport
 from ..models.team_strength import TeamStrength
-from ..services.tactical_matchup_service import (
+from ..services.tactical_analysis import (
     compute_tactical_matchup,
     format_tactical_report,
 )

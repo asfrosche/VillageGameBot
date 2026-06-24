@@ -16,7 +16,7 @@ from fifa_data.services.manager_service import (
     manager_game_plan_modifier,
     apply_manager_context_adjustment,
 )
-from fifa_data.services.tactical_matchup_service import (
+from fifa_data.services.tactical_analysis import (
     _TACTICAL_PROFILES,
     compute_tactical_matchup,
     format_tactical_report,

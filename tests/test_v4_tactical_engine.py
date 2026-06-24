@@ -9,7 +9,7 @@ import numpy as np
 from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
 from fifa_data.models.player import Player
 from fifa_data.models.squad import Squad
-from fifa_data.services.tactical_matchup_service import compute_tactical_matchup, format_tactical_report
+from fifa_data.services.tactical_analysis import compute_tactical_matchup, format_tactical_report
 from fifa_data.services.formation_service import get_formation_profile, formation_matchup_advantages
 from fifa_data.services.simulation_service import run_simulation
 

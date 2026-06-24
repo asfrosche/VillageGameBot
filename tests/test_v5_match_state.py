@@ -9,13 +9,12 @@ from fifa_data.models.player_match_state import PlayerMatchState
 from fifa_data.models.squad import Squad
 from fifa_data.services.card_service import CardService
 from fifa_data.services.event_engine import EventEngine
-from fifa_data.services.fatigue_service import FatigueService
 from fifa_data.services.game_script_service import GameScriptService
 from fifa_data.services.match_momentum_service import MatchMomentumService
 from fifa_data.services.match_state_service import MatchStateService
 from fifa_data.services.penalty_engine import PenaltyEngine
-from fifa_data.services.substitution_service import SubstitutionService
-from fifa_data.services.tactical_matchup_service import compute_tactical_matchup
+from fifa_data.services.substitution_manager import FatigueService, SubstitutionService
+from fifa_data.services.tactical_analysis import compute_tactical_matchup
 
 
 HERE = Path(__file__).resolve().parents[1] / "fifa_data"

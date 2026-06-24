@@ -18,15 +18,13 @@ from fifa_data.models.market_comparison import (
     MarketOdds, NormalizedMarket, ModelVsMarketEntry, ModelVsMarketComparison,
     ValueLevel, ConsensusLevel, ConsensusData, ValueDetection,
 )
-from fifa_data.services.player_influence_service import (
+from fifa_data.services.tactical_analysis import (
     compute_offensive_influence,
     compute_defensive_influence,
     compute_goalkeeper_influence,
     compute_team_dependency,
     compute_player_matchups,
     compute_player_influence,
-)
-from fifa_data.services.tactical_vulnerability_service import (
     compute_strengths,
     compute_weaknesses,
     compute_vulnerability_report,

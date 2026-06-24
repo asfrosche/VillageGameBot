@@ -19,14 +19,13 @@ from ..models.team_strength import TeamStrength
 from ..models.tactical_state import ManagerProfile
 from ..services.card_service import CardService
 from ..services.event_engine import EventEngine
-from ..services.fatigue_service import FatigueService
 from ..services.game_script_service import GameScriptService
 from ..services.manager_service import get_manager, manager_game_plan_modifier
 from ..services.match_momentum_service import MatchMomentumService
 from ..services.match_state_service import MatchStateService
 from ..services.penalty_engine import PenaltyEngine
-from ..services.substitution_service import SubstitutionService
-from ..services.tactical_matchup_service import compute_tactical_matchup
+from ..services.substitution_manager import FatigueService, SubstitutionService
+from ..services.tactical_analysis import compute_tactical_matchup
 from ..services.v2_data_loader import load_v2_squads
 from .base_engine import MatchEngine
 from .v4_tactical_engine import V4TacticalEngine
@@ -486,7 +485,7 @@ class V5MatchStateEngine(MatchEngine):
         lines.extend(f"  {l}" for l in story)
 
         if v4_report:
-            from ..services.tactical_matchup_service import format_tactical_report
+            from ..services.tactical_analysis import format_tactical_report
             lines.append(f"\n{format_tactical_report(v4_report)}")
 
         lines.append(f"\n{'='*60}")

@@ -3153,7 +3153,7 @@ class DraftCog(commands.Cog):
                 nationality_modifier_b=v3.national_modifiers.get(team_b, 0.0),
             )
             context = "knockout" if knockout else "group"
-            from fifa_data.services.tactical_matchup_service import compute_tactical_matchup
+            from fifa_data.services.tactical_analysis import compute_tactical_matchup
             from fifa_data.services.manager_service import get_manager
             base_l1, base_l2 = v3.expected_goals(sa, sb)
             tactical = compute_tactical_matchup(
@@ -3214,7 +3214,7 @@ class DraftCog(commands.Cog):
                 nationality_modifier_b=v3.national_modifiers.get(team_b, 0.0),
             )
             context = "knockout" if knockout else "group"
-            from fifa_data.services.tactical_matchup_service import compute_tactical_matchup
+            from fifa_data.services.tactical_analysis import compute_tactical_matchup
             from fifa_data.services.manager_service import get_manager
             base_l1, base_l2 = v3.expected_goals(sa, sb)
             tactical = compute_tactical_matchup(
@@ -3235,9 +3235,9 @@ class DraftCog(commands.Cog):
             )
 
             # === V5.1 Explainability: pre-match analysis (static: squads, tactics) ===
-            from fifa_data.services.player_influence_service import compute_player_influence
-            from fifa_data.services.tactical_vulnerability_service import (
-                compute_exploitation, classify_match_archetypes, analyze_win_conditions,
+            from fifa_data.services.tactical_analysis import (
+                compute_player_influence, compute_exploitation,
+                classify_match_archetypes, analyze_win_conditions,
             )
             from fifa_data.services.market_odds_service import compute_model_vs_market
 
