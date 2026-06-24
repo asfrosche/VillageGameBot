@@ -71,7 +71,7 @@ class ChemistryService:
 
         bonus += min(pair_bonus, 0.04)
         if pair_bonus > 0:
-            sources.append(f"Club pairings: +{pair_bonus:.2%}")
+            sources.append(f"Club pairings: +{min(pair_bonus, 0.04):.2%}")
 
         known_partnerships = self.relationships.get(team, [])
         if known_partnerships:
@@ -162,7 +162,7 @@ class ContinuityService:
         previous = set(history[-2])
         unchanged = len(current & previous)
         total = len(current | previous)
-        changes = total - unchanged
+        changes = len(current) - unchanged
 
         if total == 0:
             return ComponentScore("continuity", 0.0, "No lineup data", 0.5)

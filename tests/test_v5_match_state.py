@@ -480,6 +480,11 @@ class MatchStateServiceTests(unittest.TestCase):
         state = MatchState(team_a="A", team_b="B")
         state.scoreline.goals_a = 2
         state.scoreline.goals_b = 0
+        self.assertEqual(self.service.get_scoreline_state("A", state), "winning_2+")
+        self.assertEqual(self.service.get_scoreline_state("B", state), "trailing_2+")
+
+        state.scoreline.goals_a = 1
+        state.scoreline.goals_b = 0
         self.assertEqual(self.service.get_scoreline_state("A", state), "winning")
         self.assertEqual(self.service.get_scoreline_state("B", state), "trailing")
 

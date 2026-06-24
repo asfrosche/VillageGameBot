@@ -67,14 +67,14 @@ class ScorelineState:
     def description_for_team(self, team: str, team_a_label: str, team_b_label: str) -> str:
         if team == team_a_label:
             if self.goals_a > self.goals_b:
-                return "winning"
+                return "winning_2+" if self.goals_a - self.goals_b >= 2 else "winning"
             if self.goals_a < self.goals_b:
-                return "trailing"
+                return "trailing_2+" if self.goals_b - self.goals_a >= 2 else "trailing"
             return "drawing"
         if self.goals_b > self.goals_a:
-            return "winning"
+            return "winning_2+" if self.goals_b - self.goals_a >= 2 else "winning"
         if self.goals_b < self.goals_a:
-            return "trailing"
+            return "trailing_2+" if self.goals_a - self.goals_b >= 2 else "trailing"
         return "drawing"
 
     def trailing_by_two_plus(self, team: str, team_a_label: str, team_b_label: str) -> bool:

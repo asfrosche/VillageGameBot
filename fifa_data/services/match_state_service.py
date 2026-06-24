@@ -93,6 +93,9 @@ class MatchStateService:
         current_game_plan: str,
     ) -> str | None:
         if manager is None:
+            if scoreline_state == "trailing_2+" and minute >= 50:
+                if current_game_plan != "attacking":
+                    return "attacking"
             if scoreline_state == "trailing" and minute >= 55:
                 if current_game_plan != "attacking":
                     return "attacking"
@@ -104,15 +107,15 @@ class MatchStateService:
         risk = manager.risk_tolerance
         flex = manager.tactical_flexibility
 
+        if scoreline_state == "trailing_2+" and minute >= 50:
+            return "attacking"
+
         if scoreline_state == "trailing":
             if minute >= 55 and current_game_plan != "attacking":
                 if risk > 65 or minute >= 70:
                     return "attacking"
                 if risk > 50 and minute >= 60:
                     return "attacking"
-
-            if "2+" in scoreline_state and minute >= 50:
-                return "attacking"
 
         elif scoreline_state == "winning":
             if minute >= 75 and current_game_plan != "counter":

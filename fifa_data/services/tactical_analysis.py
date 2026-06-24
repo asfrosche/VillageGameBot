@@ -361,7 +361,7 @@ def _set_pieces(
         sp_quality = (heading_b + strength_b + crossing_b) / 3.0
         gap = (sp_attack_b - sp_defense_a) / 100.0
         boost = round(0.10 * gap * max(0, (sp_quality - 50) / 50.0), 4)
-        if boost > 0.01:
+        if boost > 0.005:
             adj_b.append(TacticalAdjustment("set_pieces", f"Set-piece mismatch (attack {sp_attack_b:.0f}/100 vs defense {sp_defense_a:.0f}/100)", boost))
             adv_b.append(f"Set-piece advantage (+{boost:.2f} xG)")
 
@@ -729,8 +729,8 @@ def _defensive_stalemate(
         adj_b.append(TacticalAdjustment("composure_stalemate",
             f"High composure match: fewer defensive errors (comp {comp_b:.0f}/{comp_a:.0f})",
             comp_reduction))
-        adv_a.append(f"Composure stalemate: both teams composed under pressure (-0.025 xG)")
-        adv_b.append(f"Composure stalemate: both teams composed under pressure (-0.025 xG)")
+        adv_a.append(f"Composure stalemate: both teams composed under pressure ({comp_reduction:.3f} xG)")
+        adv_b.append(f"Composure stalemate: both teams composed under pressure ({comp_reduction:.3f} xG)")
 
 
 def format_tactical_report(report: TacticalReport) -> str:
@@ -766,7 +766,7 @@ def format_tactical_report(report: TacticalReport) -> str:
     if report.adjustments_a:
         for adj in report.adjustments_a:
             lines.append(f"    {adj.category}: {adj.value:+.4f} xG  [{adj.description}]")
-            lines.append(f"    Total: {report.total_adjustment_a():+.4f} xG")
+        lines.append(f"    Total: {report.total_adjustment_a():+.4f} xG")
     else:
         lines.append("    No adjustments")
 
@@ -774,7 +774,7 @@ def format_tactical_report(report: TacticalReport) -> str:
     if report.adjustments_b:
         for adj in report.adjustments_b:
             lines.append(f"    {adj.category}: {adj.value:+.4f} xG  [{adj.description}]")
-            lines.append(f"    Total: {report.total_adjustment_b():+.4f} xG")
+        lines.append(f"    Total: {report.total_adjustment_b():+.4f} xG")
     else:
         lines.append("    No adjustments")
 
@@ -910,11 +910,11 @@ def compute_vulnerability_report(
 
 
 EXPLOIT_MAP = [
-    ("high_line_exploit", "space_behind", "pace behind high line"),
+    ("high_line", "space_behind", "pace behind high line"),
     ("pressing", "build_up_pressure", "press against weak buildup"),
-    ("aerial", "aerial_weakness", "aerial attack"),
-    ("set_pieces", "set_piece_defense", "set-piece exploitation"),
-    ("possession_creativity", "low_block_struggle", "possession vs low block"),
+    ("aerial_strength", "aerial_weakness", "aerial attack"),
+    ("set_piece_attack", "set_piece_defense", "set-piece exploitation"),
+    ("possession", "low_block_struggle", "possession vs low block"),
     ("counter", "counter_vulnerability", "counter-attack"),
 ]
 

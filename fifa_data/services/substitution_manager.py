@@ -116,7 +116,9 @@ class SubstitutionService:
         is_extra_time: bool = False,
     ) -> list[SubstitutionEvent]:
         substitutions: list[SubstitutionEvent] = []
-        if minute < 50 or minute > 88:
+        if not is_extra_time and (minute < 50 or minute > 88):
+            return substitutions
+        if is_extra_time and (minute < 90 or minute > 115):
             return substitutions
 
         candidates_off: list[tuple[Player, str, float]] = []
@@ -139,7 +141,7 @@ class SubstitutionService:
                 reason = "fatigue"
                 min_sub_minute = 60
 
-            if state.yellow_cards >= 1 and "CB" in squad.formation or "DM" in squad.formation:
+            if state.yellow_cards >= 1:
                 is_defender = any(
                     pos in player.normalized_positions()
                     for pos in ("CB", "FB", "DM")
@@ -222,7 +224,7 @@ class SubstitutionService:
             if manager and manager.risk_tolerance > 65:
                 base += 0.2
             return base
-        if "2+" in scoreline and minute >= 55:
+        if scoreline == "trailing_2+" and minute >= 55:
             base = 0.5 + (minute - 55) / 100.0
             if manager and manager.risk_tolerance > 65:
                 base += 0.25
