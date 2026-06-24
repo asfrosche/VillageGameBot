@@ -31,11 +31,15 @@ class V1EloMatchEngine(MatchEngine):
         self.tiebreaker_delta_scale = tiebreaker_delta_scale
 
     def _rating(self, team: str) -> float:
-        metrics = self.team_metrics.get(team, {"ELO": 1500, "PELE": 1500})
+        if team not in self.team_metrics:
+            raise KeyError(f"Unknown team: {team}")
+        metrics = self.team_metrics[team]
         return (float(metrics.get("ELO", 1500)) + float(metrics.get("PELE", 1500))) / 2.0
 
     def get_team_ratings(self, team: str) -> dict[str, float]:
-        metrics = self.team_metrics.get(team, {})
+        if team not in self.team_metrics:
+            raise KeyError(f"Unknown team: {team}")
+        metrics = self.team_metrics[team]
         elo = float(metrics.get("ELO", 1500))
         pele = float(metrics.get("PELE", 1500))
         return {"elo": elo, "pele": pele, "combined": (elo + pele) / 2.0}
@@ -49,6 +53,7 @@ class V1EloMatchEngine(MatchEngine):
         r1 = self._rating(team1)
         r2 = self._rating(team2)
         raw_delta = r1 - r2
+
         upset_factor = max(
             self.upset_factor_min,
             min(
@@ -57,7 +62,7 @@ class V1EloMatchEngine(MatchEngine):
             ),
         )
         lam1 = self.base_goals * upset_factor
-        lam2 = self.base_goals * (2.0 - upset_factor)
+        lam2 = max(self.minimum_lambda, self.base_goals * max(0.20, 1.5 - 0.5 * upset_factor))
         g1 = poisson(max(self.minimum_lambda, lam1))
         g2 = poisson(max(self.minimum_lambda, lam2))
         if not can_draw and g1 == g2:

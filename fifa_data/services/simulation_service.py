@@ -6,6 +6,7 @@ from ..engines.v1_elo_engine import V1EloMatchEngine
 from ..engines.v2_player_engine import V2PlayerMatchEngine
 from ..engines.v3_dynamic_engine import V3DynamicEngine
 from ..engines.v4_tactical_engine import V4TacticalEngine
+from ..engines.v5_match_state_engine import V5MatchStateEngine
 from .orchestrator import TournamentOrchestrator
 
 HERE = Path(__file__).resolve().parents[1]
@@ -109,6 +110,8 @@ def run_simulation(model="v1", debug=False):
         engine = V3DynamicEngine(data_dir=HERE)
     elif normalized_model == "v4":
         engine = V4TacticalEngine(data_dir=HERE)
+    elif normalized_model == "v5":
+        engine = V5MatchStateEngine(data_dir=HERE)
     else:
         raise ValueError(f"Unknown simulation model: {model}")
 

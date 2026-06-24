@@ -144,7 +144,9 @@ class V2PlayerMatchEngine(MatchEngine):
         midfield_modifier = 1.0 + self.midfield_control_weight * (
             (attacking.midfield_rating - defending.midfield_rating) / 100.0
         )
-        return self.base_goals * attack_ratio * midfield_modifier
+        curve_value = attack_ratio ** 2.5
+        curve_value = max(0.30, min(3.0, curve_value))
+        return self.base_goals * curve_value * midfield_modifier
 
     def _format_starting_xi(self, strength: TeamStrength) -> list[str]:
         squad = self.squads[strength.team]

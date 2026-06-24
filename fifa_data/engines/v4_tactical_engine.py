@@ -96,8 +96,8 @@ class V4TacticalEngine(MatchEngine):
                 extra_time_used = True
             else:
                 leader_prob = self.tiebreaker_base_probability + (raw_diff * self.tiebreaker_delta_scale * 10)
-                dyn1 = self._v3._compute_dynamic_state(team1, is_knockout=False)
-                dyn2 = self._v3._compute_dynamic_state(team2, is_knockout=False)
+                dyn1 = self._v3.get_dynamic_state(team1, is_knockout=False)
+                dyn2 = self._v3.get_dynamic_state(team2, is_knockout=False)
                 leader_prob += (dyn1.leadership.value - dyn2.leadership.value) * 0.5
                 leader_prob += (dyn1.experience.value - dyn2.experience.value) * 0.3
                 nat1 = self._v3.national_modifiers.get(team1, 0.0)
@@ -166,8 +166,8 @@ class V4TacticalEngine(MatchEngine):
     ) -> str:
         v3_debug = self._v3.format_match_debug(
             team1, team2, strength1, strength2,
-            self._v3._compute_dynamic_state(team1, is_knockout, extra_time_used, penalties_used),
-            self._v3._compute_dynamic_state(team2, is_knockout, extra_time_used, penalties_used),
+            self._v3.get_dynamic_state(team1, is_knockout, extra_time_used, penalties_used),
+            self._v3.get_dynamic_state(team2, is_knockout, extra_time_used, penalties_used),
             base_xg, score,
         )
         lines = [

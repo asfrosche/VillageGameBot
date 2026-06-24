@@ -113,6 +113,9 @@ def compute_tactical_matchup(
     # NEW: Match context
     _match_context_effects(team_a, team_b, context, plan_a, plan_b, adjustments_a, adjustments_b, advantages_a, advantages_b)
 
+    # NEW: Elite defensive stalemate
+    _defensive_stalemate(team_a, team_b, squad_a, squad_b, adjustments_a, adjustments_b, advantages_a, advantages_b)
+
     max_adj_a = max(base_xg_a * MAX_XG_ADJUSTMENT_PCT, 0.05)
     max_adj_b = max(base_xg_b * MAX_XG_ADJUSTMENT_PCT, 0.05)
 
@@ -681,6 +684,71 @@ def _match_context_effects(
             adj_b.append(TacticalAdjustment("match_context", "GD chase: high-risk attacking", 0.025))
             adj_b.append(TacticalAdjustment("match_context_risk", "GD chase: defensive gaps", -0.015))
             adv_b.append("GD chase: high risk/reward (+0.025 xG, -0.015 defensive)")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# NEW: Elite Defensive Stalemate
+# ────────────────────────────────────────────────────────────────────────────
+
+def _get_squad_defensive_rating(squad: Squad | None) -> float:
+    if not squad or not squad.current_starting_xi:
+        return 50.0
+    vals = [p.attributes.get("defending", 50.0) for p in squad.current_starting_xi]
+    return sum(vals) / len(vals)
+
+
+def _get_squad_composure_avg(squad: Squad | None) -> float:
+    if not squad or not squad.current_starting_xi:
+        return 50.0
+    vals = [p.attributes.get("composure", 50.0) for p in squad.current_starting_xi]
+    return sum(vals) / len(vals)
+
+
+def _defensive_stalemate(
+    team_a: str, team_b: str,
+    squad_a: Squad | None, squad_b: Squad | None,
+    adj_a: list, adj_b: list,
+    adv_a: list, adv_b: list,
+) -> None:
+    """
+    When both teams have elite-level defensive capability, reduce xG for both
+    sides to reflect tactical caution and defensive organization canceling out
+    attacking threats. This is observed in real World Cup data: Elite-vs-Elite
+    matches produce fewer goals (1.9-2.3) than the talent level would suggest.
+    """
+    def_a = _get_squad_defensive_rating(squad_a)
+    def_b = _get_squad_defensive_rating(squad_b)
+    comp_a = _get_squad_composure_avg(squad_a)
+    comp_b = _get_squad_composure_avg(squad_b)
+
+    stalemate_threshold = 55.0
+    if def_a >= stalemate_threshold and def_b >= stalemate_threshold:
+        avg_def = (def_a + def_b) / 2.0
+        above = (avg_def - stalemate_threshold) / 20.0
+        above = max(0.0, min(1.0, above))
+
+        reduction = round(-0.35 * above, 4)
+        if reduction < -0.005:
+            adj_a.append(TacticalAdjustment("defensive_stalemate",
+                f"Defensive stalemate (def {def_a:.0f} vs {def_b:.0f}, comp {comp_a:.0f}/{comp_b:.0f})",
+                reduction))
+            adj_b.append(TacticalAdjustment("defensive_stalemate",
+                f"Defensive stalemate (def {def_b:.0f} vs {def_a:.0f}, comp {comp_b:.0f}/{comp_a:.0f})",
+                reduction))
+            adv_a.append(f"Defensive stalemate: both teams solid in defense ({reduction:.2f} xG)")
+            adv_b.append(f"Defensive stalemate: both teams solid in defense ({reduction:.2f} xG)")
+
+    # High composure also reduces error-induced goals
+    if comp_a >= 60.0 and comp_b >= 60.0:
+        comp_reduction = round(-0.05, 4)
+        adj_a.append(TacticalAdjustment("composure_stalemate",
+            f"High composure match: fewer defensive errors (comp {comp_a:.0f}/{comp_b:.0f})",
+            comp_reduction))
+        adj_b.append(TacticalAdjustment("composure_stalemate",
+            f"High composure match: fewer defensive errors (comp {comp_b:.0f}/{comp_a:.0f})",
+            comp_reduction))
+        adv_a.append(f"Composure stalemate: both teams composed under pressure (-0.025 xG)")
+        adv_b.append(f"Composure stalemate: both teams composed under pressure (-0.025 xG)")
 
 
 # ────────────────────────────────────────────────────────────────────────────

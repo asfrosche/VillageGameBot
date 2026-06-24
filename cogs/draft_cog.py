@@ -30,7 +30,7 @@ from fifa_data.services.fantasy_service import FantasyService, FIFA_POSITION_MAP
 from fifa_data.services.match_analytics import (
     fetch_and_cache_data, get_match_analytics, get_form_players, get_differentials,
     get_matches_for_team, get_squad_remaining, get_squad_games_played,
-    get_group_standings, load_data,
+    get_group_standings, load_data, expand_name_variants,
 )
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data", "data", "draft_data.json")
@@ -151,6 +151,23 @@ def country_to_sim(name):
 
 def sim_to_country(name):
     return SIM_TO_COUNTRY.get(name, name)
+
+
+# ── Squad flag emojis ──────────────────────────────────────────
+# Build from COUNTRY_LIST + known name variants; add 3 missing teams.
+SQUAD_FLAGS = {}
+for _name, _flag, _ in COUNTRY_LIST:
+    SQUAD_FLAGS[_name] = _flag
+    for _v in expand_name_variants(_name):
+        SQUAD_FLAGS[_v] = _flag
+# Three teams not in COUNTRY_LIST
+SQUAD_FLAGS.setdefault("New Zealand", "\U0001f1f3\U0001f1ff")
+SQUAD_FLAGS.setdefault("Bosnia and Herzegovina", "\U0001f1e7\U0001f1e6")
+SQUAD_FLAGS.setdefault("Scotland", "\U0001f3f4\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f")
+
+
+def _flag(name):
+    return SQUAD_FLAGS.get(name, "")
 
 
 def get_roster_counts(players):
@@ -1422,7 +1439,8 @@ class DraftCog(commands.Cog):
                 for r in pos_players:
                     pts_str = f"{r['net_points']}pts" if r['match'] else "N/A"
                     icon = "⏳ " if _behind(r["squad_name"]) else ""
-                    lines.append(f"{POSITION_EMOJIS[pos]} {icon}**{r['name']}** — {pts_str}")
+                    sf = f" {_flag(r['squad_name'])} {r['squad_name']}" if r["squad_name"] else ""
+                    lines.append(f"{POSITION_EMOJIS[pos]} {icon}**{r['name']}** — {pts_str}{sf}")
             else:
                 lines.append(f"{POSITION_EMOJIS[pos]} {pos}: --")
         embed.description = "\n".join(lines)
@@ -1767,8 +1785,9 @@ class DraftCog(commands.Cog):
             lines = []
             for n, p, pos, squad_name in details:
                 icon = "⏳ " if _behind(squad_name) else ""
+                sf = f" {_flag(squad_name)} {squad_name}" if squad_name else ""
                 pts_str = f"{p}pts"
-                lines.append(f"{icon}{n}: {pts_str} ({pos})")
+                lines.append(f"{icon}{n}: {pts_str} ({pos}){sf}")
             val = "\n".join(lines) if lines else "No players drafted"
             val += f"\n**Total: {total} pts**"
             suffix = f" — ({not_played} not played ⏳)" if not_played else ""
@@ -1847,12 +1866,30 @@ class DraftCog(commands.Cog):
         scout, _ = self.fantasy.get_scouting_bonus(match)
         net = total - scout
 
+        # Find which draft user owns this player
+        name_lower = pname.lower()
+        owner_info = None
+        draft = self._get_draft(ctx.guild.id)
+        if draft:
+            for uid_str, team in draft["teams"].items():
+                for p in team["players"]:
+                    if p["name"].lower() == name_lower:
+                        uid = int(uid_str)
+                        member = ctx.guild.get_member(uid)
+                        owner_info = member.display_name if member else f"<@{uid}>"
+                        break
+                if owner_info:
+                    break
+
         embed = discord.Embed(title=f"⚽ {pname}", color=0xff3fb9)
+        sf = f" {_flag(squad_name)} {squad_name}" if squad_name else squad_name
         embed.add_field(name="Position", value=pos, inline=True)
-        embed.add_field(name="Team", value=squad_name, inline=True)
+        embed.add_field(name="Team", value=sf, inline=True)
         embed.add_field(name="Total Points", value=net, inline=True)
         embed.add_field(name="Last Round", value=last, inline=True)
         embed.add_field(name="Games Played", value=gp, inline=True)
+        if owner_info:
+            embed.add_field(name="Drafted by", value=owner_info, inline=True)
 
         all_rounds = round_pts.copy() if round_pts else {}
         rounds_sel = match.get("roundsSelected", {})
@@ -2170,7 +2207,7 @@ class DraftCog(commands.Cog):
 
     @commands.command(aliases=["simhelp"])
     async def simulate_help(self, ctx):
-        """Detailed explanation of simulation models (V1-V4)."""
+        """Detailed explanation of simulation models (V1-V5)."""
         embed1 = discord.Embed(title="Simulation Commands Overview", color=0xff3fb9)
         embed1.add_field(name="Tournament Simulation", value=(
             "`.simulate` / `.fsim` / `.sim` — **full World Cup 2026 sim**\n"
@@ -2180,6 +2217,7 @@ class DraftCog(commands.Cog):
             "**Examples:**\n"
             "`.fsim` — V1 fast (default)\n"
             "`.fsim v4` — V4 tactical, fast\n"
+            "`.fsim v5` — V5 match state, fast\n"
             "`.fsim v4 animated` — V4 goal-by-goal\n"
             "`.fsim v4 debug` — V4 with tactical breakdown"
         ), inline=False)
@@ -2189,9 +2227,10 @@ class DraftCog(commands.Cog):
             "**Syntax:** `.fsim detailed <version> <Team A> <Team B> [knockout] [N]`\n"
             "**Examples:**\n"
             "`.fsim detailed v4 France Spain`\n"
+            "`.fsim detailed v5 France Spain`\n"
             "`.fsim detailed v4 France Spain knockout`\n"
             "`.fsim detailed v4 France Spain 10000`\n"
-            "`.fsim detailed v4 France Spain knockout 10000`"
+            "`.fsim detailed v5 France Spain knockout 10000`"
         ), inline=False)
         await ctx.send(embed=embed1)
 
@@ -2222,12 +2261,21 @@ class DraftCog(commands.Cog):
             "Match context affects xG: Group (baseline), Knockout (-0.01), "
             "Must-win (+0.02), Need draw (-0.015), GD chase (+0.025 xG, -0.015 def)."
         ), inline=False)
-        embed2.set_footer(text="48 teams | 20+ attributes | 8 formations | 5 contexts")
+        embed2.add_field(name="V5 — Match State Simulation (NEW)", value=(
+            "**`.simulate v5` / `.fsim detailed v5`**\n"
+            "Full 90+ minute phase-based simulation on top of V4 tactical layer. "
+            "Every match unfolds through 6 regular phases + 2 extra time phases. "
+            "Features: player fatigue system, yellow/red cards, substitutions, "
+            "in-match momentum, scoreline intelligence, manager reactions, "
+            "penalty shootouts, and dynamic event generation (attacks → shots → "
+            "big chances → goals). Most immersive and realistic option."
+        ), inline=False)
+        embed2.set_footer(text="48 teams | 20+ attributes | 8 formations | 5 contexts | V5 adds fatigue, cards, subs")
         await ctx.send(embed=embed2)
 
     @commands.command(aliases=["sim", "fsim"])
     async def simulate(self, ctx, *, args: str = None):
-        """Run tournament simulation: `.simulate [v1|v2|v3|v4] [fast|animated|detailed] [debug]` or `.fsim ...`."""
+        """Run tournament simulation: `.simulate [v1|v2|v3|v4|v5] [fast|animated|detailed] [debug]` or `.fsim ...`."""
         if args and args.strip().lower() in ("help", "?"):
             return await self.simulate_help(ctx)
         if not ctx.author.guild_permissions.administrator:
@@ -2326,12 +2374,13 @@ class DraftCog(commands.Cog):
             await self._simulate_fast(ctx, status_msg, data, model=model, debug=debug)
 
     async def _simulate_detailed(self, ctx, tokens: list[str]) -> None:
-        VALID_VERSIONS = {"v1", "v2", "v3", "v4"}
+        VALID_VERSIONS = {"v1", "v2", "v3", "v4", "v5"}
         VERSION_LABELS = {
             "v1": "Historical ELO/PELE",
             "v2": "FC26 Player Intelligence",
             "v3": "Dynamic Team State",
             "v4": "Tactical Intelligence",
+            "v5": "Match State Simulation",
         }
         MATCHES_TEAM_MAP = {
             "USA": "United States",
@@ -2387,18 +2436,19 @@ class DraftCog(commands.Cog):
                 "`v2` — Player intelligence (FC26 ratings, XI, formations)",
                 "`v3` — Team state (chemistry, form, experience, momentum, leadership)",
                 "`v4` — Tactical intelligence (styles, formations, managers, matchups)",
+                "`v5` — Match state simulation (fatigue, cards, subs, momentum, penalties)",
                 "",
                 "Examples:",
                 "`.fsim detailed v4 France Spain`",
                 "`.fsim detailed v4 France Spain knockout`",
-                "`.fsim detailed v4 France Spain 1000`",
-                "`.fsim detailed v4 France Spain knockout 10000`",
+                "`.fsim detailed v5 France Spain 1000`",
+                "`.fsim detailed v5 France Spain knockout 10000`",
             ]
             return await ctx.send("\n".join(lines))
 
         version = tokens[0].lower()
         if version not in VALID_VERSIONS:
-            avail = "\n".join(f"`{v}` — {VERSION_LABELS[v]}" for v in ["v1", "v2", "v3", "v4"])
+            avail = "\n".join(f"`{v}` — {VERSION_LABELS[v]}" for v in ["v1", "v2", "v3", "v4", "v5"])
             return await ctx.send(
                 f"❌ Unknown version: `{version}`\n\nAvailable:\n{avail}"
             )
@@ -2480,6 +2530,19 @@ class DraftCog(commands.Cog):
         if report.v4:
             raw.append(self._page_tactical_identity(report))
             raw.append(self._page_tactical_battles(report))
+        if report.version == "v5":
+            raw.append(self._page_match_flow(report))
+        if report.has_v51_data:
+            if report.v51 and report.v51.player_influence:
+                raw.append(self._page_player_influence(report))
+            if report.v51 and report.v51.tactical_exploitation:
+                raw.append(self._page_tactical_vulnerabilities(report))
+            if report.v51 and report.v51.match_archetypes:
+                raw.append(self._page_match_archetype(report))
+            if report.v51 and report.v51.market_comparison:
+                raw.append(self._page_market_comparison(report))
+            if report.v51 and report.v51.model_confidence:
+                raw.append(self._page_model_confidence(report))
         raw.append(self._page_simulation_insights(report))
 
         total = len(raw)
@@ -2741,6 +2804,203 @@ class DraftCog(commands.Cog):
         embed.set_footer(text="Adjustments capped at ±10% of base xG per team")
         return embed
 
+    def _page_match_flow(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Match Flow (Sample)")
+        if report.version != "v5":
+            embed.description = "Match flow data only available for V5"
+            return embed
+        embed.description = "One sample match from the Monte Carlo simulation."
+        embed.add_field(name="⚙️ Features", value=(
+            "• **8-phase simulation** (6 regular + 2 extra time)\n"
+            "• Player fatigue system per 15-min phase\n"
+            "• Yellow/red cards with attribute-driven probability\n"
+            "• Substitution AI based on energy, cards, and rating\n"
+            "• In-match momentum (goals, cards, chances trigger shifts)\n"
+            "• Scoreline intelligence (trailing teams attack more)\n"
+            "• Manager reactions (game plan changes)\n"
+            "• Penalty shootout support"
+        ), inline=False)
+        embed.add_field(name="📊 Event Pipeline", value=(
+            "Possession → Attacks → Dangerous Attacks → Shots → "
+            "Shots on Target → Big Chances → Goals"
+        ), inline=False)
+        embed.set_footer(text=f"Model: {report.version.upper()} | Each match unfolds minute-by-minute")
+        return embed
+
+    def _page_player_influence(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Player Influence (V5.1)")
+        v51 = report.v51
+        if not v51 or not v51.player_influence:
+            embed.description = "Player influence data not available."
+            return embed
+        pi = v51.player_influence
+
+        top_a = pi.get("top_attackers_a", [])
+        top_b = pi.get("top_attackers_b", [])
+        if top_a and top_b:
+            val_a = "\n".join(f"{p['name']} ({p['role']}): {p['influence']}" for p in top_a[:3])
+            val_b = "\n".join(f"{p['name']} ({p['role']}): {p['influence']}" for p in top_b[:3])
+            embed.add_field(name=f"⚔️ Top Attackers: {report.flag_a} {report.team_a}",
+                            value=f"```{val_a}```", inline=True)
+            embed.add_field(name=f"⚔️ Top Attackers: {report.flag_b} {report.team_b}",
+                            value=f"```{val_b}```", inline=True)
+
+        dep_a = pi.get("dependency_a")
+        dep_b = pi.get("dependency_b")
+        if dep_a and dep_b:
+            embed.add_field(name="🎯 Dependency",
+                            value=f"{report.flag_a}: **{dep_a['dependency_level']}** ({dep_a['attack_output_share']}% top 3)\n"
+                                  f"{report.flag_b}: **{dep_b['dependency_level']}** ({dep_b['attack_output_share']}% top 3)",
+                            inline=False)
+
+        matchups = pi.get("matchups", [])
+        if matchups:
+            lines = []
+            for m in matchups[:4]:
+                arrow = "→" if m["advantage_team"] == m["player_a"].split(" ")[0] else "←"
+                lines.append(f"**{m['category']}**: {m['player_a']} {arrow} {m['player_b']} ({m['advantage_team']})")
+            embed.add_field(name="🔗 Key Matchups", value="\n".join(lines), inline=False)
+
+        gk_a = pi.get("gk_a")
+        gk_b = pi.get("gk_b")
+        if gk_a and gk_b:
+            embed.add_field(name="🧤 Goalkeepers",
+                            value=f"{report.flag_a}: {gk_a['player_name']} ({gk_a['overall_influence']}/10)\n"
+                                  f"{report.flag_b}: {gk_b['player_name']} ({gk_b['overall_influence']}/10)",
+                            inline=False)
+
+        embed.set_footer(text="V5.1 Explainability: Player-level attribution")
+        return embed
+
+    def _page_tactical_vulnerabilities(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Tactical Exploitation (V5.1)")
+        v51 = report.v51
+        if not v51 or not v51.tactical_exploitation:
+            embed.description = "Tactical vulnerability data not available."
+            return embed
+        te = v51.tactical_exploitation
+
+        opportunities = te.get("opportunities", [])
+        if not opportunities:
+            embed.description = "No significant exploitation opportunities found."
+            return embed
+
+        lines = []
+        for opp in opportunities[:5]:
+            lines.append(f"**{opp['attacker']}** → **{opp['defender']}**: {opp['description']} "
+                         f"(+{opp['xg_impact']:.3f} xG)")
+        embed.description = "\n".join(lines)
+
+        embed.set_footer(text="V5.1 Explainability: Strength vs Weakness exploitation analysis")
+        return embed
+
+    def _page_match_archetype(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Match Archetype (V5.1)")
+        v51 = report.v51
+        if not v51 or not v51.match_archetypes:
+            embed.description = "Match archetype data not available."
+            return embed
+        arch = v51.match_archetypes
+
+        archetypes = arch.get("archetypes", [])
+        if not archetypes:
+            embed.description = "No archetype classification available."
+            return embed
+
+        lines = []
+        for a in archetypes:
+            bar = "█" * max(1, round(a["prob"] / 10))
+            lines.append(f"**{a['name']}**: {a['prob']:.1f}%\n`{bar}`\n_{a.get('desc', '')}_")
+        embed.description = "\n".join(lines)
+
+        wc_a = v51.win_conditions_a or {}
+        wc_b = v51.win_conditions_b or {}
+        conds_a = wc_a.get("conditions", [])
+        conds_b = wc_b.get("conditions", [])
+        if conds_a:
+            embed.add_field(name=f"🏆 {report.team_a} Win Conditions",
+                            value="\n".join(f"**{c['method']}**: {c['prob']:.1f}% — {c.get('desc', '')}"
+                                            for c in conds_a[:3]),
+                            inline=True)
+        if conds_b:
+            embed.add_field(name=f"🏆 {report.team_b} Win Conditions",
+                            value="\n".join(f"**{c['method']}**: {c['prob']:.1f}% — {c.get('desc', '')}"
+                                            for c in conds_b[:3]),
+                            inline=True)
+
+        embed.set_footer(text="V5.1 Explainability: Archetype classification & win conditions")
+        return embed
+
+    def _page_market_comparison(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Market Comparison (V5.1)")
+        v51 = report.v51
+        if not v51 or not v51.market_comparison:
+            embed.description = "Market comparison data not available."
+            return embed
+        mc_dict = v51.market_comparison
+
+        entries = mc_dict.get("entries", [])
+        if entries:
+            lines = []
+            for e in entries:
+                emoji = "🟢" if e["edge"] > 0.03 else "🟡" if e["edge"] > 0 else "🔴"
+                lines.append(f"{emoji} **{e['team']}**: Model {e['model_prob']:.1f}% vs Market {e['market_prob']:.1f}% "
+                             f"(Edge: {e['edge']:+.1%}) [{e.get('value_level', '')}]")
+            embed.description = "\n".join(lines)
+
+        market = mc_dict.get("market")
+        if market and market.get("home_prob") is not None:
+            embed.add_field(name="📊 Normalized Market",
+                            value=f"Home: {market['home_prob']:.1f}% | Draw: {market['draw_prob']:.1f}% | Away: {market['away_prob']:.1f}%",
+                            inline=False)
+
+        consensus = mc_dict.get("consensus")
+        if consensus:
+            embed.add_field(name="🤝 Market Consensus",
+                            value=f"Home: **{consensus['home_consensus']}** ({consensus['home_range'][0]:.1f}–{consensus['home_range'][1]:.1f}%)\n"
+                                  f"Draw: **{consensus['draw_consensus']}** ({consensus['draw_range'][0]:.1f}–{consensus['draw_range'][1]:.1f}%)\n"
+                                  f"Away: **{consensus['away_consensus']}** ({consensus['away_range'][0]:.1f}–{consensus['away_range'][1]:.1f}%)\n"
+                                  f"Sources: {consensus['market_count']}",
+                            inline=False)
+
+        embed.set_footer(text="V5.1 Explainability: Model vs Market odds comparison")
+        return embed
+
+    def _page_model_confidence(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "Model Confidence (V5.1)")
+        v51 = report.v51
+        if not v51 or not v51.model_confidence:
+            embed.description = "Model confidence data not available."
+            return embed
+        conf = v51.model_confidence
+
+        score = conf.get("score", 0)
+        level = conf.get("level", "Unknown")
+        colors = {"Very High": 0x00ff00, "High": 0x88ff00, "Moderate": 0xffaa00,
+                  "Low": 0xff6600, "Very Low": 0xff0000}
+        embed.color = colors.get(level, 0xff3fb9)
+        bar_len = 14
+        filled = round(score / 100 * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        embed.description = f"**{level}** (Score: {score:.1f}/100)\n`{bar}`"
+
+        factors = conf.get("factors", [])
+        if factors:
+            lines = []
+            for f in factors:
+                f_bar = "█" * max(1, round(f["score"] / 100 * 10))
+                lines.append(f"**{f['name']}**: {f['score']:.0f}/100 `{f_bar:<10}` (weight: {f['weight']:.0%})")
+            embed.add_field(name="📈 Confidence Factors", value="\n".join(lines), inline=False)
+
+        upset = conf.get("upset_probability", 0)
+        volatility = conf.get("volatility", 0)
+        embed.add_field(name="⚡ Risk Metrics",
+                        value=f"Upset Probability: **{upset:.1f}%**\nVolatility: **{volatility:.1f}/100**",
+                        inline=False)
+
+        embed.set_footer(text="V5.1 Explainability: Multi-factor prediction confidence")
+        return embed
+
     def _page_simulation_insights(self, report: "SimulationReport") -> discord.Embed:
         embed = self._page_header(report, "Simulation Insights")
         mc = report.mc
@@ -2773,10 +3033,11 @@ class DraftCog(commands.Cog):
         from fifa_data.engines.v2_player_engine import V2PlayerMatchEngine
         from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
         from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
+        from fifa_data.engines.v5_match_state_engine import V5MatchStateEngine
         from fifa_data.services.simulation_report import (
             SimulationReport, MonteCarloResult, V1ReportData, V2ReportData,
             V3ReportData, V4ReportData, V3ComponentData, RoleRatingData,
-            TacticalAdjustmentData,
+            TacticalAdjustmentData, V51ReportData,
         )
 
         fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
@@ -2852,7 +3113,7 @@ class DraftCog(commands.Cog):
                 nationality_modifier_b=engine.national_modifiers.get(team_b, 0.0),
             )
 
-        else:  # v4
+        elif version == "v4":
             engine = V4TacticalEngine(data_dir=fifa_dir)
             v3 = engine._v3
             sa = v3.get_team_strength(team_a, is_knockout=knockout)
@@ -2912,6 +3173,224 @@ class DraftCog(commands.Cog):
                 manager_b=mgr_b.name if mgr_b else "Unknown",
             )
 
+        else:  # v5
+            engine = V5MatchStateEngine(data_dir=fifa_dir)
+            v4 = engine._v4
+            v3 = v4._v3
+            sa = v3.get_team_strength(team_a, is_knockout=knockout)
+            sb = v3.get_team_strength(team_b, is_knockout=knockout)
+            da = v3.get_dynamic_state(team_a, is_knockout=knockout)
+            db = v3.get_dynamic_state(team_b, is_knockout=knockout)
+            report.v2 = V2ReportData(
+                role_ratings_a=[RoleRatingData(r.player_name, r.role, r.rating) for r in sa.role_ratings],
+                role_ratings_b=[RoleRatingData(r.player_name, r.role, r.rating) for r in sb.role_ratings],
+                attack_a=sa.attack_rating, midfield_a=sa.midfield_rating,
+                defense_a=sa.defense_rating, goalkeeper_a=sa.goalkeeper_rating,
+                attack_b=sb.attack_rating, midfield_b=sb.midfield_rating,
+                defense_b=sb.defense_rating, goalkeeper_b=sb.goalkeeper_rating,
+                formation_a=sa.formation, formation_b=sb.formation,
+                xi_names_a=[p.name for p in engine.squads[team_a].current_starting_xi],
+                xi_names_b=[p.name for p in engine.squads[team_b].current_starting_xi],
+            )
+            components = []
+            for cn in ["chemistry", "experience", "form", "momentum", "continuity", "leadership"]:
+                ca = next(c for c in da.components() if c.component == cn)
+                cb = next(c for c in db.components() if c.component == cn)
+                components.append(V3ComponentData(cn, ca.value, cb.value, ca.source, cb.source, ca.confidence, cb.confidence))
+            form_a = [{"name": p.name, "form": (p.stats.get("form", 0) if isinstance(p.stats, dict) else 0)} for p in engine.squads[team_a].current_starting_xi]
+            form_b = [{"name": p.name, "form": (p.stats.get("form", 0) if isinstance(p.stats, dict) else 0)} for p in engine.squads[team_b].current_starting_xi]
+            report.v3 = V3ReportData(
+                components=components,
+                combined_mult_a=da.combined_multiplier(),
+                combined_mult_b=db.combined_multiplier(),
+                form_details_a=form_a, form_details_b=form_b,
+                experience_details_a=v3.experience_service.get_player_details(engine.squads[team_a].current_starting_xi),
+                experience_details_b=v3.experience_service.get_player_details(engine.squads[team_b].current_starting_xi),
+                leadership_a=v3.leadership_service.get_leadership_details(engine.squads[team_a].current_starting_xi),
+                leadership_b=v3.leadership_service.get_leadership_details(engine.squads[team_b].current_starting_xi),
+                chemistry_a=v3.chemistry_service.get_club_groupings(team_a, engine.squads[team_a].current_starting_xi, engine.squads[team_a].formation),
+                chemistry_b=v3.chemistry_service.get_club_groupings(team_b, engine.squads[team_b].current_starting_xi, engine.squads[team_b].formation),
+                nationality_modifier_a=v3.national_modifiers.get(team_a, 0.0),
+                nationality_modifier_b=v3.national_modifiers.get(team_b, 0.0),
+            )
+            context = "knockout" if knockout else "group"
+            from fifa_data.services.tactical_matchup_service import compute_tactical_matchup
+            from fifa_data.services.manager_service import get_manager
+            base_l1, base_l2 = v3.expected_goals(sa, sb)
+            tactical = compute_tactical_matchup(
+                team_a, team_b, base_l1, base_l2,
+                engine.squads[team_a], engine.squads[team_b], context=context,
+            )
+            mgr_a = get_manager(team_a)
+            mgr_b = get_manager(team_b)
+            report.v4 = V4ReportData(
+                base_xg_a=tactical.base_xg_a, base_xg_b=tactical.base_xg_b,
+                final_xg_a=tactical.final_xg_a, final_xg_b=tactical.final_xg_b,
+                game_plan_a=tactical.game_plan_a, game_plan_b=tactical.game_plan_b,
+                advantages_a=list(tactical.advantages_a), advantages_b=list(tactical.advantages_b),
+                adjustments_a=[TacticalAdjustmentData(a.category, a.description, a.value, a.confidence) for a in tactical.adjustments_a],
+                adjustments_b=[TacticalAdjustmentData(a.category, a.description, a.value, a.confidence) for a in tactical.adjustments_b],
+                manager_a=mgr_a.name if mgr_a else "Unknown",
+                manager_b=mgr_b.name if mgr_b else "Unknown",
+            )
+
+            # === V5.1 Explainability: pre-match analysis (static: squads, tactics) ===
+            from fifa_data.services.player_influence_service import compute_player_influence
+            from fifa_data.services.tactical_vulnerability_service import (
+                compute_exploitation, classify_match_archetypes, analyze_win_conditions,
+            )
+            from fifa_data.services.market_odds_service import compute_model_vs_market
+
+            profile_a = {
+                "possession": tactical.base_possession_a if hasattr(tactical, "base_possession_a") else 50,
+                "pressing": tactical.pressing_a if hasattr(tactical, "pressing_a") else 50,
+                "directness": tactical.directness_a if hasattr(tactical, "directness_a") else 50,
+                "defensive_line": tactical.defensive_line_a if hasattr(tactical, "defensive_line_a") else 50,
+                "aerial_strength": 55, "set_piece_attack": 50, "set_piece_defense": 50,
+                "big_chance_creation": 55, "defensive_compactness": 55,
+                "build_up": 55, "defensive_width": 50,
+            }
+            profile_b = {k: v for k, v in profile_a.items()}
+
+            try:
+                pi_report = compute_player_influence(
+                    team_a, team_b,
+                    engine.squads[team_a], engine.squads[team_b],
+                    tactical.final_xg_a, tactical.final_xg_b,
+                )
+            except Exception:
+                pi_report = None
+
+            try:
+                exploitation = compute_exploitation(
+                    team_a, team_b,
+                    engine.squads[team_a], engine.squads[team_b],
+                    profile_a, profile_b, tactical_report=tactical,
+                )
+            except Exception:
+                exploitation = None
+
+            try:
+                archetypes = classify_match_archetypes(
+                    team_a, team_b, profile_a, profile_b, tactical_report=tactical,
+                )
+            except Exception:
+                archetypes = None
+
+            try:
+                wc_a = analyze_win_conditions(team_a, profile_a, engine.squads[team_a])
+            except Exception:
+                wc_a = None
+
+            try:
+                wc_b = analyze_win_conditions(team_b, profile_b, engine.squads[team_b])
+            except Exception:
+                wc_b = None
+
+            try:
+                market_comp = compute_model_vs_market(
+                    team_a, team_b,
+                    tactical.final_xg_a / max(tactical.final_xg_a + tactical.final_xg_b, 0.01) * 100,
+                    25.0,
+                    tactical.final_xg_b / max(tactical.final_xg_a + tactical.final_xg_b, 0.01) * 100,
+                )
+            except Exception:
+                market_comp = None
+
+            v51_dict: dict[str, Any] = {}
+
+            if pi_report:
+                import dataclasses
+                v51_dict["player_influence"] = {
+                    "team_a": pi_report.team_a,
+                    "team_b": pi_report.team_b,
+                    "top_attackers_a": [
+                        {"name": p.player_name, "role": p.role, "influence": p.overall_influence}
+                        for p in pi_report.top_attackers(pi_report.team_a, 5)
+                    ],
+                    "top_attackers_b": [
+                        {"name": p.player_name, "role": p.role, "influence": p.overall_influence}
+                        for p in pi_report.top_attackers(pi_report.team_b, 5)
+                    ],
+                    "top_defenders_a": [
+                        {"name": p.player_name, "role": p.role, "influence": p.overall_influence}
+                        for p in pi_report.top_defenders(pi_report.team_a, 5)
+                    ],
+                    "top_defenders_b": [
+                        {"name": p.player_name, "role": p.role, "influence": p.overall_influence}
+                        for p in pi_report.top_defenders(pi_report.team_b, 5)
+                    ],
+                    "gk_a": dataclasses.asdict(pi_report.goalkeeper_a) if pi_report.goalkeeper_a else None,
+                    "gk_b": dataclasses.asdict(pi_report.goalkeeper_b) if pi_report.goalkeeper_b else None,
+                    "dependency_a": dataclasses.asdict(pi_report.dependency_a) if pi_report.dependency_a else None,
+                    "dependency_b": dataclasses.asdict(pi_report.dependency_b) if pi_report.dependency_b else None,
+                    "matchups": [
+                        {"player_a": m.player_a, "player_b": m.player_b, "category": m.category,
+                         "advantage_team": m.advantage_team, "net_xg_impact": m.net_xg_impact}
+                        for m in pi_report.top_matchups(6)
+                    ],
+                }
+
+            if exploitation:
+                v51_dict["tactical_exploitation"] = {
+                    "opportunities": [
+                        {"attacker": o.attacker, "defender": o.defender, "category": o.category,
+                         "description": o.description, "xg_impact": o.xg_impact}
+                        for o in exploitation.top_exploits(6)
+                    ],
+                }
+
+            if archetypes:
+                v51_dict["match_archetypes"] = {
+                    "archetypes": [
+                        {"name": a.archetype, "prob": a.probability, "desc": a.description}
+                        for a in archetypes.archetypes
+                    ],
+                }
+
+            if wc_a:
+                v51_dict["win_conditions_a"] = {
+                    "conditions": [
+                        {"method": c.method, "prob": c.probability, "desc": c.description}
+                        for c in wc_a.conditions
+                    ],
+                }
+
+            if wc_b:
+                v51_dict["win_conditions_b"] = {
+                    "conditions": [
+                        {"method": c.method, "prob": c.probability, "desc": c.description}
+                        for c in wc_b.conditions
+                    ],
+                }
+
+            if market_comp:
+                v51_dict["market_comparison"] = {
+                    "team_a": market_comp.team_a,
+                    "team_b": market_comp.team_b,
+                    "entries": [
+                        {"team": e.team, "model_prob": e.model_prob, "market_prob": e.market_prob,
+                         "edge": e.edge, "value_level": e.value_level.value}
+                        for e in market_comp.entries
+                    ],
+                    "market": {
+                        "home_prob": market_comp.market.home_prob if market_comp.market else None,
+                        "draw_prob": market_comp.market.draw_prob if market_comp.market else None,
+                        "away_prob": market_comp.market.away_prob if market_comp.market else None,
+                    } if market_comp.market else None,
+                    "consensus": {
+                        "market_count": market_comp.consensus.market_count,
+                        "home_range": list(market_comp.consensus.home_range),
+                        "draw_range": list(market_comp.consensus.draw_range),
+                        "away_range": list(market_comp.consensus.away_range),
+                        "home_consensus": market_comp.consensus.home_consensus.value,
+                        "draw_consensus": market_comp.consensus.draw_consensus.value,
+                        "away_consensus": market_comp.consensus.away_consensus.value,
+                    } if market_comp.consensus else None,
+                }
+
+            report.v51 = V51ReportData(**v51_dict)
+
         # === Monte Carlo simulation loop ===
         wins_a = 0
         wins_b = 0
@@ -2921,7 +3400,7 @@ class DraftCog(commands.Cog):
         score_counter: dict[tuple[int, int], int] = collections.Counter()
 
         for _ in range(simulations):
-            if version == "v4":
+            if version in ("v4", "v5"):
                 ctx_str = "knockout" if knockout else "group"
                 g1, g2 = engine.simulate_match(team_a, team_b, can_draw=not knockout, context=ctx_str)
             else:
@@ -2954,6 +3433,31 @@ class DraftCog(commands.Cog):
             min_goals_b=min_b, max_goals_b=max_b,
         )
 
+        # === V5.1 Model Confidence (after MC results available) ===
+        if version == "v5" and report.v51:
+            from fifa_data.services.model_confidence_service import compute_confidence
+            dep_a = None
+            if report.v51.player_influence and report.v51.player_influence.get("dependency_a"):
+                from fifa_data.models.player_influence import TeamDependency
+                d = report.v51.player_influence["dependency_a"]
+                dep_a = TeamDependency(
+                    team=d["team"], top_n_attackers=d["top_n_attackers"],
+                    attack_output_share=d["attack_output_share"],
+                    top_attackers_names=d["top_attackers_names"],
+                    dependency_level=d["dependency_level"],
+                    top_n_defenders=d["top_n_defenders"],
+                    defense_output_share=d["defense_output_share"],
+                    top_defenders_names=d["top_defenders_names"],
+                )
+            mc_result = report.mc
+            confidence = compute_confidence(
+                mc_result, v4_data=report.v4,
+                dependency=dep_a,
+                market_comparison=None,
+                simulations=simulations,
+            )
+            report.v51.model_confidence = confidence
+
         return report
 
     def _parse_simulation_args(self, args: str | None) -> tuple[str | None, str, bool]:
@@ -2966,13 +3470,13 @@ class DraftCog(commands.Cog):
             return model, presentation, debug
 
         first = tokens[0].lower()
-        if first in {"v1", "v2", "v3", "v4"}:
+        if first in {"v1", "v2", "v3", "v4", "v5"}:
             model = first
             tokens = tokens[1:]
         elif first in {"animated", "fast", "debug"}:
             pass
         else:
-            return None, "Usage: `.simulate [v1|v2|v3|v4] [fast|animated] [debug]`", False
+            return None, "Usage: `.simulate [v1|v2|v3|v4|v5] [fast|animated] [debug]`", False
 
         for token in tokens:
             lowered = token.lower()

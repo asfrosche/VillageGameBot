@@ -164,6 +164,17 @@ class V4ReportData:
 
 
 @dataclass
+class V51ReportData:
+    player_influence: dict[str, Any] = field(default_factory=dict)
+    tactical_exploitation: dict[str, Any] = field(default_factory=dict)
+    match_archetypes: dict[str, Any] = field(default_factory=dict)
+    win_conditions_a: dict[str, Any] = field(default_factory=dict)
+    win_conditions_b: dict[str, Any] = field(default_factory=dict)
+    market_comparison: dict[str, Any] = field(default_factory=dict)
+    model_confidence: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class SimulationReport:
     version: str
     team_a: str
@@ -178,6 +189,11 @@ class SimulationReport:
     v2: V2ReportData | None = None
     v3: V3ReportData | None = None
     v4: V4ReportData | None = None
+    v51: V51ReportData | None = None
+
+    @property
+    def has_v51_data(self) -> bool:
+        return self.v51 is not None
 
     @property
     def version_label(self) -> str:
@@ -186,12 +202,13 @@ class SimulationReport:
             "v2": "FC26 Player Intelligence",
             "v3": "Dynamic Team State",
             "v4": "Tactical Intelligence",
+            "v5": "Match State Simulation",
         }.get(self.version, self.version.upper())
 
     @property
     def has_v3_data(self) -> bool:
-        return self.version in ("v3", "v4")
+        return self.version in ("v3", "v4", "v5")
 
     @property
     def has_v4_data(self) -> bool:
-        return self.version == "v4"
+        return self.version in ("v4", "v5")

@@ -307,9 +307,9 @@ COMMAND_INDEX = [
     (".matches [filter] / .matchinfo", "Group standings, tiebreakers & matches via dropdown, or filter by team name", "Draft", ["matches", "results", "fixtures", "standings", "groups"]),
     (".trending [position] / .form", "Players with best form rating", "Draft", ["trending", "form", "players"]),
     (".differentials [N] / .diff", "Best differential picks", "Draft", ["differential", "diff", "value"]),
-    (".simulate / .sim / .fsim", "Simulate tournament (ELO/players/dynamic/tactical)", "Draft", ["simulate", "sim", "fsim", "tournament"]),
+    (".simulate / .sim / .fsim", "Simulate tournament (ELO/players/dynamic/tactical/match state)", "Draft", ["simulate", "sim", "fsim", "tournament"]),
     (".fsim detailed", "Head-to-head Monte Carlo analysis", "Draft", ["simulate", "detailed", "head", "head"]),
-    (".simhelp / .sim help", "Simulation model descriptions", "Draft", ["simulate", "help", "models"]),
+    (".simhelp / .sim help", "Simulation model descriptions (V1-V5)", "Draft", ["simulate", "help", "models"]),
 ]
 
 
@@ -1793,10 +1793,10 @@ class Other(commands.Cog):
         ), inline=False)
         embed.add_field(name="Simulation — Tournament", value=(
             "**.simulate** / **.sim** / **.fsim** [version] [mode] [debug]\n"
-            "  Versions: **v1** (ELO), **v2** (players), **v3** (dynamic), **v4** (tactical)\n"
+            "  Versions: **v1** (ELO), **v2** (players), **v3** (dynamic), **v4** (tactical), **v5** (match state)\n"
             "  Modes: **fast** (default), **animated** (goal-by-goal)\n"
-            "  Flags: **debug** (V4 tactical breakdown)\n"
-            "  `Ex: .fsim v4 animated`"
+            "  Flags: **debug** (V4/V5 tactical breakdown)\n"
+            "  `Ex: .fsim v5 animated`"
         ), inline=False)
         embed.add_field(name="Simulation — Head-to-Head", value=(
             "**.fsim detailed** <version> <Team A> <Team B> [knockout] [N]\n"
@@ -1806,11 +1806,12 @@ class Other(commands.Cog):
             "  `Ex: .fsim detailed v4 France Spain knockout 10000`"
         ), inline=False)
         embed.add_field(name="Simulation — Help & Reference", value=(
-            "**.simhelp** / **.sim help** — Full V1-V4 model descriptions\n"
+            "**.simhelp** / **.sim help** — Full V1-V5 model descriptions\n"
             "**.simulate v1** — Historical ELO/PELE ratings\n"
             "**.simulate v2** — FC26 player attributes + formations\n"
             "**.simulate v3** — Chemistry, form, momentum, leadership\n"
-            "**.simulate v4** — Tactics, managers, styles, contexts"
+            "**.simulate v4** — Tactics, managers, styles, contexts\n"
+            "**.simulate v5** — Match state: fatigue, cards, subs, momentum, penalties"
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_draft)
