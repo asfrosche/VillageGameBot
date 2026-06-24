@@ -9,7 +9,7 @@ from fifa_data.models.player_influence import (
     TeamDependency, PlayerMatchup, PlayerInfluenceReport,
 )
 from fifa_data.models.tactical_vulnerability import (
-    TeamStrength, TeamWeakness, TacticalVulnerabilityReport,
+    TacticalStrength, TeamWeakness, TacticalVulnerabilityReport,
     ExploitationOpportunity, ExploitationReport,
     MatchArchetypeData, MatchArchetypeReport,
     WinCondition, WinConditionReport,
@@ -215,7 +215,7 @@ class TacticalVulnerabilityServiceTests(unittest.TestCase):
         self.assertGreater(len(strengths), 0)
         self.assertLessEqual(len(strengths), 6)
         for s in strengths:
-            self.assertIsInstance(s, TeamStrength)
+            self.assertIsInstance(s, TacticalStrength)
             self.assertGreater(s.magnitude, 0)
 
     def test_compute_strengths_low_team(self):
