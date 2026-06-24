@@ -14,13 +14,11 @@ from ..models.team_strength import (
     build_team_strength,
     weighted_average,
 )
-from ..services.chemistry_service import ChemistryService
-from ..services.continuity_service import ContinuityService
-from ..services.experience_service import ExperienceService
-from ..services.form_service import FormService
-from ..services.leadership_service import LeadershipService
-from ..services.momentum_service import MomentumService
 from ..services.v2_data_loader import load_v2_squads
+from ..services.v3_modifiers import (
+    ChemistryService, ContinuityService, ExperienceService,
+    FormService, LeadershipService, MomentumService,
+)
 from .base_engine import MatchEngine
 
 HERE = Path(__file__).resolve().parents[1]
