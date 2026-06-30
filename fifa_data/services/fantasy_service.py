@@ -18,14 +18,6 @@ CACHE_TTL = 120
 _SSL_CTX = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
-_CONNECTOR: aiohttp.TCPConnector | None = None
-
-
-def _get_connector() -> aiohttp.TCPConnector:
-    global _CONNECTOR
-    if _CONNECTOR is None:
-        _CONNECTOR = aiohttp.TCPConnector(ssl=_SSL_CTX)
-    return _CONNECTOR
 
 
 async def _fetch_json(session: aiohttp.ClientSession, url: str) -> list | dict:
@@ -112,7 +104,7 @@ class FantasyService:
                 self._cache_time = now
                 return self._players, self._squads
 
-        async with aiohttp.ClientSession(connector=_get_connector()) as session:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_SSL_CTX)) as session:
             self._players = await _fetch_json(session, PLAYERS_URL)
             squads_raw = await _fetch_json(session, SQUADS_URL)
 

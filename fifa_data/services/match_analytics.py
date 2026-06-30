@@ -18,14 +18,6 @@ FANTASY_SQUADS_URL = "https://play.fifa.com/json/fantasy/squads.json"
 _SSL_CTX = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
-_CONNECTOR: aiohttp.TCPConnector | None = None
-
-
-def _get_connector() -> aiohttp.TCPConnector:
-    global _CONNECTOR
-    if _CONNECTOR is None:
-        _CONNECTOR = aiohttp.TCPConnector(ssl=_SSL_CTX)
-    return _CONNECTOR
 
 
 async def _fetch_json(session: aiohttp.ClientSession, url: str, params: dict | None = None) -> dict | list:
@@ -43,7 +35,7 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str, params: dict | N
 
 async def fetch_and_cache_data():
     """Fetch live match data from FIFA API and cache to disk."""
-    async with aiohttp.ClientSession(connector=_get_connector()) as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_SSL_CTX)) as session:
         params = {"idCompetition": COMPETITION_ID, "idSeason": SEASON_ID, "count": 200}
         match_data = await _fetch_json(session, FIFA_API_URL, params=params)
         players = await _fetch_json(session, FANTASY_PLAYERS_URL)
