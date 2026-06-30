@@ -1242,7 +1242,7 @@ class Other(commands.Cog):
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
         embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
         embedh.add_field(name="🏆 - Draft", value="20 Commands\n`.help draft`", inline=True)
-        embedh.add_field(name="🐦 - Blood on the Clocktower", value="5 Commands\n`.help botc`", inline=True)
+        embedh.add_field(name="🐦 - Blood on the Clocktower", value="All Commands\n`.help botc`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -1821,27 +1821,12 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_draft)
 
     async def help_botc(self, ctx):
-        embed = discord.Embed(title="🐦 Blood on the Clocktower", description="8 Commands", color=0x008080)
-        embed.add_field(name="Role Lookups", value=(
-            "**`.rr <name>`** ─ Look up a role by name or alias. Shows ability,\n"
-            "  team, edition, and reminder tokens. Interactive buttons for\n"
-            "  jinxes, night order, aliases, and wiki.\n"
-            "**`.jinx <name>`** ─ Show all jinxes for a given role.\n"
-            "**`.fabled <name>`** ─ Look up a fabled character."
-        ), inline=False)
-        embed.add_field(name="Scripts & Night Order", value=(
-            "**`.scripts [tb|bmr|snv]`** ─ View TB, BMR, or SNV as a\n"
-            "  full-script image with role icons. Include an edition to skip\n"
-            "  the interactive buttons.\n"
-            "**`.nightorder [tb|bmr|snv]`** ─ Display first-night and\n"
-            "  other-night order. Include an edition to skip the buttons."
-        ), inline=False)
-        embed.add_field(name="Game References", value=(
-            "**`.setref <script|grim> [link]`** ─ Store a message as the\n"
-            "  custom script or grim reference for this server (reply or link).\n"
-            "**`.ref <script|grim>`** ─ Show the saved reference message."
-        ), inline=False)
-        embed.set_footer(text="Blood on the Clocktower • Use `.` prefix for these commands")
+        try:
+            from BOTC.cogs.help import _build_help_embed
+            embed = _build_help_embed()
+        except ImportError:
+            embed = discord.Embed(title="🐦 Blood on the Clocktower", color=0x008080)
+            embed.description = "See `.botchelp` for all BOTC commands."
         await self.send_help_page(ctx, embed, self.help_botc)
 
 
