@@ -141,6 +141,11 @@ def _build_help_embed() -> discord.Embed:
         value="[Admin] Set the nomination expiry timeout (default 120s, min 10s).",
         inline=False,
     )
+    embed.add_field(
+        name="`.bnoms`",
+        value="Show current nomination status, vote counts, voter turnout, and required guilty votes.",
+        inline=False,
+    )
 
     embed.set_footer(text="Use .botchelp or /help to see this message again.")
     return embed

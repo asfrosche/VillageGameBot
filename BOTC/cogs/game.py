@@ -113,6 +113,7 @@ class BOTCGame(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._messages: dict[int, discord.Message] = {}   # guild_id -> nomination message
+        self._views: dict[int, VoteView] = {}             # guild_id -> vote view
         self._tasks: dict[int, asyncio.Task] = {}         # guild_id -> expiry task
         self._timeouts: dict[int, int] = {}               # guild_id -> custom timeout
 
@@ -129,6 +130,7 @@ class BOTCGame(commands.Cog):
         if channel:
             await channel.send(f"⏰ Nomination expired. Final tally above.")
         self._messages.pop(guild_id, None)
+        self._views.pop(guild_id, None)
         self._tasks.pop(guild_id, None)
 
     @commands.command(name="bnominate")
@@ -145,6 +147,7 @@ class BOTCGame(commands.Cog):
         view._refresh_alive_info(ctx.guild)
         msg = await ctx.send(embed=view._build_embed(), view=view)
         self._messages[ctx.guild.id] = msg
+        self._views[ctx.guild.id] = view
         self._tasks[ctx.guild.id] = asyncio.create_task(self._expire(ctx.guild.id, view))
 
     @commands.command(name="bnomtimeout")
@@ -155,6 +158,59 @@ class BOTCGame(commands.Cog):
             return await ctx.send("Minimum timeout is 10 seconds.")
         self._timeouts[ctx.guild.id] = seconds
         await ctx.send(f"⏱️ Nomination timeout set to {seconds} seconds.")
+
+    @commands.command(name="bnoms")
+    async def bnoms(self, ctx: commands.Context):
+        """Show current nomination status, vote counts, and required votes."""
+        view = self._views.get(ctx.guild.id)
+        if not view or view._closed:
+            await ctx.send("No active nomination.")
+            return
+
+        view._refresh_alive_info(ctx.guild)
+        guilty = sum(1 for v in view.votes.values() if v)
+        notguilty = sum(1 for v in view.votes.values() if not v)
+        total_voted = guilty + notguilty
+
+        nominee = self.bot.get_user(view.nominee_id)
+        nominator = self.bot.get_user(view.nominator_id)
+        n_name = nominee.display_name if nominee else f"<@{view.nominee_id}>"
+        nom_name = nominator.display_name if nominator else f"<@{view.nominator_id}>"
+
+        embed = discord.Embed(
+            title=f"🗳️ Nomination Status",
+            color=discord.Color.teal(),
+        )
+        embed.add_field(name="Nominator", value=nom_name, inline=True)
+        embed.add_field(name="Nominee", value=n_name, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)  # spacer
+        embed.add_field(
+            name=f"🟥 Guilty ({guilty})",
+            value="\n".join(f"<@{uid}>" for uid in view.votes if view.votes[uid]) or "—",
+            inline=True,
+        )
+        embed.add_field(
+            name=f"🟩 Not Guilty ({notguilty})",
+            value="\n".join(f"<@{uid}>" for uid in view.votes if not view.votes[uid]) or "—",
+            inline=True,
+        )
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(
+            name="Voter Turnout",
+            value=f"{total_voted} / {view._alive_count} alive",
+            inline=True,
+        )
+        embed.add_field(
+            name="Required Guilty",
+            value=f"{view._required}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Status",
+            value=f"Expires <t:{int(view._expires_at)}:R>",
+            inline=True,
+        )
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
