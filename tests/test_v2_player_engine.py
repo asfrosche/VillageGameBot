@@ -66,7 +66,7 @@ class PlayerRatingTests(unittest.TestCase):
 class SquadLoadingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.squads = load_v2_squads("may/fifa_data")
+        cls.squads = load_v2_squads("fifa_data")
 
     def test_all_world_cup_teams_have_valid_squads_and_starting_xi(self):
         self.assertEqual(len(self.squads), 48)
