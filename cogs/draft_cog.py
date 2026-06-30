@@ -2208,29 +2208,58 @@ class DraftCog(commands.Cog):
             return await ctx.send("Admin only.")
 
         status = await ctx.send("🔄 Fetching latest fantasy data from FIFA servers...")
+        errors = []
 
+        # 1. Fantasy data
         try:
             await self.fantasy.fetch_data(force=True)
-            total = len(self.fantasy._players)
-            with_points = len([p for p in self.fantasy._players if p.get("stats", {}).get("totalPoints", 0) > 0])
-            # Save fresh data to local files
+            total = len(self.fantasy._players) if self.fantasy._players else 0
+            with_points = len([p for p in (self.fantasy._players or []) if p.get("stats", {}).get("totalPoints", 0) > 0])
             os.makedirs(os.path.join(FIFA_DIR, "data"), exist_ok=True)
-            with open(os.path.join(FIFA_DIR, "data", "players.json"), "w", encoding="utf-8") as f:
-                json.dump(self.fantasy._players, f, ensure_ascii=False)
-            with open(os.path.join(FIFA_DIR, "data", "squads.json"), "w", encoding="utf-8") as f:
-                json.dump(list(self.fantasy._squads.values()), f, ensure_ascii=False)
-            # Also refresh match data
-            try:
-                await fetch_and_cache_data()
-            except Exception as match_e:
-                await status.edit(content=f"⚠️ Fantasy data OK ({total} players), but matches failed: {match_e}")
-                return
-            phase = get_tournament_phase()
-            eliminated = get_eliminated_set()
-            elim_msg = f", {len(eliminated)} teams eliminated" if eliminated else ""
-            await status.edit(content=f"✅ Updated! {total} players loaded, {with_points} with points, matches refreshed. Phase: {phase}{elim_msg}.")
+            if self.fantasy._players:
+                with open(os.path.join(FIFA_DIR, "data", "players.json"), "w", encoding="utf-8") as f:
+                    json.dump(self.fantasy._players, f, ensure_ascii=False)
+            if self.fantasy._squads:
+                with open(os.path.join(FIFA_DIR, "data", "squads.json"), "w", encoding="utf-8") as f:
+                    json.dump(list(self.fantasy._squads.values()), f, ensure_ascii=False)
         except Exception as e:
-            await status.edit(content=f"❌ Failed to fetch: {e}")
+            errors.append(f"fantasy: {e}")
+
+        # 2. Match data
+        try:
+            await fetch_and_cache_data()
+        except Exception as e:
+            errors.append(f"matches: {e}")
+
+        # 3. Verify and report
+        phase = get_tournament_phase()
+        eliminated = get_eliminated_set()
+
+        # Yet to play = players on non-eliminated teams
+        yet_to_play = 0
+        if self.fantasy._players and self.fantasy._squads:
+            eliminated_lower = {s.lower() for s in eliminated}
+            for p in self.fantasy._players:
+                sid = p.get("squadId")
+                s = self.fantasy._squads.get(sid)
+                if s and s["name"].lower() not in eliminated_lower:
+                    yet_to_play += 1
+
+        elim_msg = f", {len(eliminated)} teams eliminated" if eliminated else ""
+        ytp_msg = f", {yet_to_play} yet to play" if yet_to_play else ""
+
+        # Count completed matches in cache to verify freshness
+        try:
+            matches, _, _, _ = load_data()
+            cached_completed = len(matches.get("completed", []))
+        except Exception:
+            cached_completed = 0
+
+        err_msg = f" ⚠️ {'; '.join(errors)}" if errors else ""
+        await status.edit(
+            content=f"✅ Updated! {total} players ({with_points} with points{ytp_msg}), "
+                    f"{cached_completed} matches. Phase: {phase}{elim_msg}.{err_msg}"
+        )
 
     # ── Live Simulation ─────────────────────────────────────────
 

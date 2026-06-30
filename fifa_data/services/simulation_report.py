@@ -17,6 +17,9 @@ class MonteCarloResult:
     max_goals_a: int = 0
     min_goals_b: int = 0
     max_goals_b: int = 0
+    penalty_matches: int = 0
+    penalty_wins_a: int = 0
+    penalty_wins_b: int = 0
 
     @property
     def win_prob_a(self) -> float:

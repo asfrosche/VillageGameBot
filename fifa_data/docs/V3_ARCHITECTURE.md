@@ -136,7 +136,7 @@ class DynamicState:
   - CB+CB pair: +1.5%
   - FB+WINGER, CM+DM, ST+WINGER: +0.8% to +1.0%
   - GK+CB: +0.5%
-- Checks `data/player_relationships.json` for known national team partnerships (+0.5% per partnership)
+- National team partnerships add +0.5% per known pair (configurable)
 - Total chemistry capped at +5%
 
 **Data source:** `fc26_ratings.json` → club team, extracted to `data/club_links.json`
@@ -226,7 +226,6 @@ class DynamicState:
 |------|--------|------------|----------|
 | `data/club_links.json` | FC26 ratings | High (known clubs) | Player → Club mapping for 929 players |
 | `data/player_experience.json` | Derived from roster tiers + FC26 OVR | Medium | caps, WC appearances, captain status for 1,245 players |
-| `data/player_relationships.json` | Manual | User-configurable | Known national team partnerships |
 | `data/national_strength_modifiers.json` | V1 ELO/PELE averages | Medium | Per-team modifier per match (–0.023 to +0.029) |
 | `data/calibration_config.json` | Tuned via 9×2,000-match calibration | High | base_goals, curve_factor, star_weights, position weights, V3 multiplier range |
 
@@ -289,7 +288,6 @@ All tunable in `data/calibration_config.json`:
 - `engines/v3_dynamic_engine.py` — V3 engine
 - `data/club_links.json` — Player club mapping
 - `data/player_experience.json` — Player experience data
-- `data/player_relationships.json` — National team partnerships (configurable)
 - `V3_ARCHITECTURE.md` — This file
 
 ---

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import ssl
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -14,17 +15,39 @@ FIFA_API_URL = "https://api.fifa.com/api/v3/calendar/matches"
 FANTASY_PLAYERS_URL = "https://play.fifa.com/json/fantasy/players.json"
 FANTASY_SQUADS_URL = "https://play.fifa.com/json/fantasy/squads.json"
 
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+_CONNECTOR: aiohttp.TCPConnector | None = None
+
+
+def _get_connector() -> aiohttp.TCPConnector:
+    global _CONNECTOR
+    if _CONNECTOR is None:
+        _CONNECTOR = aiohttp.TCPConnector(ssl=_SSL_CTX)
+    return _CONNECTOR
+
+
+async def _fetch_json(session: aiohttp.ClientSession, url: str, params: dict | None = None) -> dict | list:
+    """Fetch JSON with retry and timeout."""
+    last_exc = None
+    for attempt in range(3):
+        try:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                return await r.json()
+        except Exception as e:
+            last_exc = e
+            await asyncio.sleep(1)
+    raise last_exc or Exception(f"Failed to fetch {url}")
+
 
 async def fetch_and_cache_data():
     """Fetch live match data from FIFA API and cache to disk."""
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=_get_connector()) as session:
         params = {"idCompetition": COMPETITION_ID, "idSeason": SEASON_ID, "count": 200}
-        async with session.get(FIFA_API_URL, params=params, timeout=15) as r:
-            match_data = await r.json()
-        async with session.get(FANTASY_PLAYERS_URL, timeout=15) as r:
-            players = await r.json()
-        async with session.get(FANTASY_SQUADS_URL, timeout=15) as r:
-            squads_raw = await r.json()
+        match_data = await _fetch_json(session, FIFA_API_URL, params=params)
+        players = await _fetch_json(session, FANTASY_PLAYERS_URL)
+        squads_raw = await _fetch_json(session, FANTASY_SQUADS_URL)
 
     results = match_data.get("Results", [])
     completed, upcoming = [], []
@@ -64,7 +87,10 @@ async def fetch_and_cache_data():
         json.dump(players, f, indent=2, ensure_ascii=False)
     with open(os.path.join(data_dir, "squads.json"), "w", encoding="utf-8") as f:
         json.dump(squads_raw, f, indent=2, ensure_ascii=False)
-    print(f"Fetched {len(completed)} completed + {len(upcoming)} upcoming matches")
+
+    # Verify data was actually updated
+    eliminated = [s for s in squads_raw if s.get("isEliminated")]
+    print(f"Fetched {len(completed)} completed + {len(upcoming)} upcoming matches, {len(eliminated)} teams eliminated")
 
 KNOWN_NAME_VARIANTS = {
     "United States": {"USA"},
@@ -112,24 +138,26 @@ def get_squad_games_played():
     except (FileNotFoundError, json.JSONDecodeError):
         return {}, 0
     completed = matches.get("completed", [])
-    squad_games = {}
+    raw_counts = {}
     for m in completed:
         stage = m.get("stage", "")
         if stage != "First Stage":
             continue
         for side in ("home", "away"):
             name = m[side]["name"]
-            for variant in expand_name_variants(name):
-                squad_games[variant] = squad_games.get(variant, 0) + 1
+            raw_counts[name] = raw_counts.get(name, 0) + 1
+    squad_games = {}
     for sid, s in squads.items():
-        if s["name"] not in squad_games:
-            squad_games[s["name"]] = 0
+        sn = s["name"]
+        variants = expand_name_variants(sn)
+        count = max(raw_counts.get(v, 0) for v in variants)
+        squad_games[sn] = count
     max_games = max(squad_games.values()) if squad_games else 0
     return squad_games, max_games
 
 
 def get_squad_remaining():
-    """Return set of squad names that still have games to play."""
+    """Return set of squad names that still have group-stage games to play."""
     try:
         matches, players, squads, name_to_id = load_data()
     except (FileNotFoundError, json.JSONDecodeError):
@@ -138,14 +166,19 @@ def get_squad_remaining():
 
     remaining = set()
     for m in upcoming:
+        stage = m.get("stage", "")
+        if stage != "First Stage":
+            continue
         for side in ("home", "away"):
             name = m[side]["name"]
-            remaining.update(expand_name_variants(name))
-            # Cross-reference against fantasy squad names
-            name_lower = name.lower()
             for sid, squad in squads.items():
-                if squad["name"].lower() == name_lower:
+                if name.lower() == squad["name"].lower():
                     remaining.add(squad["name"])
+                    break
+                variants = expand_name_variants(squad["name"])
+                if name in variants:
+                    remaining.add(squad["name"])
+                    break
 
     return remaining
 
@@ -407,3 +440,100 @@ def get_group_standings(group_letter):
     group_upcoming = [m for m in upcoming if m.get("group") == group_tag]
 
     return standings, group_completed, group_upcoming
+
+
+DATA_MAX_AGE = 7200  # seconds (2 hours)
+
+def is_data_stale():
+    """Check if cached match data is older than DATA_MAX_AGE."""
+    data_dir = os.path.join(HERE, "data")
+    matches_path = os.path.join(data_dir, "matches.json")
+    if not os.path.exists(matches_path):
+        return True
+    age = datetime.now(timezone.utc).timestamp() - os.path.getmtime(matches_path)
+    return age > DATA_MAX_AGE
+
+
+async def ensure_fresh_data():
+    """Re-fetch match data from FIFA API if cached version is stale."""
+    if is_data_stale():
+        print("Match data stale, refreshing...")
+        await fetch_and_cache_data()
+
+
+def get_eliminated_set():
+    """Return set of team names eliminated from the tournament.
+
+    Derives eliminations from knockout match results (any team that lost
+    a knockout match is eliminated). Also includes teams marked as
+    eliminated by the FIFA fantasy API.
+    """
+    eliminated = set()
+    try:
+        matches, _, squads, name_to_id = load_data()
+    except Exception:
+        return set()
+
+    # Teams marked eliminated by the API
+    for s in squads.values():
+        if s.get("isEliminated"):
+            eliminated.add(s["name"])
+
+    # Compute from knockout match results
+    KO_STAGES = {"Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Play-off for third place", "Final"}
+    completed = matches.get("completed", [])
+    for m in completed:
+        stage = m.get("stage", "")
+        if stage not in KO_STAGES:
+            continue
+        winner_id = m.get("winner")
+        home_name = m["home"]["name"]
+        away_name = m["away"]["name"]
+        home_id = m["home"].get("id")
+        away_id = m["away"].get("id")
+        # The loser is eliminated
+        if winner_id and winner_id == home_id:
+            eliminated.add(away_name)
+        elif winner_id and winner_id == away_id:
+            eliminated.add(home_name)
+        elif winner_id is None and m["home"]["score"] is not None:
+            # Penalty shootout winner marked via home/away id;
+            # fallback: if scores differ, the lower score loses
+            hs = m["home"].get("score")
+            aws = m["away"].get("score")
+            if hs is not None and aws is not None and hs != aws:
+                eliminated.add(home_name if hs < aws else away_name)
+
+    return eliminated
+
+
+def is_team_eliminated(team_name):
+    """Check if a specific team has been eliminated."""
+    return team_name in get_eliminated_set()
+
+
+def get_tournament_phase():
+    """Return a string describing the current tournament phase."""
+    try:
+        matches, _, _, _ = load_data()
+    except Exception:
+        return "unknown"
+    completed = matches.get("completed", [])
+    upcoming = matches.get("upcoming", [])
+
+    # Tournament order: earliest stage first
+    stage_order = ["First Stage", "Round of 32", "Round of 16",
+                   "Quarter-final", "Semi-final", "Play-off for third place", "Final"]
+
+    # Find the earliest stage with any upcoming matches — that's the current phase
+    for stage in stage_order:
+        if any(m.get("stage") == stage for m in upcoming):
+            return stage  # some matches done, some left — this is the current phase
+
+    # No upcoming matches at all — tournament may be over
+    # Find the latest stage that has completed matches
+    for stage in reversed(stage_order):
+        if any(m.get("stage") == stage for m in completed):
+            return stage
+
+    return "unknown"

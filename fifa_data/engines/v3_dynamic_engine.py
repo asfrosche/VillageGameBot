@@ -45,10 +45,12 @@ class V3DynamicEngine(MatchEngine):
         self,
         data_dir: str | Path | None = None,
         squads: dict[str, Squad] | None = None,
+        team_metrics: dict[str, dict[str, float]] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir else None
         resolved = self.data_dir or HERE
         self.squads = squads if squads is not None else load_v2_squads(resolved)
+        self.team_metrics = team_metrics or {}
 
         cfg = _load_config()
         self.base_goals = cfg.get("base_goals", 1.10)
@@ -67,6 +69,7 @@ class V3DynamicEngine(MatchEngine):
         self.extra_time_lambda_scale = cfg.get("extra_time_lambda_scale", 0.30)
         self.tiebreaker_base_probability = cfg.get("tiebreaker_base_probability", 0.50)
         self.tiebreaker_delta_scale = cfg.get("tiebreaker_delta_scale", 0.0005)
+        self.elo_dampening = cfg.get("elo_dampening", 0.40)
 
         self.national_modifiers = _load_national_modifiers()
 
@@ -76,6 +79,9 @@ class V3DynamicEngine(MatchEngine):
         self.momentum_service = MomentumService()
         self.continuity_service = ContinuityService()
         self.leadership_service = LeadershipService(resolved)
+
+        xg_deltas = self._compute_xg_deltas(resolved)
+        self.form_service.set_xg_deltas(xg_deltas)
 
         self._match_number = 0
         self.last_match_debug = ""
@@ -167,10 +173,21 @@ class V3DynamicEngine(MatchEngine):
         dyn = self._compute_dynamic_state(team, is_knockout)
         dyn_mult = max(self.v3_min, min(self.v3_max, dyn.combined_multiplier()))
 
-        attack_rating = round(star_a * (1.0 + nat_mod) * dyn_mult, 4)
-        midfield_rating = round(star_m * (1.0 + nat_mod) * dyn_mult, 4)
-        defense_rating = round(star_d * (1.0 + nat_mod) * dyn_mult, 4)
-        goalkeeper_rating = round(star_g * (1.0 + nat_mod) * dyn_mult, 4)
+        # ELO/PELE strength modifier from real match results
+        metrics = self.team_metrics.get(team)
+        if metrics:
+            elo_avg = (metrics.get("ELO", 1500) + metrics.get("PELE", 1500)) / 2
+            elo_mod = 1.0 + 0.003 * (elo_avg - 1500)
+            elo_mod = max(0.50, min(elo_mod, 3.0))
+        else:
+            elo_mod = 1.0
+
+        combined_mult = (1.0 + nat_mod) * dyn_mult * elo_mod
+
+        attack_rating = round(star_a * combined_mult, 4)
+        midfield_rating = round(star_m * combined_mult, 4)
+        defense_rating = round(star_d * combined_mult, 4)
+        goalkeeper_rating = round(star_g * combined_mult, 4)
 
         return TeamStrength(
             team=base.team,
@@ -187,6 +204,7 @@ class V3DynamicEngine(MatchEngine):
                 "star_defense": star_d,
                 "star_goalkeeper": star_g,
                 "national_modifier": nat_mod,
+                "elo_multiplier": elo_mod,
                 "v3_dynamic_multiplier": dyn_mult,
                 "v3_dynamic_state": {
                     "chemistry": dyn.chemistry.value,
@@ -312,6 +330,63 @@ class V3DynamicEngine(MatchEngine):
         squad = self.squads[team]
         return build_team_strength(team, squad.current_starting_xi, squad.formation)
 
+    def _compute_xg_deltas(self, data_dir: Path) -> dict[str, float]:
+        matches_path = data_dir / "data" / "matches.json"
+        if not matches_path.exists():
+            return {}
+
+        with matches_path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        deltas: dict[str, list[float]] = {}
+        star_weights = None
+
+        for match in raw.get("completed", []):
+            if match.get("status") != 0:
+                continue
+            t1 = match["home"]["name"]
+            t2 = match["away"]["name"]
+            g1 = match["home"].get("score")
+            g2 = match["away"].get("score")
+            if t1 not in self.squads or t2 not in self.squads:
+                continue
+            if g1 is None or g2 is None:
+                continue
+
+            b1 = self._base_strength(t1)
+            b2 = self._base_strength(t2)
+            if star_weights is None:
+                from ..models.team_strength import weighted_average
+                star_weights = weighted_average
+            sw = star_weights
+            star_a1 = sw(b1.role_ratings, {"ST", "WINGER"}, self.star_weights)
+            star_m1 = sw(b1.role_ratings, {"CM", "DM"}, self.star_weights)
+            star_d2 = sw(b2.role_ratings, {"CB", "FB"}, self.star_weights)
+            star_g2 = sw(b2.role_ratings, {"GK"}, self.star_weights)
+            star_m2 = sw(b2.role_ratings, {"CM", "DM"}, self.star_weights)
+            star_a2 = sw(b2.role_ratings, {"ST", "WINGER"}, self.star_weights)
+            star_d1 = sw(b1.role_ratings, {"CB", "FB"}, self.star_weights)
+            star_g1 = sw(b1.role_ratings, {"GK"}, self.star_weights)
+
+            nat1 = self.national_modifiers.get(t1, 0.0)
+            nat2 = self.national_modifiers.get(t2, 0.0)
+
+            for team_a, team_d, actual_g, s_a, s_m_a, s_d, s_gk, s_m_d, nat_a, nat_d in [
+                (t1, t2, g1, star_a1, star_m1, star_d2, star_g2, star_m2, nat1, nat2),
+                (t2, t1, g2, star_a2, star_m2, star_d1, star_g1, star_m1, nat2, nat1),
+            ]:
+                def_idx = self.attack_weight_defense * s_d + self.attack_weight_goalkeeper * s_gk
+                ratio = s_a / max(def_idx, 1.0)
+                curve = ratio ** self.curve_factor
+                curve = max(self.curve_min, min(self.curve_max, curve))
+                mid_mod = 1.0 + self.midfield_control_weight * ((s_m_a - s_m_d) / 100.0)
+                xg = self.base_goals * curve * mid_mod
+                xg *= (1.0 + nat_a - nat_d)
+                delta = max(-2.0, min(2.0, actual_g - xg))
+                deltas.setdefault(team_a, []).append(delta)
+
+        return {team: sum(vals) / len(vals) for team, vals in deltas.items()}
+
     def _expected_goals_for(
         self,
         attacking: TeamStrength,
@@ -326,6 +401,12 @@ class V3DynamicEngine(MatchEngine):
         star_m_a = bd_a.get("star_midfield", attacking.midfield_rating)
         star_m_d = bd_d.get("star_midfield", defending.midfield_rating)
 
+        nat_mod_a = bd_a.get("national_modifier", 0.0)
+        nat_mod_d = bd_d.get("national_modifier", 0.0)
+        v3_mult = bd_a.get("v3_dynamic_multiplier", 1.0)
+        elo_mod_a = bd_a.get("elo_multiplier", 1.0)
+        elo_mod_d = bd_d.get("elo_multiplier", 1.0)
+
         defensive_index = (
             self.attack_weight_defense * star_d
             + self.attack_weight_goalkeeper * star_gk
@@ -339,12 +420,11 @@ class V3DynamicEngine(MatchEngine):
         )
         lambda_raw = self.base_goals * curve_value * midfield_modifier
 
-        nat_mod_a = bd_a.get("national_modifier", 0.0)
-        nat_mod_d = bd_d.get("national_modifier", 0.0)
-        v3_mult = bd_a.get("v3_dynamic_multiplier", 1.0)
-
         lambda_raw *= v3_mult
         lambda_raw *= (1.0 + nat_mod_a - nat_mod_d)
+        if elo_mod_a != elo_mod_d and self.elo_dampening > 0:
+            elo_ratio = elo_mod_a / elo_mod_d
+            lambda_raw *= (1.0 + (elo_ratio - 1.0) * self.elo_dampening)
 
         return max(self.minimum_lambda, lambda_raw)
 

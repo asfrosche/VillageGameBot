@@ -52,25 +52,13 @@ fifa_data/
 +-- data/
 |   +-- calibration_config.json          # V3.1 calibration parameters
 |   +-- club_links.json                  # 929 player->club mappings from FC26
-|   +-- countries.json                   # Country metadata
 |   +-- draft_data.json                  # Fantasy draft teams
-|   +-- fc26_lineup_analysis.json        # Detailed analysis of missing players
-|   +-- fc26_lineup_missing.json         # Lineup players still unrated
-|   +-- fc26_missing_players.json        # WC players absent from FC26
-|   +-- fc26_new_matches.json            # FC26 match data
-|   +-- fc26_player_index.json           # EA index of ~18,000 players
 |   +-- fc26_ratings.json                # ~984 FC26 player ratings
-|   +-- fc26_ratings_cache.json          # Raw EA cache by player ID
-|   +-- lineups_with_ratings.txt         # Lineups with FC26 ratings
 |   +-- matches.json                     # Completed + upcoming matches with lineups
-|   +-- matches_lineups.json             # Match lineup data
 |   +-- national_strength_modifiers.json # Per-team national strength modifiers
 |   +-- player_experience.json           # 1245 players with caps/WCs/captain status
-|   +-- player_relationships.json        # Configurable partnerships
 |   +-- players.json                     # FIFA fantasy players (44k lines)
-|   +-- round1_lineups.txt               # All 24 Round 1 lineups with FC26 ratings
 |   +-- squads.json                      # Team/squad definitions (48 teams)
-|   +-- squads.json                      # Team/squad definitions
 
 +-- docs/
 |   +-- ARCHITECTURE.md                  # This file

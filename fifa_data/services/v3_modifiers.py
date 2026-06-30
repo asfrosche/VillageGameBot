@@ -306,6 +306,12 @@ class ExperienceService:
 
 
 class FormService:
+    def __init__(self) -> None:
+        self._xg_deltas: dict[str, float] = {}
+
+    def set_xg_deltas(self, deltas: dict[str, float]) -> None:
+        self._xg_deltas = deltas
+
     def evaluate(self, team: str, squad: Squad) -> ComponentScore:
         xi = squad.current_starting_xi
         if not xi:
@@ -357,6 +363,14 @@ class FormService:
         elif avg_pts <= 20:
             bonus -= 0.01
             sources.append(f"Avg {avg_pts:.0f} pts (low): -1%")
+
+        xg_delta = self._xg_deltas.get(team, 0.0)
+        if xg_delta != 0.0:
+            delta_bonus = max(-0.05, min(0.05, xg_delta * 0.02))
+            delta_bonus = round(delta_bonus, 4)
+            if delta_bonus != 0.0:
+                bonus += delta_bonus
+                sources.append(f"xG delta {xg_delta:+.2f}: {delta_bonus:+.2%}")
 
         bonus = max(-0.05, min(0.05, bonus))
         bonus = round(bonus, 4)

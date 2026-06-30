@@ -36,11 +36,12 @@ class V5MatchStateEngine(MatchEngine):
         self,
         data_dir: str | Path | None = None,
         squads: dict[str, Squad] | None = None,
+        team_metrics: dict[str, dict[str, float]] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir else None
         resolved = self.data_dir or Path(__file__).resolve().parents[1]
         self.squads = squads if squads is not None else load_v2_squads(resolved)
-        self._v4 = V4TacticalEngine(data_dir=resolved, squads=self.squads)
+        self._v4 = V4TacticalEngine(data_dir=resolved, squads=self.squads, team_metrics=team_metrics)
 
         self.minimum_lambda = self._v4.minimum_lambda
         self.extra_time_lambda_scale = self._v4.extra_time_lambda_scale

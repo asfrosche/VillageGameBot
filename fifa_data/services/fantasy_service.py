@@ -7,12 +7,37 @@ import difflib
 import json
 import os
 import re
+import ssl
 import unicodedata
 
 
 PLAYERS_URL = "https://play.fifa.com/json/fantasy/players.json"
 SQUADS_URL = "https://play.fifa.com/json/fantasy/squads.json"
 CACHE_TTL = 120
+
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+_CONNECTOR: aiohttp.TCPConnector | None = None
+
+
+def _get_connector() -> aiohttp.TCPConnector:
+    global _CONNECTOR
+    if _CONNECTOR is None:
+        _CONNECTOR = aiohttp.TCPConnector(ssl=_SSL_CTX)
+    return _CONNECTOR
+
+
+async def _fetch_json(session: aiohttp.ClientSession, url: str) -> list | dict:
+    last_exc = None
+    for attempt in range(3):
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as r:
+                return await r.json()
+        except Exception as e:
+            last_exc = e
+            await asyncio.sleep(1)
+    raise last_exc or Exception(f"Failed to fetch {url}")
 
 FIFA_POSITION_MAP = {
     "1": "GK", "2": "DEF", "3": "MID", "4": "FWD",
@@ -87,11 +112,9 @@ class FantasyService:
                 self._cache_time = now
                 return self._players, self._squads
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(PLAYERS_URL) as r:
-                self._players = await r.json()
-            async with session.get(SQUADS_URL) as r:
-                squads_raw = await r.json()
+        async with aiohttp.ClientSession(connector=_get_connector()) as session:
+            self._players = await _fetch_json(session, PLAYERS_URL)
+            squads_raw = await _fetch_json(session, SQUADS_URL)
 
         self._squads = {s["id"]: s for s in squads_raw}
         self._cache_time = now

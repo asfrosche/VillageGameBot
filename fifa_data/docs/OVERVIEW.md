@@ -134,9 +134,8 @@ worldcupsimulator.py (V1 data)
                           │
                           ├─ fc26_ratings.json (962 players with OVR + attributes)
                           │
-                          └─ club_links.json (for chemistry service)
-                              player_experience.json (caps/WCs/captains)
-                              player_relationships.json (national team bonds)
+                           └─ club_links.json (for chemistry service)
+                               player_experience.json (caps/WCs/captains)
 ```
 
 ---
