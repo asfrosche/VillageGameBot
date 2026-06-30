@@ -1167,6 +1167,7 @@ class Other(commands.Cog):
                 "birthdays": self.help_birthdays,
                 "calendar": self.help_calendar,
                 "draft": self.help_draft,
+                "botc": self.help_botc,
             }
             if category in categories:
                 await categories[category](ctx)
@@ -1203,6 +1204,7 @@ class Other(commands.Cog):
                     discord.SelectOption(label="↪ - Send Role", value="sendrole", description="Get all 'Send Role' commands"),
                     discord.SelectOption(label="⚙️ - Utility", value="utility", description="Get all 'Utility' commands"),
                     discord.SelectOption(label="👽 - Other", value="other", description="Get all 'Other' commands"),
+                    discord.SelectOption(label="🐦 - BOTC", value="botc", description="Get all 'Blood on the Clocktower' commands"),
                 ]
                 route_fn = lambda cat: self.help(ctx, category=cat)
         else:
@@ -1240,6 +1242,7 @@ class Other(commands.Cog):
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
         embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
         embedh.add_field(name="🏆 - Draft", value="20 Commands\n`.help draft`", inline=True)
+        embedh.add_field(name="🐦 - Blood on the Clocktower", value="5 Commands\n`.help botc`", inline=True)
         embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -1796,6 +1799,7 @@ class Other(commands.Cog):
             "  Versions: **v1** (ELO), **v2** (players), **v3** (dynamic), **v4** (tactical), **v5** (match state)\n"
             "  Modes: **fast** (default), **animated** (goal-by-goal)\n"
             "  Flags: **debug** (V4/V5 tactical breakdown)\n"
+            "  `Ex: .fsim v5` — comprehensive output with V1-V5 insights\n"
             "  `Ex: .fsim v5 animated`"
         ), inline=False)
         embed.add_field(name="Simulation — Head-to-Head", value=(
@@ -1811,10 +1815,34 @@ class Other(commands.Cog):
             "**.simulate v2** — FC26 player attributes + formations\n"
             "**.simulate v3** — Chemistry, form, momentum, leadership\n"
             "**.simulate v4** — Tactics, managers, styles, contexts\n"
-            "**.simulate v5** — Match state: fatigue, cards, subs, momentum, penalties"
+            "**.simulate v5** — Comprehensive: V1 Elo + V2 squads + V3 dynamics + V4 tactics + V5 match state"
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_draft)
+
+    async def help_botc(self, ctx):
+        embed = discord.Embed(title="🐦 Blood on the Clocktower", description="8 Commands", color=0x008080)
+        embed.add_field(name="Role Lookups", value=(
+            "**`.rr <name>`** ─ Look up a role by name or alias. Shows ability,\n"
+            "  team, edition, and reminder tokens. Interactive buttons for\n"
+            "  jinxes, night order, aliases, and wiki.\n"
+            "**`.jinx <name>`** ─ Show all jinxes for a given role.\n"
+            "**`.fabled <name>`** ─ Look up a fabled character."
+        ), inline=False)
+        embed.add_field(name="Scripts & Night Order", value=(
+            "**`.scripts [tb|bmr|snv]`** ─ View TB, BMR, or SNV as a\n"
+            "  full-script image with role icons. Include an edition to skip\n"
+            "  the interactive buttons.\n"
+            "**`.nightorder [tb|bmr|snv]`** ─ Display first-night and\n"
+            "  other-night order. Include an edition to skip the buttons."
+        ), inline=False)
+        embed.add_field(name="Game References", value=(
+            "**`.setref <script|grim> [link]`** ─ Store a message as the\n"
+            "  custom script or grim reference for this server (reply or link).\n"
+            "**`.ref <script|grim>`** ─ Show the saved reference message."
+        ), inline=False)
+        embed.set_footer(text="Blood on the Clocktower • Use `.` prefix for these commands")
+        await self.send_help_page(ctx, embed, self.help_botc)
 
 
 class NarrationColorView(discord.ui.View):

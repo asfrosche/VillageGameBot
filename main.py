@@ -54,7 +54,13 @@ from cogs.item_drop_cog import ItemDrop
 from cogs.channel_cog import ChannelMap
 from cogs.draft_cog import DraftCog
 
-
+from BOTC.cogs.role import RoleCog as BOTCRoleCog
+from BOTC.cogs.jinx import JinxCog as BOTCJinxCog
+from BOTC.cogs.fabled import FabledCog as BOTCFabledCog
+from BOTC.cogs.nightorder import NightOrderCog as BOTCNightOrderCog
+from BOTC.cogs.scripts import ScriptsCog as BOTCScriptsCog
+from BOTC.cogs.help import HelpCog as BOTCHelpCog
+from BOTC.cogs.game import BOTCGame
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=PREFIX, help_command=None, intents=intents)
@@ -64,6 +70,10 @@ init_deadlist_db()
 
 @bot.event
 async def on_ready():
+    try:
+        await bot.tree.sync()
+    except Exception as e:
+        print(f"Error syncing slash commands: {e}")
     for guild in bot.guilds:
         guild_data = load_guild_data(guild.id)
         if guild_data is None:
@@ -186,6 +196,18 @@ async def on_guild_remove(guild):
     if bidet:
         await bidet.send(f"{guild.name} data deleted")
 
+async def safe_reply(ctx, **kwargs):
+    try:
+        await ctx.reply(**kwargs)
+    except discord.HTTPException as e:
+        if e.code == 50035 and "Unknown message" in str(e):
+            embed = kwargs.get("embed")
+            if embed:
+                embed.description = f"*Original message was deleted.*\n\n{embed.description}"
+            await ctx.send(**kwargs)
+        else:
+            raise
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -195,17 +217,17 @@ async def on_command_error(ctx, error):
         embed = error_embed(
             description="Missing required argument. Please check the command usage.",
         )
-        await ctx.reply(embed=embed, mention_author=False)
+        await safe_reply(ctx, embed=embed, mention_author=False)
     elif isinstance(error, commands.BadArgument):
         embed = error_embed(
-            description="Bad argument. Please check the command usage.",
+            description=f"Bad argument: {error}",
         )
-        await ctx.reply(embed=embed, mention_author=False)
+        await safe_reply(ctx, embed=embed, mention_author=False)
     elif isinstance(error, commands.CheckFailure):
         embed = error_embed(
             description="You don't have permission to use this command.",
         )
-        await ctx.reply(embed=embed, mention_author=False)
+        await safe_reply(ctx, embed=embed, mention_author=False)
     elif isinstance(error, discord.errors.HTTPException) and getattr(error, "status", None) == 429:
         retry_after = getattr(error, "retry_after", None)
         if retry_after is not None:
@@ -213,13 +235,13 @@ async def on_command_error(ctx, error):
                 title="Rate Limited",
                 description=f"Rate limit exceeded. Retry in {retry_after:.2f} seconds.",
             )
-            await ctx.reply(embed=embed, mention_author=False)
+            await safe_reply(ctx, embed=embed, mention_author=False)
             await asyncio.sleep(retry_after)
     else:
         embed = error_embed(
             description="An unexpected error occurred. Please try again later.",
         )
-        await ctx.reply(embed=embed, mention_author=False)
+        await safe_reply(ctx, embed=embed, mention_author=False)
 
     print(f"Error: {error}")
 
@@ -620,6 +642,13 @@ async def startcog():
     await bot.add_cog(ChannelMap(bot))
     await bot.add_cog(VgIntro(bot))
     await bot.add_cog(DraftCog(bot))
+    await bot.add_cog(BOTCRoleCog(bot))
+    await bot.add_cog(BOTCJinxCog(bot))
+    await bot.add_cog(BOTCFabledCog(bot))
+    await bot.add_cog(BOTCNightOrderCog(bot))
+    await bot.add_cog(BOTCScriptsCog(bot))
+    await bot.add_cog(BOTCHelpCog(bot))
+    await bot.add_cog(BOTCGame(bot))
 
 
 asyncio.run(startcog())

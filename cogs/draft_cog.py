@@ -25,12 +25,14 @@ for p in [
         sys.path.insert(0, p)
         break
 
-from fifa_data.services.simulation_service import run_simulation, TEAM_METRICS, GROUPS
+from fifa_data.services.simulation_service import run_simulation, run_monte_carlo, TEAM_METRICS, GROUPS
 from fifa_data.services.fantasy_service import FantasyService, FIFA_POSITION_MAP
 from fifa_data.services.match_analytics import (
-    fetch_and_cache_data, get_match_analytics, get_form_players, get_differentials,
-    get_matches_for_team, get_squad_remaining, get_squad_games_played,
-    get_group_standings, load_data, expand_name_variants,
+    fetch_and_cache_data, ensure_fresh_data, get_match_analytics,
+    get_form_players, get_differentials, get_matches_for_team,
+    get_squad_remaining, get_squad_games_played, get_group_standings,
+    get_tournament_phase, load_data, expand_name_variants,
+    get_eliminated_set, is_team_eliminated,
 )
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data", "data", "draft_data.json")
@@ -1748,14 +1750,18 @@ class DraftCog(commands.Cog):
 
         await self.fantasy.fetch_data()
         try:
-            await fetch_and_cache_data()
+            await ensure_fresh_data()
         except Exception:
             pass
-        squad_games, max_games = get_squad_games_played()
+        try:
+            squad_games, max_games = get_squad_games_played()
+        except Exception:
+            squad_games, max_games = {}, 0
         squad_remaining = get_squad_remaining()
+        eliminated = get_eliminated_set()
 
         def _behind(sn):
-            if not sn:
+            if not sn or sn in eliminated:
                 return False
             gp = squad_games.get(sn, 0)
             if gp < max_games:
@@ -1772,25 +1778,38 @@ class DraftCog(commands.Cog):
             resolved = self.fantasy.resolve_players(team["players"])
             total = sum(r["net_points"] for r in resolved)
             not_played = sum(1 for r in resolved if _behind(r["squad_name"]))
+            knocked = sum(1 for r in resolved if r["squad_name"] in eliminated)
             details = [
                 (r["name"], r["net_points"], r["position"], r["squad_name"])
                 for r in resolved
             ]
-            results.append((total, manager, details, not_played))
+            results.append((total, manager, details, not_played, knocked))
 
         results.sort(key=lambda x: x[0], reverse=True)
 
         embed = discord.Embed(title="🏆 Draft Fantasy Points", color=0xff3fb9)
-        for rank, (total, manager, details, not_played) in enumerate(results, 1):
+        phase = get_tournament_phase()
+        embed.set_footer(text=f"Phase: {phase}")
+        for rank, (total, manager, details, not_played, knocked) in enumerate(results, 1):
             lines = []
             for n, p, pos, squad_name in details:
-                icon = "⏳ " if _behind(squad_name) else ""
+                if squad_name in eliminated:
+                    icon = "❌ "
+                elif _behind(squad_name):
+                    icon = "⏳ "
+                else:
+                    icon = ""
                 sf = f" {_flag(squad_name)} {squad_name}" if squad_name else ""
                 pts_str = f"{p}pts"
                 lines.append(f"{icon}{n}: {pts_str} ({pos}){sf}")
             val = "\n".join(lines) if lines else "No players drafted"
             val += f"\n**Total: {total} pts**"
-            suffix = f" — ({not_played} not played ⏳)" if not_played else ""
+            tags = []
+            if not_played:
+                tags.append(f"{not_played} ⏳")
+            if knocked:
+                tags.append(f"{knocked} ❌")
+            suffix = f" — ({', '.join(tags)})" if tags else ""
             embed.add_field(name=f"#{rank} {manager}{suffix}", value=val[:1024], inline=False)
 
         await ctx.send(embed=embed)
@@ -2195,11 +2214,21 @@ class DraftCog(commands.Cog):
             total = len(self.fantasy._players)
             with_points = len([p for p in self.fantasy._players if p.get("stats", {}).get("totalPoints", 0) > 0])
             # Save fresh data to local files
-            with open(os.path.join(FIFA_DIR, "players.json"), "w", encoding="utf-8") as f:
+            os.makedirs(os.path.join(FIFA_DIR, "data"), exist_ok=True)
+            with open(os.path.join(FIFA_DIR, "data", "players.json"), "w", encoding="utf-8") as f:
                 json.dump(self.fantasy._players, f, ensure_ascii=False)
-            with open(os.path.join(FIFA_DIR, "squads.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(FIFA_DIR, "data", "squads.json"), "w", encoding="utf-8") as f:
                 json.dump(list(self.fantasy._squads.values()), f, ensure_ascii=False)
-            await status.edit(content=f"✅ Updated! {total} players loaded, {with_points} with points.")
+            # Also refresh match data
+            try:
+                await fetch_and_cache_data()
+            except Exception as match_e:
+                await status.edit(content=f"⚠️ Fantasy data OK ({total} players), but matches failed: {match_e}")
+                return
+            phase = get_tournament_phase()
+            eliminated = get_eliminated_set()
+            elim_msg = f", {len(eliminated)} teams eliminated" if eliminated else ""
+            await status.edit(content=f"✅ Updated! {total} players loaded, {with_points} with points, matches refreshed. Phase: {phase}{elim_msg}.")
         except Exception as e:
             await status.edit(content=f"❌ Failed to fetch: {e}")
 
@@ -2261,16 +2290,22 @@ class DraftCog(commands.Cog):
             "Match context affects xG: Group (baseline), Knockout (-0.01), "
             "Must-win (+0.02), Need draw (-0.015), GD chase (+0.025 xG, -0.015 def)."
         ), inline=False)
-        embed2.add_field(name="V5 — Match State Simulation (NEW)", value=(
-            "**`.simulate v5` / `.fsim detailed v5`**\n"
+        embed2.add_field(name="V5 — Match State Simulation (Comprehensive)", value=(
+            "**`.simulate v5` / `.fsim v5`**\n"
             "Full 90+ minute phase-based simulation on top of V4 tactical layer. "
             "Every match unfolds through 6 regular phases + 2 extra time phases. "
-            "Features: player fatigue system, yellow/red cards, substitutions, "
+            "Features: player fatigue, yellow/red cards, substitutions, "
             "in-match momentum, scoreline intelligence, manager reactions, "
-            "penalty shootouts, and dynamic event generation (attacks → shots → "
-            "big chances → goals). Most immersive and realistic option."
+            "penalty shootouts, and dynamic event generation.\n\n"
+            "**Comprehensive Output:** `.fsim v5` now includes pre-tournament "
+            "analysis from **all engine versions**:\n"
+            "• V1 — Elo/PELE ratings for every team\n"
+            "• V2 — Squad quality ratings (A/M/D/GK) + star players\n"
+            "• V3 — Dynamic state (chemistry, form, momentum, leadership)\n"
+            "• V4 — Manager profiles & tactical identity\n"
+            "• V5 — Tournament results + champion breakdown with cross-version insights"
         ), inline=False)
-        embed2.set_footer(text="48 teams | 20+ attributes | 8 formations | 5 contexts | V5 adds fatigue, cards, subs")
+        embed2.set_footer(text="48 teams | 5 engines | 1 comprehensive output | .fsim v5 for the full picture")
         await ctx.send(embed=embed2)
 
     @commands.command(aliases=["sim", "fsim"])
@@ -2346,11 +2381,12 @@ class DraftCog(commands.Cog):
                 "completed": completed,
                 "upcoming": upcoming,
             }
-            with open(os.path.join(fifa_dir, "matches.json"), "w", encoding="utf-8") as f:
+            os.makedirs(os.path.join(fifa_dir, "data"), exist_ok=True)
+            with open(os.path.join(fifa_dir, "data", "matches.json"), "w", encoding="utf-8") as f:
                 json.dump(matches_out, f, indent=2, ensure_ascii=False)
-            with open(os.path.join(fifa_dir, "players.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(fifa_dir, "data", "players.json"), "w", encoding="utf-8") as f:
                 json.dump(players, f, indent=2, ensure_ascii=False)
-            with open(os.path.join(fifa_dir, "squads.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(fifa_dir, "data", "squads.json"), "w", encoding="utf-8") as f:
                 json.dump(squads_raw, f, indent=2, ensure_ascii=False)
 
             self.fantasy._players = None
@@ -2372,6 +2408,126 @@ class DraftCog(commands.Cog):
             await self._simulate_animated(ctx, status_msg, data, model=model)
         else:
             await self._simulate_fast(ctx, status_msg, data, model=model, debug=debug)
+
+    @commands.command(aliases=["mc"])
+    async def montecarlo(self, ctx, *, args: str = None):
+        """Monte Carlo simulation: `.montecarlo v5 50` — runs N full tournaments, shows champion %."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Admin only.")
+
+        tokens = args.split() if args and args.strip() else []
+        model = "v5"
+        n = 50
+        if tokens:
+            if tokens[0].lower() in ("v1", "v2", "v3", "v4", "v5"):
+                model = tokens[0].lower()
+                if len(tokens) > 1:
+                    try:
+                        n = max(1, min(int(tokens[1]), 500))
+                    except ValueError:
+                        pass
+            else:
+                try:
+                    n = max(1, min(int(tokens[0]), 500))
+                except ValueError:
+                    pass
+
+        status_msg = await ctx.send(f"🎲 **Monte Carlo — {model.upper()}**\n⏳ Fetching latest match data...")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {"idCompetition": "17", "idSeason": "285023", "count": 200}
+                async with session.get(
+                    "https://api.fifa.com/api/v3/calendar/matches",
+                    params=params, timeout=15,
+                ) as r:
+                    match_data = await r.json()
+                async with session.get(
+                    "https://play.fifa.com/json/fantasy/players.json",
+                    timeout=15,
+                ) as r:
+                    players = await r.json()
+                async with session.get(
+                    "https://play.fifa.com/json/fantasy/squads.json",
+                    timeout=15,
+                ) as r:
+                    squads_raw = await r.json()
+
+            fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+            results = match_data.get("Results", [])
+            completed, upcoming = [], []
+            for m in results:
+                status = m.get("MatchStatus")
+                home_data = m.get("Home") or {}
+                away_data = m.get("Away") or {}
+                home = (home_data.get("TeamName") or [{}])[0].get("Description", "?")
+                away = (away_data.get("TeamName") or [{}])[0].get("Description", "?")
+                entry = {
+                    "id": m.get("IdMatch"), "date": m.get("Date", "?"),
+                    "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
+                    "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
+                    "home": {"name": home, "score": m.get("HomeTeamScore"), "id": home_data.get("IdTeam")},
+                    "away": {"name": away, "score": m.get("AwayTeamScore"), "id": away_data.get("IdTeam")},
+                    "winner": m.get("Winner"), "status": status,
+                }
+                (completed if status == 0 else upcoming).append(entry)
+            matches_out = {
+                "last_updated": datetime.utcnow().isoformat(),
+                "completed_count": len(completed), "upcoming_count": len(upcoming),
+                "competition": "FIFA World Cup 2026",
+                "completed": completed, "upcoming": upcoming,
+            }
+            os.makedirs(os.path.join(fifa_dir, "data"), exist_ok=True)
+            with open(os.path.join(fifa_dir, "data", "matches.json"), "w", encoding="utf-8") as f:
+                json.dump(matches_out, f, indent=2, ensure_ascii=False)
+            with open(os.path.join(fifa_dir, "data", "players.json"), "w", encoding="utf-8") as f:
+                json.dump(players, f, indent=2, ensure_ascii=False)
+            with open(os.path.join(fifa_dir, "data", "squads.json"), "w", encoding="utf-8") as f:
+                json.dump(squads_raw, f, indent=2, ensure_ascii=False)
+
+            self.fantasy._players = None
+            self.fantasy._cache_time = 0
+
+            await status_msg.edit(content=f"🎲 **Monte Carlo — {model.upper()}**\n⏳ Running {n} simulations...")
+        except Exception as e:
+            await status_msg.edit(content=f"🎲 **Monte Carlo — {model.upper()}**\n⚠️ Using cached data ({e})")
+
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(None, run_monte_carlo, model, n, False)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return await ctx.send(f"❌ Monte Carlo error: {e}")
+
+        champ = result["champion"]
+        embed = discord.Embed(
+            title=f"🎲 Monte Carlo — {model.upper()} ({n} sims)",
+            description=f"Completed in {result['elapsed']}s ({result['sims_per_sec']}/s)",
+            color=0xff3fb9,
+        )
+
+        champ_lines = []
+        total = result["total"]
+        for team, count in champ[:15]:
+            pct = count / total * 100
+            medal = "🥇" if champ and team == champ[0][0] else ""
+            champ_lines.append(f"{medal}{team}: {pct:.1f}% ({count}/{total})")
+        if len(champ) > 15:
+            champ_lines.append(f"... and {len(champ) - 15} others")
+        embed.add_field(name="🏆 Champion Probability", value="\n".join(champ_lines), inline=False)
+
+        ff = result["final_four"]
+        if ff:
+            ff_lines = [f"{t}: {c/total*100:.1f}%" for t, c in ff[:10]]
+            embed.add_field(name="Semi-Final Appearances", value="\n".join(ff_lines), inline=True)
+
+        gw = result["group_win"]
+        if gw:
+            gw_lines = [f"{t}: {c/total*100:.1f}%" for t, c in gw[:10]]
+            embed.add_field(name="Group Win Rate", value="\n".join(gw_lines), inline=True)
+
+        await status_msg.edit(content="", embed=embed)
 
     async def _simulate_detailed(self, ctx, tokens: list[str]) -> None:
         VALID_VERSIONS = {"v1", "v2", "v3", "v4", "v5"}
@@ -2567,12 +2723,23 @@ class DraftCog(commands.Cog):
         w1_bar = "█" * max(1, round(mc.win_prob_a / 100 * bar_len)) if mc.win_prob_a > 0 else ""
         w2_bar = "█" * max(1, round(mc.win_prob_b / 100 * bar_len)) if mc.win_prob_b > 0 else ""
         d_bar = "█" * max(1, round(mc.draw_prob / 100 * bar_len)) if mc.draw_prob > 0 else ""
+        pen_text = ""
+        if report.knockout and mc.penalty_matches > 0:
+            pct = mc.penalty_matches / mc.total * 100
+            pen_text = (
+                f"\n**Penalties:** {mc.penalty_matches:,}/{mc.total:,} ({pct:.1f}%)\n"
+                f"{report.flag_a} {report.team_a}: {mc.penalty_wins_a:,} wins "
+                f"({mc.penalty_wins_a/mc.penalty_matches*100:.1f}%) "
+                f"| {report.flag_b} {report.team_b}: {mc.penalty_wins_b:,} wins "
+                f"({mc.penalty_wins_b/mc.penalty_matches*100:.1f}%)"
+            )
         embed.add_field(
             name="📊 Match Outcome",
             value=(
                 f"**{report.flag_a} {report.team_a}**  {mc.win_prob_a:.1f}%\n`{w1_bar:<{bar_len}}` {mc.wins_a:,}\n"
                 f"**Draw**          {mc.draw_prob:.1f}%\n`{d_bar:<{bar_len}}` {mc.draws:,}\n"
                 f"**{report.flag_b} {report.team_b}**  {mc.win_prob_b:.1f}%\n`{w2_bar:<{bar_len}}` {mc.wins_b:,}"
+                f"{pen_text}"
             ),
             inline=False,
         )
@@ -3075,7 +3242,7 @@ class DraftCog(commands.Cog):
             )
 
         elif version == "v3":
-            engine = V3DynamicEngine(data_dir=fifa_dir)
+            engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
             sa = engine.get_team_strength(team_a, is_knockout=knockout)
             sb = engine.get_team_strength(team_b, is_knockout=knockout)
             da = engine.get_dynamic_state(team_a, is_knockout=knockout)
@@ -3114,7 +3281,7 @@ class DraftCog(commands.Cog):
             )
 
         elif version == "v4":
-            engine = V4TacticalEngine(data_dir=fifa_dir)
+            engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
             v3 = engine._v3
             sa = v3.get_team_strength(team_a, is_knockout=knockout)
             sb = v3.get_team_strength(team_b, is_knockout=knockout)
@@ -3174,7 +3341,7 @@ class DraftCog(commands.Cog):
             )
 
         else:  # v5
-            engine = V5MatchStateEngine(data_dir=fifa_dir)
+            engine = V5MatchStateEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
             v4 = engine._v4
             v3 = v4._v3
             sa = v3.get_team_strength(team_a, is_knockout=knockout)
@@ -3398,6 +3565,9 @@ class DraftCog(commands.Cog):
         total_xg_a = 0.0
         total_xg_b = 0.0
         score_counter: dict[tuple[int, int], int] = collections.Counter()
+        penalty_matches = 0
+        penalty_wins_a = 0
+        penalty_wins_b = 0
 
         for _ in range(simulations):
             if version in ("v4", "v5"):
@@ -3417,6 +3587,13 @@ class DraftCog(commands.Cog):
             total_xg_b += g2
             score_counter[(g1, g2)] += 1
 
+            if version == "v5" and knockout and hasattr(engine, "last_match_state") and engine.last_match_state and engine.last_match_state.is_penalty_shootout:
+                penalty_matches += 1
+                if g1 > g2:
+                    penalty_wins_a += 1
+                else:
+                    penalty_wins_b += 1
+
         avg_xg_a = total_xg_a / simulations
         avg_xg_b = total_xg_b / simulations
         top_scores = score_counter.most_common(10)
@@ -3431,6 +3608,9 @@ class DraftCog(commands.Cog):
             top_scores=top_scores,
             min_goals_a=min_a, max_goals_a=max_a,
             min_goals_b=min_b, max_goals_b=max_b,
+            penalty_matches=penalty_matches,
+            penalty_wins_a=penalty_wins_a,
+            penalty_wins_b=penalty_wins_b,
         )
 
         # === V5.1 Model Confidence (after MC results available) ===
@@ -3487,7 +3667,7 @@ class DraftCog(commands.Cog):
             elif lowered == "debug":
                 debug = True
             else:
-                return None, "Usage: `.simulate [v1|v2|v3|v4] [fast|animated] [debug]`", False
+                return None, "Usage: `.simulate [v1|v2|v3|v4|v5] [fast|animated] [debug]`", False
 
         return model, presentation, debug
 
@@ -3626,8 +3806,251 @@ class DraftCog(commands.Cog):
         await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} SIMULATION COMPLETE**")
         await ctx.send(f"🏆🏆🏆 **{champ.upper()}** ARE WORLD CUP 2026 CHAMPIONS! 🏆🏆🏆")
 
+    def _gather_v1_insights(self, top_n: int = 10) -> list[dict]:
+        teams = []
+        for t, m in TEAM_METRICS.items():
+            elo = float(m.get("ELO", 1500))
+            pele = float(m.get("PELE", 1500))
+            teams.append({"team": t, "elo": elo, "pele": pele, "combined": (elo + pele) / 2})
+        teams.sort(key=lambda x: x["combined"], reverse=True)
+        return teams[:top_n]
+
+    def _gather_v2_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
+        from fifa_data.engines.v2_player_engine import V2PlayerMatchEngine
+        engine = V2PlayerMatchEngine(data_dir=fifa_dir)
+        results = []
+        for t in top_teams:
+            try:
+                s = engine.get_team_strength(t)
+                results.append({
+                    "team": t, "attack": s.attack_rating, "midfield": s.midfield_rating,
+                    "defense": s.defense_rating, "gk": s.goalkeeper_rating,
+                    "formation": s.formation,
+                    "best_player": max(s.role_ratings, key=lambda r: r.rating).player_name,
+                    "best_rating": max(r.rating for r in s.role_ratings),
+                })
+            except Exception:
+                continue
+        return results
+
+    def _gather_v3_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
+        from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
+        from fifa_data.services.simulation_service import TEAM_METRICS
+        engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+        results = []
+        for t in top_teams:
+            try:
+                dyn = engine.get_dynamic_state(t)
+                comps = {c.component: c.value for c in dyn.components()}
+                results.append({
+                    "team": t,
+                    "chemistry": comps.get("chemistry", 0),
+                    "experience": comps.get("experience", 0),
+                    "form": comps.get("form", 0),
+                    "momentum": comps.get("momentum", 0),
+                    "continuity": comps.get("continuity", 0),
+                    "leadership": comps.get("leadership", 0),
+                    "combined": dyn.combined_multiplier(),
+                })
+            except Exception:
+                continue
+        return results
+
+    def _gather_v4_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
+        from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
+        from fifa_data.services.manager_service import get_manager
+        from fifa_data.services.simulation_service import TEAM_METRICS
+        engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+        results = []
+        for t in top_teams:
+            try:
+                mgr = get_manager(t)
+                squad = engine.squads.get(t)
+                formation = squad.formation if squad else "N/A"
+                results.append({
+                    "team": t,
+                    "manager": mgr.name if mgr else "Unknown",
+                    "style": mgr.preferred_style if mgr and hasattr(mgr, "preferred_style") else "N/A",
+                    "formation": formation,
+                })
+            except Exception:
+                continue
+        return results
+
+    def _all_tournament_teams(self) -> list[str]:
+        seen = set()
+        for gid in sorted(GROUPS.keys()):
+            for t in GROUPS[gid]:
+                if t not in seen:
+                    seen.add(t)
+        return list(seen)
+
+    async def _show_comprehensive_v5(self, ctx, status_msg, data) -> None:
+        await status_msg.edit(content="🌍 **World Cup 2026 — V5 Comprehensive Simulation**\n🔍 Gathering cross-version insights...")
+
+        fifa_dir = FIFA_DIR
+        all_teams = self._all_tournament_teams()
+
+        v1_data = self._gather_v1_insights(15)
+        top_names = [t["team"] for t in v1_data[:10]]
+        v2_data = self._gather_v2_insights(fifa_dir, top_names)
+        v3_data = self._gather_v3_insights(fifa_dir, top_names)
+        v4_data = self._gather_v4_insights(fifa_dir, top_names)
+
+        v2_map = {t["team"]: t for t in v2_data}
+        v3_map = {t["team"]: t for t in v3_data}
+        v4_map = {t["team"]: t for t in v4_data}
+
+        champ = data.get("champion", "TBD")
+
+        flag_map = {c_name: flag for c_name, flag, _code in COUNTRY_LIST}
+        flag_map.update({v: flag_map.get(k, "") for k, v in SIM_TO_COUNTRY.items()})
+        champion_flag = flag_map.get(champ, "")
+
+        embeds = []
+
+        # ── Embed 1: Version Overview ──
+        e1 = discord.Embed(title="Version Overview & Pre-Tournament Analysis", color=0xff3fb9)
+        e1.set_author(name=f"World Cup 2026 — V5 Comprehensive Simulation")
+        v1_lines = []
+        for rank, t in enumerate(v1_data[:8], 1):
+            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"`#{rank}`")
+            v1_lines.append(f"{medal} **{t['team']}** — Elo {t['elo']:.0f} / PELE {t['pele']:.0f} / Comb **{t['combined']:.0f}**")
+        e1.add_field(name="📈 V1 — Top 8 by Elo/PELE Combined", value="\n".join(v1_lines), inline=False)
+
+        squad_lines = []
+        for t in v2_data[:6]:
+            squad_lines.append(f"**{t['team']}** — A={t['attack']:.1f} M={t['midfield']:.1f} D={t['defense']:.1f} GK={t['gk']:.1f} | ⭐ {t['best_player']} ({t['best_rating']:.1f})")
+        e1.add_field(name="⭐ V2 — Top Squads by Attribute Rating", value="\n".join(squad_lines), inline=False)
+        embeds.append(e1)
+
+        # ── Embed 2: Dynamics & Tactics ──
+        e2 = discord.Embed(title="Dynamic State & Tactical Landscape", color=0xff3fb9)
+        if v3_data:
+            dyn_lines = []
+            for t in v3_data[:6]:
+                dyn_lines.append(f"**{t['team']}** — Chem {t['chemistry']:+.2%} Form {t['form']:+.2%} Lead {t['leadership']:+.2%} Mom {t['momentum']:+.2%} = **{t['combined']:.4f}×**")
+            e2.add_field(name="🔄 V3 — Dynamic State Multipliers", value="\n".join(dyn_lines), inline=False)
+        if v4_data:
+            tac_lines = []
+            for t in v4_data[:6]:
+                tac_lines.append(f"**{t['team']}** — {t['manager']} ({t['style']}) | {t['formation']}")
+            e2.add_field(name="🧠 V4 — Manager & Tactical Profiles", value="\n".join(tac_lines), inline=False)
+
+        knockout_total = data["stats"]["knockout_matches"]
+        group_total = data["stats"]["total_group_matches"]
+        real_total = data["stats"]["real_count"]
+        sim_group = group_total - real_total
+        e2.add_field(name="⚙️ V5 — Match State Features", value=(
+            "• 8-phase simulation (6 regular + 2 extra time)\n"
+            "• Player fatigue system per 15-min phase\n"
+            "• Yellow/red cards with attribute probability\n"
+            "• Substitution AI (energy, cards, rating)\n"
+            "• In-match momentum (goals, cards, chances)\n"
+            "• Scoreline intelligence & manager reactions\n"
+            "• Penalty shootout support"
+        ), inline=False)
+        e2.add_field(name="📊 Tournament Scope", value=(
+            f"Groups: {len(data['groups'])} groups × 6 matches = {group_total} matches "
+            f"({real_total} real + {sim_group} simulated)\n"
+            f"Knockout: {knockout_total} matches\n"
+            f"Total: {group_total + knockout_total + data['stats']['third_place']} matches"
+        ), inline=False)
+        embeds.append(e2)
+
+        # ── Embed 3: Champion Breakdown ──
+        e3 = discord.Embed(title="V5 Champion Analysis", color=0xffd700)
+        e3.set_author(name=f"{champion_flag} {champ} — World Cup 2026 Champions!")
+        e3.description = f"🏆🏆🏆 **{champ.upper()}** ARE WORLD CUP 2026 CHAMPIONS! 🏆🏆🏆"
+
+        champ_v1 = next((t for t in v1_data if t["team"] == champ), None)
+        champ_v2 = v2_map.get(champ)
+        champ_v3 = v3_map.get(champ)
+        champ_v4 = v4_map.get(champ)
+
+        if champ_v1:
+            e3.add_field(name="📈 V1 Rating", value=f"Elo {champ_v1['elo']:.0f} / PELE {champ_v1['pele']:.0f} / Combined **{champ_v1['combined']:.0f}**", inline=True)
+        if champ_v2:
+            e3.add_field(name="⭐ V2 Squad", value=f"A={champ_v2['attack']:.1f} M={champ_v2['midfield']:.1f} D={champ_v2['defense']:.1f} GK={champ_v2['gk']:.1f}\n⭐ {champ_v2['best_player']} ({champ_v2['best_rating']:.1f})", inline=True)
+        if champ_v4:
+            e3.add_field(name="🧠 V4 Manager", value=f"{champ_v4['manager']} ({champ_v4['style']})\nFormation: {champ_v4['formation']}", inline=True)
+        if champ_v3:
+            e3.add_field(name="🔄 V3 Dynamics", value=f"Chem {champ_v3['chemistry']:+.2%} Form {champ_v3['form']:+.2%}\nCombined: **{champ_v3['combined']:.4f}×**", inline=True)
+
+        # Runner-up
+        final_rd = data["knockout"][4] if len(data["knockout"]) > 4 else []
+        runner_up = None
+        for m in final_rd:
+            if m and m["winner"] != champ:
+                runner_up = m["winner"]
+                break
+        if runner_up:
+            ru_v1 = next((t for t in v1_data if t["team"] == runner_up), None)
+            e3.add_field(name=f"🥈 Runner-Up: {runner_up}", value=(
+                f"V1: {ru_v1['combined']:.0f}" if ru_v1 else "N/A"
+            ), inline=True)
+
+        # Tournament path
+        ko_names = ["R32", "R16", "QF", "SF", "Final"]
+        path_parts = []
+        for rnd_idx, rd_name in enumerate(ko_names):
+            if rnd_idx < len(data["knockout"]):
+                for m in data["knockout"][rnd_idx]:
+                    if m and (m["home"] == champ or m["away"] == champ):
+                        opp = m["away"] if m["home"] == champ else m["home"]
+                        score = f"{m['home_goals']}-{m['away_goals']}"
+                        path_parts.append(f"{rd_name}: vs **{opp}** {score}")
+        if path_parts:
+            e3.add_field(name="🏆 Champion's Path", value="\n".join(path_parts), inline=False)
+
+        e3.set_footer(text="V5 combines all prior versions: Elo → Player Attributes → Dynamics → Tactics → Match State")
+        embeds.append(e3)
+
+        # Send the tournament results first (same as fast), then supplementary embeds
+        await status_msg.edit(content=f"🌍 **World Cup 2026 — V5 Comprehensive Simulation Complete**")
+
+        # Group Stage - tables only
+        for gid in sorted(data["groups"].keys()):
+            gp = data["groups"][gid]
+            table = gp["table"]
+            lines = [f"**Group {gid}**", "` #  Team                PTS  GD  GF`"]
+            for rank, t, pts, gd, gf in table:
+                medal = {1: "🥇", 2: "🥈", 3: "🥉", 4: "  "}.get(rank, "  ")
+                lines.append(f"`{medal}{rank}.  {t:<18s} {pts:>2d}  {gd:+>2d}  {gf}`")
+            await ctx.send("\n".join(lines))
+
+        # Third place
+        tp_lines = ["**Best 3rd-Placed Teams** (top 8 advance)"]
+        for rank, tp in enumerate(data["third_placed"], 1):
+            gid, t, pts, gd, gf = tp
+            mark = "✅" if rank <= 8 else "❌"
+            tp_lines.append(f"{mark} Grp {gid} **{t}** — {pts}pts, {gd:+}GD, {gf}GF")
+        await ctx.send("\n".join(tp_lines[:13]))
+
+        # Knockout results
+        for rnd_idx, (rd_name, rd_matches) in enumerate(zip(ko_names, data["knockout"])):
+            if rnd_idx == 4:
+                await ctx.send(f"🔴 **{rd_name}**")
+            else:
+                await ctx.send(f"**{rd_name}**")
+            for m in rd_matches:
+                if m:
+                    await ctx.send(f"⚽ **{m['home']}** {m['home_goals']}-{m['away_goals']} **{m['away']}** → **{m['winner']}**")
+
+        tp3 = data.get("third_place")
+        if tp3:
+            await ctx.send("🥉 **Third Place Play-Off**")
+            await ctx.send(f"⚽ **{tp3['home']}** {tp3['home_goals']}-{tp3['away_goals']} **{tp3['away']}** → **{tp3['winner']}** wins!")
+
+        # Send supplementary analysis embeds
+        for embed in embeds:
+            await ctx.send(embed=embed)
+
     async def _simulate_fast(self, ctx, status_msg, data, model: str = "v1", debug: bool = False):
         """Fast simulation - show results without animations."""
+        if model == "v5" and not debug:
+            return await self._show_comprehensive_v5(ctx, status_msg, data)
+
         await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation Complete**")
 
         # Group Stage - tables only

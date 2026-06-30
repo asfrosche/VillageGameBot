@@ -122,7 +122,9 @@ MATCHES_TEAM_MAP = {
     "Bosnia and Herzegovina": "Bosnia-Herzegovina",
 }
 
-def update_elo_from_matches(matches_file="matches.json"):
+def update_elo_from_matches(matches_file=None):
+    if matches_file is None:
+        matches_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "matches.json")
     with open(matches_file, encoding="utf-8") as f:
         data = json.load(f)
     completed = data.get("completed", [])
