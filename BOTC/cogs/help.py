@@ -133,7 +133,17 @@ def _build_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="`.bnominate @player`",
-        value="[Admin] Nominate a player. An embed with Guilty/Not Guilty buttons appears. Tracks alive count & required votes. Expires after a set time.",
+        value="[Admin] Nominate a player. Seating chart embed with Guilty/Not Guilty buttons, visual clock, accusation/defense. Expires after a set time.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.baccuse <text>`",
+        value="[Admin] Set the accusation for the current nomination.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bdefend <text>`",
+        value="[Admin] Set the defense for the current nomination.",
         inline=False,
     )
     embed.add_field(
@@ -143,7 +153,47 @@ def _build_help_embed() -> discord.Embed:
     )
     embed.add_field(
         name="`.bnoms`",
-        value="Show current nomination status, vote counts, voter turnout, and required guilty votes.",
+        value="Show current nomination status, seating chart with votes, clock position, and required guilty votes.",
+        inline=False,
+    )
+    embed.add_field(
+        name="── Seating ──",
+        value="Set and view the BOTC seating order. All mechanics reference this order.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bsetseating @p1 @p2 ...`",
+        value="[Admin] Set the permanent seating order for this server.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bseating`",
+        value="Show the current seating order with dead ☠️ and sponsor ⭐ indicators.",
+        inline=False,
+    )
+    embed.add_field(
+        name="── Player State ──",
+        value="Track dead players and sponsors (substitutes who never vote).",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bkill @player`",
+        value="[Admin] Mark a player as dead. They lose their dead vote.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.brevive @player`",
+        value="[Admin] Revive a dead player and restore their dead vote.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bsponsor @player`",
+        value="[Admin] Mark a player as a sponsor (substitute, cannot vote).",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bunsponsor @player`",
+        value="[Admin] Remove sponsor status from a player.",
         inline=False,
     )
 
