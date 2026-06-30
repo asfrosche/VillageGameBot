@@ -3241,7 +3241,6 @@ class DraftCog(commands.Cog):
 
         # === Pre-match analysis: capture engine state before any simulations ===
         if version == "v1":
-            from fifa_data.services.simulation_service import TEAM_METRICS
             engine = V1EloMatchEngine(TEAM_METRICS)
             r_a = engine.get_team_ratings(team_a)
             r_b = engine.get_team_ratings(team_b)
@@ -3864,7 +3863,6 @@ class DraftCog(commands.Cog):
 
     def _gather_v3_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
         from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
-        from fifa_data.services.simulation_service import TEAM_METRICS
         engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
         results = []
         for t in top_teams:
@@ -3888,7 +3886,6 @@ class DraftCog(commands.Cog):
     def _gather_v4_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
         from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
         from fifa_data.services.manager_service import get_manager
-        from fifa_data.services.simulation_service import TEAM_METRICS
         engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
         results = []
         for t in top_teams:
