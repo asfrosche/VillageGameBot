@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import botc
+from utils.script_image import generate_script_image
 
 EDITION_KEYS = ["tb", "bmr", "snv"]
 
@@ -33,27 +34,6 @@ class ScriptsView(discord.ui.View):
         await _send_script(interaction, "snv")
 
 
-async def _send_script(interaction: discord.Interaction, edition_key: str):
-    await interaction.response.defer()
-    edition_name = botc.get_edition_name(edition_key)
-
-    def gen():
-        return botc.generate_script_image(edition_key)
-
-    png_bytes = await asyncio.to_thread(gen)
-    file = discord.File(io.BytesIO(png_bytes), filename=f"{edition_key}.png")
-
-    download_url = _script_download_url(edition_key)
-    embed = discord.Embed(
-        title=f"📜 {edition_name}",
-        color=discord.Color.blue(),
-    )
-    embed.set_image(url=f"attachment://{edition_key}.png")
-    embed.add_field(name="Download", value=f"[JSON]({download_url})", inline=True)
-
-    await interaction.followup.send(embed=embed, file=file)
-
-
 def _script_download_url(edition_key: str) -> str:
     urls = {
         "tb": "https://botcscripts.com/script/35930/1.3.0/download",
@@ -63,28 +43,21 @@ def _script_download_url(edition_key: str) -> str:
     return urls.get(edition_key, "")
 
 
-async def _send_script_to_channel(ctx_or_interaction, edition_key: str):
-    """Send a script image to a text channel (prefix or slash agnostic)."""
+async def _make_script_embed_and_file(edition_key: str) -> tuple[discord.Embed, discord.File]:
     edition_name = botc.get_edition_name(edition_key)
-
-    def gen():
-        return botc.generate_script_image(edition_key)
-
-    png_bytes = await asyncio.to_thread(gen)
+    png_bytes = await asyncio.to_thread(generate_script_image, edition_key)
     file = discord.File(io.BytesIO(png_bytes), filename=f"{edition_key}.png")
-
     download_url = _script_download_url(edition_key)
-    embed = discord.Embed(
-        title=f"📜 {edition_name}",
-        color=discord.Color.blue(),
-    )
+    embed = discord.Embed(title=f"📜 {edition_name}", color=discord.Color.blue())
     embed.set_image(url=f"attachment://{edition_key}.png")
     embed.add_field(name="Download", value=f"[JSON]({download_url})", inline=True)
+    return embed, file
 
-    if isinstance(ctx_or_interaction, discord.Interaction):
-        await ctx_or_interaction.followup.send(embed=embed, file=file)
-    else:
-        await ctx_or_interaction.send(embed=embed, file=file)
+
+async def _send_script(interaction: discord.Interaction, edition_key: str):
+    await interaction.response.defer()
+    embed, file = await _make_script_embed_and_file(edition_key)
+    await interaction.followup.send(embed=embed, file=file)
 
 
 class ScriptsCog(commands.Cog):
@@ -100,23 +73,11 @@ class ScriptsCog(commands.Cog):
             if edition not in EDITION_KEYS:
                 await interaction.followup.send(f"Invalid edition `{edition}`. Use: tb, bmr, or snv.", ephemeral=True)
                 return
-            await _send_script_to_channel(interaction, edition)
+            embed, file = await _make_script_embed_and_file(edition)
+            await interaction.followup.send(embed=embed, file=file)
             return
 
-        png_bytes = await asyncio.to_thread(botc.generate_script_image, "tb")
-        file = discord.File(io.BytesIO(png_bytes), filename="tb.png")
-
-        embed = discord.Embed(
-            title="📜 Trouble Brewing",
-            color=discord.Color.blue(),
-        )
-        embed.set_image(url="attachment://tb.png")
-        embed.add_field(
-            name="Download",
-            value="[JSON](https://botcscripts.com/script/35930/1.3.0/download)",
-            inline=True,
-        )
-
+        embed, file = await _make_script_embed_and_file("tb")
         view = ScriptsView(interaction.user.id)
         await interaction.followup.send(embed=embed, file=file, view=view)
 
@@ -128,24 +89,12 @@ class ScriptsCog(commands.Cog):
                 await ctx.send(f"Invalid edition `{edition}`. Use: tb, bmr, or snv.")
                 return
             async with ctx.typing():
-                await _send_script_to_channel(ctx, edition)
+                embed, file = await _make_script_embed_and_file(edition)
+                await ctx.send(embed=embed, file=file)
             return
 
         async with ctx.typing():
-            png_bytes = await asyncio.to_thread(botc.generate_script_image, "tb")
-            file = discord.File(io.BytesIO(png_bytes), filename="tb.png")
-
-            embed = discord.Embed(
-                title="📜 Trouble Brewing",
-                color=discord.Color.blue(),
-            )
-            embed.set_image(url="attachment://tb.png")
-            embed.add_field(
-                name="Download",
-                value="[JSON](https://botcscripts.com/script/35930/1.3.0/download)",
-                inline=True,
-            )
-
+            embed, file = await _make_script_embed_and_file("tb")
             view = ScriptsView(ctx.author.id)
             await ctx.send(embed=embed, file=file, view=view)
 
