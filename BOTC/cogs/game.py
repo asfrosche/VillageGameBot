@@ -11,7 +11,6 @@ import discord
 from discord.ext import commands
 from cogs.data_utils import load_guild_data
 
-NOMINATION_TIMEOUT = 120
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 STATE_FILE = os.path.join(DATA_DIR, "game_state.json")
 
@@ -23,7 +22,7 @@ class PlayerState:
     user_id: int
     dead: bool = False
     has_dead_vote: bool = False
-    is_sponsor: bool = False
+    sponsor_id: int | None = None  # user_id of this player's sponsor
 
 
 @dataclass
@@ -58,6 +57,7 @@ def _load_state() -> dict[int, GameState]:
         players_raw = data.get("players", {})
         players = {}
         for uid_str, pd in players_raw.items():
+            pd.pop("is_sponsor", None)  # backward compat
             players[int(uid_str)] = PlayerState(**pd)
         out[gid] = GameState(seating_order=seating, players=players)
     return out
@@ -73,7 +73,7 @@ def _save_state(states: dict[int, GameState]):
                 "user_id": ps.user_id,
                 "dead": ps.dead,
                 "has_dead_vote": ps.has_dead_vote,
-                "is_sponsor": ps.is_sponsor,
+                "sponsor_id": ps.sponsor_id,
             }
         raw[str(gid)] = {
             "seating_order": gs.seating_order,
@@ -90,8 +90,6 @@ def get_clock_order(seating: list[int], nominee_id: int) -> list[int]:
 
 def can_vote(player: PlayerState | None) -> bool:
     if player is None:
-        return False
-    if player.is_sponsor:
         return False
     if not player.dead:
         return True
@@ -133,10 +131,10 @@ class VoteView(discord.ui.View):
             return "✅"
         if vote is False:
             return "❌"
-        if ps and ps.is_sponsor:
-            return "⭐"
         if ps and ps.dead:
             return "☠️🗳️" if ps.has_dead_vote else "☠️"
+        if ps and ps.sponsor_id is not None:
+            return "⭐"
         return "—"
 
     def _build_seating_chart(self, gs: GameState) -> str:
@@ -214,8 +212,6 @@ class VoteView(discord.ui.View):
             return await interaction.response.send_message("Only alive players can vote.", ephemeral=True)
         ps = self.cog._get_state(self.guild_id).players.get(interaction.user.id)
         if not can_vote(ps):
-            if ps and ps.is_sponsor:
-                return await interaction.response.send_message("Sponsors cannot vote.", ephemeral=True)
             if ps and ps.dead:
                 return await interaction.response.send_message("You are dead and have no dead vote left.", ephemeral=True)
             return await interaction.response.send_message("You cannot vote.", ephemeral=True)
@@ -226,7 +222,7 @@ class VoteView(discord.ui.View):
             self.cog._save()
         await self._refresh()
         label = "Guilty" if guilty else "Not Guilty"
-        await interaction.response.send_message(f"You voted **{label}**.", ephemeral=True)
+        await interaction.response.send_message(f"You voted **{label}**. Click the other button to change your vote.", ephemeral=True)
 
     async def _advance_clock(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
@@ -246,7 +242,7 @@ class VoteView(discord.ui.View):
 
     async def _back_clock(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Only the Storyteller can advance the clock.", ephemeral=True)
+            return await interaction.response.send_message("Only the Storyteller can move the clock.", ephemeral=True)
         gs = self.cog._get_state(self.guild_id)
         clock_order = get_clock_order(gs.seating_order, self.nom.nominee_id)
         if not clock_order:
@@ -275,6 +271,13 @@ class VoteView(discord.ui.View):
     @discord.ui.button(label="⏪ Back Clock", style=discord.ButtonStyle.secondary, row=1)
     async def back_clock_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._back_clock(interaction)
+
+    @discord.ui.button(label="🔒 Close Voting", style=discord.ButtonStyle.danger, row=1)
+    async def close_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Only the Storyteller can close voting.", ephemeral=True)
+        await self._close()
+        await interaction.response.send_message("🔒 Voting closed.", ephemeral=True)
 
 
 # ── Cog ──────────────────────────────────────────────────────────────────────
@@ -312,6 +315,72 @@ class BOTCGame(commands.Cog):
         self._views.pop(guild_id, None)
         self._tasks.pop(guild_id, None)
 
+    # ── Neighbor Threads ────────────────────────────────────────────────────
+
+    def _get_alive_members(self, guild: discord.Guild, gs: GameState) -> list[discord.Member]:
+        out = []
+        for uid in gs.seating_order:
+            ps = gs.players.get(uid)
+            if not ps or not ps.dead:
+                m = guild.get_member(uid)
+                if m:
+                    out.append(m)
+        return out
+
+    def _neighbor_pair_names(self, guild: discord.Guild, gs: GameState) -> list[str]:
+        alive = self._get_alive_members(guild, gs)
+        return [
+            f"{alive[i].display_name}-{alive[(i + 1) % len(alive)].display_name}"
+            for i in range(len(alive))
+        ]
+
+    async def _create_neighbor_threads(self, ctx: commands.Context, gs: GameState):
+        alive = self._get_alive_members(ctx.guild, gs)
+        if len(alive) < 2:
+            return
+        channel = discord.utils.get(ctx.guild.text_channels, name="🌞daytime-chat")
+        if not channel:
+            await ctx.send("No channel named `🌞daytime-chat` found. Reply `yes` to create threads in this channel instead.")
+            try:
+                r = await self.bot.wait_for("message", timeout=30,
+                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel)
+            except asyncio.TimeoutError:
+                return await ctx.send("Cancelled (timeout).")
+            if r.content.lower() != "yes":
+                return await ctx.send("Cancelled.")
+            channel = ctx.channel
+        storyteller_role = discord.utils.get(ctx.guild.roles, name="Storyteller")
+        storytellers = storyteller_role.members if storyteller_role else [ctx.author]
+        created = 0
+        for i in range(len(alive)):
+            p1 = alive[i]
+            p2 = alive[(i + 1) % len(alive)]
+            try:
+                thread = await channel.create_thread(
+                    name=f"neighbor-{p1.display_name}-{p2.display_name}"[:100],
+                    type=discord.ChannelType.private_thread,
+                )
+                await asyncio.sleep(0.6)
+                await thread.add_user(p1)
+                await asyncio.sleep(0.6)
+                await thread.add_user(p2)
+                await asyncio.sleep(0.6)
+                for st in storytellers:
+                    await thread.add_user(st)
+                    await asyncio.sleep(0.6)
+                st_names = ", ".join(st.display_name for st in storytellers)
+                await thread.send(
+                    f"{p1.mention} {p2.mention} — you are neighbors! "
+                    f"Storyteller{'s' if len(storytellers) != 1 else ''}: {st_names}",
+                    allowed_mentions=discord.AllowedMentions(users=[p1, p2]),
+                )
+                created += 1
+                await asyncio.sleep(1)
+            except Exception as e:
+                await ctx.send(f"⚠️ Could not create thread for {p1.display_name} & {p2.display_name}: {e}")
+        if created:
+            await ctx.send(f"✅ Created {created} neighbor threads in {channel.mention}.")
+
     # ── Seating ──────────────────────────────────────────────────────────────
 
     @commands.command(name="bsetseating")
@@ -328,6 +397,7 @@ class BOTCGame(commands.Cog):
         self._save()
         names = ", ".join(m.display_name for m in members)
         await ctx.send(f"✅ Seating order set: {names}")
+        await self._create_neighbor_threads(ctx, gs)
 
     @commands.command(name="bseating")
     async def bseating(self, ctx: commands.Context):
@@ -337,15 +407,19 @@ class BOTCGame(commands.Cog):
             return await ctx.send("No seating order set. Use `.bsetseating @p1 @p2 ...`")
         lines = []
         for i, uid in enumerate(gs.seating_order):
+            member = ctx.guild.get_member(uid)
+            name = member.display_name if member else f"<unknown {uid}>"
             ps = gs.players.get(uid)
             tags = []
             if ps and ps.dead:
                 tags.append("☠️")
-            if ps and ps.is_sponsor:
-                tags.append("⭐")
+            if ps and ps.sponsor_id is not None:
+                sponsor_member = ctx.guild.get_member(ps.sponsor_id)
+                sponsor_name = sponsor_member.display_name if sponsor_member else f"<unknown {ps.sponsor_id}>"
+                tags.append(f"→ sponsor: {sponsor_name}")
             tag_str = " ".join(tags)
             tag_str = f" {tag_str}" if tag_str else ""
-            lines.append(f"{i+1}. {_username(uid)}{tag_str}")
+            lines.append(f"{i+1}. {name}{tag_str}")
         await ctx.send("\n".join(lines))
 
     # ── Player State ─────────────────────────────────────────────────────────
@@ -358,6 +432,16 @@ class BOTCGame(commands.Cog):
         ps = gs.players.get(target.id)
         if not ps:
             return await ctx.send("Player not found in seating order.")
+
+        await ctx.send(f"☠️ Kill {target.display_name}? Reply `yes` to confirm.")
+        try:
+            r = await self.bot.wait_for("message", timeout=30,
+                check=lambda m: m.author == ctx.author and m.channel == ctx.channel)
+        except asyncio.TimeoutError:
+            return await ctx.send("Cancelled (timeout).")
+        if r.content.lower() != "yes":
+            return await ctx.send("Cancelled.")
+
         ps.dead = True
         ps.has_dead_vote = False
         self._save()
@@ -378,27 +462,43 @@ class BOTCGame(commands.Cog):
 
     @commands.command(name="bsponsor")
     @commands.has_permissions(administrator=True)
-    async def bsponsor(self, ctx: commands.Context, *, target: discord.Member):
-        """Mark a player as a sponsor (substitute, cannot vote)."""
+    async def bsponsor(self, ctx: commands.Context, player: discord.Member, sponsor: discord.Member):
+        """Assign a sponsor to a player. Usage: .bsponsor @player @sponsor"""
         gs = self._get_state(ctx.guild.id)
-        ps = gs.players.get(target.id)
+        ps = gs.players.get(player.id)
         if not ps:
             return await ctx.send("Player not found in seating order.")
-        ps.is_sponsor = True
+        ps.sponsor_id = sponsor.id
         self._save()
-        await ctx.send(f"⭐ {target.display_name} is now a sponsor.")
+        await ctx.send(f"⭐ {sponsor.display_name} is now the sponsor for {player.display_name}.")
 
     @commands.command(name="bunsponsor")
     @commands.has_permissions(administrator=True)
     async def bunsponsor(self, ctx: commands.Context, *, target: discord.Member):
-        """Remove sponsor status from a player."""
+        """Remove the sponsor from a player."""
         gs = self._get_state(ctx.guild.id)
         ps = gs.players.get(target.id)
         if not ps:
             return await ctx.send("Player not found in seating order.")
-        ps.is_sponsor = False
+        ps.sponsor_id = None
         self._save()
-        await ctx.send(f"✅ {target.display_name} is no longer a sponsor.")
+        await ctx.send(f"✅ Sponsor removed from {target.display_name}.")
+
+    # ── Dead List ────────────────────────────────────────────────────────────
+
+    @commands.command(name="bdead")
+    async def bdead(self, ctx: commands.Context):
+        """Show the list of dead players."""
+        gs = self._get_state(ctx.guild.id)
+        dead = [(uid, gs.players[uid]) for uid in gs.seating_order if uid in gs.players and gs.players[uid].dead]
+        if not dead:
+            return await ctx.send("☠️ No dead players.")
+        lines = []
+        for uid, ps in dead:
+            member = ctx.guild.get_member(uid)
+            name = member.display_name if member else f"<unknown {uid}>"
+            lines.append(f"☠️ {name} {'🗳️(dead vote)' if ps.has_dead_vote else ''}")
+        await ctx.send("\n".join(lines))
 
     # ── Nomination ───────────────────────────────────────────────────────────
 
@@ -414,18 +514,19 @@ class BOTCGame(commands.Cog):
         if target.id not in gs.seating_order:
             return await ctx.send("Target is not in the seating order.")
 
-        timeout = self._timeouts.get(ctx.guild.id, NOMINATION_TIMEOUT)
+        timeout = self._timeouts.get(ctx.guild.id, 0)
         nom = Nomination(
             nominator_id=ctx.author.id,
             nominee_id=target.id,
-            expires_at=time.time() + timeout,
+            expires_at=time.time() + timeout if timeout else 0,
         )
         view = VoteView(self, ctx.guild.id, nom, timeout)
         view._refresh_alive_info(ctx.guild)
         msg = await ctx.send(embed=view._build_embed(), view=view)
         self._messages[ctx.guild.id] = msg
         self._views[ctx.guild.id] = view
-        self._tasks[ctx.guild.id] = asyncio.create_task(self._expire(ctx.guild.id, view))
+        if timeout:
+            self._tasks[ctx.guild.id] = asyncio.create_task(self._expire(ctx.guild.id, view))
 
     @commands.command(name="baccuse")
     @commands.has_permissions(administrator=True)
@@ -451,12 +552,23 @@ class BOTCGame(commands.Cog):
 
     @commands.command(name="bnomtimeout")
     @commands.has_permissions(administrator=True)
-    async def bnomtimeout(self, ctx: commands.Context, seconds: int):
+    async def bnomtimeout(self, ctx: commands.Context, minutes: int):
         """Set the nomination expiry timeout for this server."""
-        if seconds < 10:
-            return await ctx.send("Minimum timeout is 10 seconds.")
-        self._timeouts[ctx.guild.id] = seconds
-        await ctx.send(f"⏱️ Nomination timeout set to {seconds} seconds.")
+        if minutes < 1:
+            return await ctx.send("Minimum timeout is 1 minute.")
+        self._timeouts[ctx.guild.id] = minutes * 60
+        await ctx.send(f"⏱️ Nomination timeout set to {minutes} minute(s).")
+
+    @commands.command(name="bclose")
+    @commands.has_permissions(administrator=True)
+    async def bclose(self, ctx: commands.Context):
+        """Close the current nomination early."""
+        view = self._views.get(ctx.guild.id)
+        if not view or view.nom.closed:
+            await ctx.send("No active nomination to close.")
+            return
+        await view._close()
+        await ctx.send("🔒 Nomination closed.")
 
     @commands.command(name="bnoms")
     async def bnoms(self, ctx: commands.Context):

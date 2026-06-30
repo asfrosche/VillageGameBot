@@ -93,107 +93,151 @@ def _build_help_embed() -> discord.Embed:
 
     embed.add_field(
         name="`.rr <name>` / </role>",
-        value="Look up a role by name or alias. Shows ability, team, edition, reminder tokens. Use the buttons below the embed for jinxes, night order, aliases, and the wiki page.",
+        value="Look up a role by name or alias.\n"
+              "Usage: `.rr washerwoman`\n"
+              "Shows ability, team, edition, reminder tokens. Interactive buttons for jinxes, night order, aliases, and wiki.",
         inline=False,
     )
     embed.add_field(
         name="`.jinx <name>` / </jinx>",
-        value="Show all jinxes for a given role.",
+        value="Show all jinxes for a role.\n"
+              "Usage: `.jinx alchemist`",
         inline=False,
     )
     embed.add_field(
         name="`.fabled <name>` / </fabled>",
-        value="Look up a fabled character.",
+        value="Look up a fabled character.\n"
+              "Usage: `.fabled djinn`",
         inline=False,
     )
     embed.add_field(
         name="`.scripts [tb|bmr|snv]` / </scripts>",
-        value="View TB, BMR, or SNV as a full-script image with role icons organized by team. Include an edition to skip the interactive buttons.",
+        value="View a script as full-script image with role icons by team.\n"
+              "Usage: `.scripts` (interactive buttons) or `.scripts tb` (skip buttons)",
         inline=False,
     )
     embed.add_field(
         name="`.nightorder [tb|bmr|snv]` / </nightorder>",
-        value="Display first-night and other-night order for the selected edition. Include an edition to skip the interactive buttons.",
+        value="Display first-night and other-night order.\n"
+              "Usage: `.nightorder` (interactive buttons), `.nightorder bmr` (skip buttons), or `.nightorder bmr short` (role names only)",
         inline=False,
     )
     embed.add_field(
         name="`.setref <script|grim> [link]`",
-        value="Store a message as the custom script or grim reference for this server (reply or paste a link).",
+        value="Store a reference message for this server.\n"
+              "Usage: `.setref script` (reply to a message) or `.setref grim <message_link>`",
         inline=False,
     )
     embed.add_field(
         name="`.ref <script|grim>`",
-        value="Show the saved reference message with its image.",
+        value="Show the saved reference message with its image.\n"
+              "Usage: `.ref script`",
         inline=False,
     )
     embed.add_field(
         name="── Voting ──",
-        value="Players with the **Alive** role vote via buttons on the nomination message.",
+        value="Players with the **Alive** Discord role vote via buttons on the nomination embed.\n"
+              "Sponsors can vote. Dead players can vote once if they still have a dead vote.",
         inline=False,
     )
     embed.add_field(
         name="`.bnominate @player`",
-        value="[Admin] Nominate a player. Seating chart embed with Guilty/Not Guilty buttons, visual clock, accusation/defense. Expires after a set time.",
+        value="[Admin] Start a nomination with voting buttons.\n"
+              "Usage: `.bnominate @player`\n"
+              "Creates a seating chart with Guilty/Not Guilty buttons, visual clock, accusation/defense fields. Expires after timeout.",
         inline=False,
     )
     embed.add_field(
         name="`.baccuse <text>`",
-        value="[Admin] Set the accusation for the current nomination.",
+        value="[Admin] Set the accusation for the current nomination.\n"
+              "Usage: `.baccuse I saw them with the murder weapon`\n"
+              "Max 1024 characters.",
         inline=False,
     )
     embed.add_field(
         name="`.bdefend <text>`",
-        value="[Admin] Set the defense for the current nomination.",
+        value="[Admin] Set the defense for the current nomination.\n"
+              "Usage: `.bdefend I was elsewhere at the time`\n"
+              "Max 1024 characters.",
         inline=False,
     )
     embed.add_field(
-        name="`.bnomtimeout <seconds>`",
-        value="[Admin] Set the nomination expiry timeout (default 120s, min 10s).",
+        name="`.bnomtimeout <minutes>`",
+        value="[Admin] Set the nomination expiry timeout.\n"
+              "Usage: `.bnomtimeout 2`\n"
+              "No default timeout — nomination runs until manually closed or timed out via this command. Minimum 1 minute.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bclose`",
+        value="[Admin] Close the current nomination early.\n"
+              "Usage: `.bclose`\n"
+              "Also available as a 🔒 Close Voting button on the nomination embed for Storytellers.",
         inline=False,
     )
     embed.add_field(
         name="`.bnoms`",
-        value="Show current nomination status, seating chart with votes, clock position, and required guilty votes.",
+        value="Show current nomination status without creating a new message.\n"
+              "Usage: `.bnoms`\n"
+              "Displays seating chart, votes, clock position, and required guilty count.",
         inline=False,
     )
     embed.add_field(
         name="── Seating ──",
-        value="Set and view the BOTC seating order. All mechanics reference this order.",
+        value="Set and view the BOTC seating order. All nomination mechanics reference this order.",
         inline=False,
     )
     embed.add_field(
         name="`.bsetseating @p1 @p2 ...`",
-        value="[Admin] Set the permanent seating order for this server.",
+        value="[Admin] Set the permanent seating order.\n"
+              "Usage: `.bsetseating @alice @bob @charlie @dave`\n"
+              "Auto-creates private neighbor threads in `🌞daytime-chat` for each alive-adjacent pair. Only pings the two players (Storytellers added silently). Min 3 players.",
         inline=False,
     )
     embed.add_field(
         name="`.bseating`",
-        value="Show the current seating order with dead ☠️ and sponsor ⭐ indicators.",
+        value="Show the current seating order.\n"
+              "Usage: `.bseating`\n"
+              "Displays player names with dead ☠️ and → sponsor: indicators.",
         inline=False,
     )
     embed.add_field(
         name="── Player State ──",
-        value="Track dead players and sponsors (substitutes who never vote).",
+        value="Track dead/alive status, sponsors, and view the deadlist.",
         inline=False,
     )
     embed.add_field(
         name="`.bkill @player`",
-        value="[Admin] Mark a player as dead. They lose their dead vote.",
+        value="[Admin] Mark a player as dead with double confirmation.\n"
+              "Usage: `.bkill @alice`\n"
+              "Shows new neighbor pairs before confirming, then recreates threads skipping the dead player.",
         inline=False,
     )
     embed.add_field(
         name="`.brevive @player`",
-        value="[Admin] Revive a dead player and restore their dead vote.",
+        value="[Admin] Revive a dead player.\n"
+              "Usage: `.brevive @alice`\n"
+              "Restores their dead vote capability.",
         inline=False,
     )
     embed.add_field(
-        name="`.bsponsor @player`",
-        value="[Admin] Mark a player as a sponsor (substitute, cannot vote).",
+        name="`.bsponsor @player @sponsor`",
+        value="[Admin] Assign a sponsor to a player.\n"
+              "Usage: `.bsponsor @alice @bob`\n"
+              "Bob is now Alice's sponsor. Sponsors can vote normally.",
         inline=False,
     )
     embed.add_field(
         name="`.bunsponsor @player`",
-        value="[Admin] Remove sponsor status from a player.",
+        value="[Admin] Remove the sponsor from a player.\n"
+              "Usage: `.bunsponsor @alice`",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bdead`",
+        value="Show the list of dead players and their dead vote status.\n"
+              "Usage: `.bdead`\n"
+              "Shows who is dead and whether they still have a dead vote remaining.",
         inline=False,
     )
 
