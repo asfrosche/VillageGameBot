@@ -195,35 +195,40 @@ class Setup(commands.Cog):
 
     # Setup roles
     @commands.command()
-    async def roleset(self, ctx, role: str = None, new_role: discord.Role = None):
-        if ctx.author.guild_permissions.administrator:
-            guild_data = load_guild_data(ctx.guild.id)
-            if guild_data:
-                if new_role:
-                    new_role_name = new_role.name
-                    if role.lower() == 'overseer':
-                        guild_data['overseer_role_name'] = new_role_name
-                    elif role.lower() == 'alive':
-                        guild_data['alive_role_name'] = new_role_name
-                    elif role.lower() == 'sponsor':
-                        guild_data['sponsor_role_name'] = new_role_name
-                    elif role.lower() == 'spectator':
-                        guild_data['spectator_role_name'] = new_role_name
-                    elif role.lower() == 'dead':
-                        guild_data['dead_role_name'] = new_role_name
-                    elif role.lower() == 'alt':
-                        guild_data['alt_role_name'] = new_role_name
-                    else:
-                        await ctx.send(f'Invalid role name, choose between following:\n- Overseer\n- Alive\n- Sponsor\n- Spectator\n- Dead\n- Alt')
-                        return
-                    save_guild_data(ctx.guild.id, guild_data)
-                    await ctx.send(f"{role.capitalize()} role set to {new_role_name}")
-                else:
-                    await ctx.send('Please provide a valid Role')
-            else:
-                await ctx.send("Guild data not loaded.")
-        else:
+    async def roleset(self, ctx, role: str = None, *, new_role: str = None):
+        if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        if not new_role:
+            await ctx.send('Please provide a valid role (mention it like @RoleName or type the name)')
+            return
+
+        # Resolve role from mention, ID, or name
+        resolved = None
+        if new_role.startswith('<@&') and new_role.endswith('>'):
+            rid = int(new_role[3:-1])
+            resolved = ctx.guild.get_role(rid)
+        elif new_role.isdigit():
+            resolved = ctx.guild.get_role(int(new_role))
+        if resolved is None:
+            resolved = discord.utils.get(ctx.guild.roles, name=new_role)
+        if resolved is None:
+            await ctx.send(f'Could not find role "{new_role}". Mention it like @RoleName.')
+            return
+
+        valid_keys = ['overseer', 'alive', 'sponsor', 'spectator', 'dead', 'alt']
+        key = role.lower() if role else ''
+        if key not in valid_keys:
+            await ctx.send(f'Invalid role name, choose between:\n- ' + '\n- '.join(k.capitalize() for k in valid_keys))
+            return
+
+        guild_data[f'{key}_role_name'] = resolved.name
+        save_guild_data(ctx.guild.id, guild_data)
+        await ctx.send(f"{role.capitalize()} role set to {resolved.name}")
 
     # Setup channels
     @commands.command()

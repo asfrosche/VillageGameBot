@@ -617,6 +617,9 @@ class Utility(commands.Cog):
             return
         whisper_logs_channel = discord.utils.get(ctx.guild.channels, name=guild_data["whisper_logs_channel_name"])
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        if not alive_role:
+            await ctx.send("Alive role not found on this server.")
+            return
         sender = None
         for member in ctx.channel.members:
             if alive_role in member.roles:
@@ -646,7 +649,8 @@ class Utility(commands.Cog):
             eout1 = ctx.channel.mention
         embedlog.add_field(name=f"{eout1} sent a whisper to {eout2}:", value=f'{message}\n\n{receiver_channel.mention}', inline=False)
         embedlog.set_footer(text="Village Game")
-        await whisper_logs_channel.send(embed=embedlog)
+        if whisper_logs_channel:
+            await whisper_logs_channel.send(embed=embedlog)
 
     @commands.command()
     async def switch(self, ctx):

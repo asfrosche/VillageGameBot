@@ -255,6 +255,8 @@ async def on_message(message):
         return
     guild_data = load_guild_data(message.guild.id)
     if not guild_data:
+        if message.content.startswith(bot.command_prefix):
+            await bot.invoke(await bot.get_context(message))
         return
     content = message.content.lower()
     if content in ("pin", "unpin") and message.reference and message.reference.message_id:

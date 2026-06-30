@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
@@ -70,19 +69,18 @@ async def _show_ref(ctx: commands.Context, ref_type: str):
 
     embed = discord.Embed(
         title=f"📌 {ref_type.capitalize()} Reference",
-        description=msg.content[:2000] if msg.content else "*no text*",
         color=discord.Color.teal(),
-        url=msg.jump_url,
     )
+    if msg.content:
+        embed.description = msg.content[:4096]
     embed.set_author(name=msg.author.display_name, icon_url=msg.author.display_avatar.url)
-    embed.add_field(name="Jump", value=f"[Go to message]({msg.jump_url})", inline=False)
 
     files = []
     if msg.attachments:
-        for att in msg.attachments[:1]:
-            img_bytes = await att.read()
-            files.append(discord.File(io.BytesIO(img_bytes), filename=att.filename))
-        embed.set_image(url=f"attachment://{msg.attachments[0].filename}")
+        att = msg.attachments[0]
+        embed.set_image(url=att.url)
+
+    embed.add_field(name="Go to message", value=msg.jump_url, inline=False)
 
     await ctx.send(embed=embed, files=files if files else None)
 

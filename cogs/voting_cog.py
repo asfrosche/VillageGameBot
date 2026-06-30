@@ -489,6 +489,8 @@ class Voting(commands.Cog):
                 lynch_channel2 = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name2"])
                 leader_channel = discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"])
                 async for message in vote_count_channel.history(limit=10):
+                    if message.author != ctx.guild.me:
+                        continue
                     if message.content.startswith('# LYNCH VOTES 1:'):
                         lynch_message1 = message
                     elif message.content.startswith('# LYNCH VOTES 2:'):

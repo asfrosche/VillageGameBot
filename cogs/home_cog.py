@@ -421,7 +421,7 @@ class Home(commands.Cog):
             else:
                 await ctx.send("This is not a valid command")
         else:
-            ctx.send("You don't have enough perms to use this command")
+            await ctx.send("You don't have enough perms to use this command")
 
     async def rc_initialize(self, ctx):
         if ctx.author.guild_permissions.administrator:
