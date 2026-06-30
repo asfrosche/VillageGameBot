@@ -58,7 +58,15 @@ class RoleView(discord.ui.View):
 
     @discord.ui.button(label="Aliases", style=discord.ButtonStyle.secondary)
     async def aliases(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = botc.build_role_embed(self.role)
+        aliases = botc.get_aliases(self.role["id"])
+        if not aliases:
+            await interaction.response.send_message("This role has no aliases.", ephemeral=True)
+            return
+        embed = discord.Embed(
+            title=f"{botc.team_emoji(self.role['team'])} {self.role['name']} — Aliases",
+            color=botc.TEAM_COLOR.get(self.role["team"], discord.Color.default()),
+        )
+        embed.add_field(name="Aliases", value=", ".join(f"`{a}`" for a in aliases), inline=False)
         await self._respond(interaction, embed, self)
 
     @discord.ui.button(label="Back to Role", style=discord.ButtonStyle.primary)
