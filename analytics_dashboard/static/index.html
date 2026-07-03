@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analytics Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #161822;
+  --bg-card: #1c1e2e;
+  --bg-hover: #252840;
+  --bg-input: #1e2030;
+  --border: #2a2d3e;
+  --text-primary: #e4e6f0;
+  --text-secondary: #9094a8;
+  --text-muted: #5c5f75;
+  --accent: #7c5cfc;
+  --accent-dim: #5a3eb8;
+  --green: #34d399;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --orange: #fb923c;
+  --blue: #60a5fa;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,.3);
+  --font: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:14px}
+body{font-family:var(--font);background:var(--bg-primary);color:var(--text-primary);min-height:100vh;display:flex}
+a{color:var(--accent);text-decoration:none}
+
+/* Sidebar */
+.sidebar{width:220px;background:var(--bg-secondary);border-right:1px solid var(--border);padding:20px 0;flex-shrink:0;height:100vh;position:sticky;top:0;overflow-y:auto}
+.sidebar h1{font-size:1.1rem;padding:0 20px 16px;color:var(--text-primary);font-weight:600;letter-spacing:-.3px}
+.sidebar h1 span{color:var(--accent)}
+.sidebar nav{}
+.sidebar a{display:flex;align-items:center;gap:10px;padding:9px 20px;color:var(--text-secondary);font-size:.9rem;transition:.15s;cursor:pointer;border-left:3px solid transparent}
+.sidebar a:hover{background:var(--bg-hover);color:var(--text-primary)}
+.sidebar a.active{color:var(--accent);background:var(--bg-hover);border-left-color:var(--accent);font-weight:500}
+.sidebar .icon{width:18px;text-align:center;font-size:1rem}
+
+/* Main */
+.main{flex:1;padding:24px 32px;max-width:1400px;overflow-x:hidden}
+.main h2{font-size:1.4rem;font-weight:600;margin-bottom:20px}
+.page{display:none}
+.page.active{display:block}
+
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:24px}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+.card .label{font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.card .value{font-size:1.5rem;font-weight:700;color:var(--text-primary);line-height:1.2}
+.card .sub{font-size:.8rem;color:var(--text-secondary);margin-top:4px}
+.card .value.green{color:var(--green)}
+.card .value.red{color:var(--red)}
+.card .value.yellow{color:var(--yellow)}
+.card .value.blue{color:var(--blue)}
+
+/* Tables */
+.table-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.table-wrap .toolbar{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
+.table-wrap .toolbar input,.table-wrap .toolbar select{background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text-primary);font-size:.85rem}
+.table-wrap .toolbar input::placeholder{color:var(--text-muted)}
+.table-wrap .toolbar label{color:var(--text-secondary);font-size:.85rem}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 14px;font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none;white-space:nowrap}
+th:hover{color:var(--text-primary)}
+th .sort-arrow{display:inline-block;margin-left:4px;color:var(--accent)}
+td{padding:9px 14px;font-size:.88rem;border-bottom:1px solid var(--border);color:var(--text-secondary)}
+tr:hover td{background:var(--bg-hover)}
+.pagination{display:flex;gap:8px;padding:12px 16px;align-items:center;justify-content:flex-end;border-top:1px solid var(--border)}
+.pagination button{background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-secondary);padding:4px 12px;cursor:pointer;font-size:.85rem}
+.pagination button:hover{color:var(--text-primary);border-color:var(--accent)}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pagination span{color:var(--text-muted);font-size:.85rem}
+
+/* Health bar */
+.health-bar{display:flex;align-items:center;gap:8px}
+.health-bar .bar{flex:1;height:6px;background:var(--bg-input);border-radius:3px;overflow:hidden}
+.health-bar .bar .fill{height:100%;border-radius:3px;transition:width .3s}
+.health-bar .score{font-weight:600;font-size:.85rem;width:28px;text-align:right}
+
+/* Badge */
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:500}
+.badge.green{background:rgba(52,211,153,.15);color:var(--green)}
+.badge.yellow{background:rgba(251,191,36,.15);color:var(--yellow)}
+.badge.red{background:rgba(248,113,113,.15);color:var(--red)}
+.badge.orange{background:rgba(251,146,60,.15);color:var(--orange)}
+.badge.blue{background:rgba(96,165,250,.15);color:var(--blue)}
+.badge.gray{background:rgba(92,95,117,.15);color:var(--text-muted)}
+
+/* Charts */
+.chart-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.chart-wrap h3{font-size:.95rem;font-weight:500;margin-bottom:12px;color:var(--text-secondary)}
+
+/* Cog card */
+.cog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.cog-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.cog-card .name{font-size:1rem;font-weight:600;margin-bottom:8px}
+.cog-card .stat-row{display:flex;justify-content:space-between;padding:4px 0;font-size:.85rem}
+.cog-card .stat-row .label{color:var(--text-muted)}
+.cog-card .stat-row .value{color:var(--text-primary)}
+.cog-card .pct-bar{height:4px;background:var(--bg-input);border-radius:2px;margin-top:8px;overflow:hidden}
+.cog-card .pct-bar .fill{height:100%;background:var(--accent);border-radius:2px}
+
+/* Error detail */
+.error-item{padding:12px 16px;border-bottom:1px solid var(--border);font-size:.85rem}
+.error-item:last-child{border-bottom:none}
+.error-item .head{display:flex;gap:12px;align-items:center;margin-bottom:4px}
+.error-item .head .time{color:var(--text-muted);font-size:.8rem}
+.error-item .head .cmd{color:var(--accent);font-weight:500}
+.error-item .pre{background:var(--bg-input);border-radius:var(--radius-sm);padding:8px;margin-top:4px;color:var(--text-secondary);font-family:monospace;font-size:.78rem;max-height:80px;overflow:auto;white-space:pre-wrap}
+
+/* Filter pills */
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.pills button{background:var(--bg-input);border:1px solid var(--border);border-radius:20px;padding:4px 14px;color:var(--text-secondary);font-size:.82rem;cursor:pointer;transition:.15s}
+.pills button:hover{border-color:var(--accent);color:var(--text-primary)}
+.pills button.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+@media(max-width:768px){
+  .sidebar{width:60px}
+  .sidebar h1,.sidebar a span{display:none}
+  .sidebar a{justify-content:center;padding:12px;border-left:none}
+  .main{padding:16px}
+  .cards{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <h1><span>&#9670;</span> Analytics</h1>
+  <nav>
+    <a class="active" data-page="overview"><span class="icon">&#9632;</span><span>Overview</span></a>
+    <a data-page="commands"><span class="icon">&#9776;</span><span>Commands</span></a>
+    <a data-page="performance"><span class="icon">&#9654;</span><span>Performance</span></a>
+    <a data-page="errors"><span class="icon">&#9888;</span><span>Errors</span></a>
+    <a data-page="features"><span class="icon">&#9733;</span><span>Dead Features</span></a>
+    <a data-page="cogs"><span class="icon">&#9635;</span><span>Cog Usage</span></a>
+  </nav>
+</aside>
+
+<div class="main">
+
+<!-- Overview -->
+<div class="page active" id="page-overview">
+  <h2>Overview</h2>
+  <div class="cards" id="overview-cards"></div>
+  <div class="chart-wrap"><h3>Daily Executions</h3><canvas id="overview-chart" height="250"></canvas></div>
+</div>
+
+<!-- Commands -->
+<div class="page" id="page-commands">
+  <h2>Command Usage</h2>
+  <div class="table-wrap">
+    <div class="toolbar">
+      <input id="cmd-search" placeholder="Search command..." oninput="loadCommands(1)">
+      <select id="cmd-sort" onchange="loadCommands(1)">
+        <option value="total_execs">Executions</option>
+        <option value="command_name">Name</option>
+        <option value="cog_name">Cog</option>
+        <option value="unique_users">Users</option>
+        <option value="last_used">Last Used</option>
+      </select>
+      <select id="cmd-order" onchange="loadCommands(1)">
+        <option value="desc">Desc</option>
+        <option value="asc">Asc</option>
+      </select>
+      <label style="margin-left:auto;color:var(--text-muted)" id="cmd-count"></label>
+    </div>
+    <table><thead><tr>
+      <th data-sort="command_name">Command <span class="sort-arrow"></span></th>
+      <th data-sort="cog_name">Cog</th>
+      <th data-sort="total_execs">Executions</th>
+      <th data-sort="unique_users">Users</th>
+      <th>Avg Time</th>
+      <th>p95</th>
+      <th data-sort="last_used">Last Used</th>
+      <th>Fail %</th>
+    </tr></thead>
+    <tbody id="cmd-body"></tbody></table>
+    <div class="pagination" id="cmd-pagination"></div>
+  </div>
+</div>
+
+<!-- Performance -->
+<div class="page" id="page-performance">
+  <h2>Performance</h2>
+  <div class="chart-wrap"><h3>Execution Time Over Time (Daily Average)</h3><canvas id="perf-chart" height="250"></canvas></div>
+  <div class="chart-wrap"><h3>Slowest Commands</h3>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>Command</th><th>Cog</th><th>Avg (ms)</th><th>p50</th><th>p95</th><th>p99</th><th>Max</th><th>Executions</th>
+    </tr></thead>
+    <tbody id="perf-body"></tbody></table></div>
+  </div>
+</div>
+
+<!-- Errors -->
+<div class="page" id="page-errors">
+  <h2>Errors</h2>
+  <div class="cards" id="error-cards" style="margin-bottom:16px"></div>
+  <div class="chart-wrap" style="margin-bottom:16px"><h3>Error Types</h3><canvas id="error-chart" height="200"></canvas></div>
+  <div class="table-wrap">
+    <div class="toolbar">
+      <input id="err-search" placeholder="Filter command..." oninput="loadErrors()">
+      <label style="margin-left:auto;color:var(--text-muted)" id="err-count"></label>
+    </div>
+    <div id="err-list"></div>
+  </div>
+</div>
+
+<!-- Dead Features -->
+<div class="page" id="page-features">
+  <h2>Feature Health</h2>
+  <div class="pills" id="feature-pills"></div>
+  <div class="table-wrap">
+    <table><thead><tr>
+      <th>Command</th><th>Cog</th><th>Health</th><th>Execs</th><th>Users</th><th>30d</th><th>90d</th><th>Trend</th><th>Recommendation</th><th>Last Used</th>
+    </tr></thead>
+    <tbody id="feature-body"></tbody></table>
+  </div>
+</div>
+
+<!-- Cog Usage -->
+<div class="page" id="page-cogs">
+  <h2>Cog Usage</h2>
+  <div class="cog-grid" id="cog-grid"></div>
+</div>
+
+</div>
+
+<script>
+const BASE = '';
+let overviewChart = null, perfChart = null, errorChart = null, errorSummaryCache = null;
+
+function $(id){return document.getElementById(id)}
+
+// Navigation
+document.querySelectorAll('.sidebar a').forEach(a => {
+  a.addEventListener('click', () => {
+    document.querySelectorAll('.sidebar a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const page = $(`page-${a.dataset.page}`);
+    if(page){page.classList.add('active')}
+    const pages = ['overview','commands','performance','errors','features','cogs'];
+    const fns = [loadOverview, ()=>loadCommands(1), loadPerformance, loadErrors, loadFeatures, loadCogs];
+    const idx = pages.indexOf(a.dataset.page);
+    if(idx>=0)fns[idx]();
+  })
+});
+
+// Fetch helper
+async function api(path){
+  const r = await fetch(`${BASE}${path}`);
+  if(!r.ok)throw new Error(await r.text());
+  return r.json();
+}
+
+// Overview
+async function loadOverview(){
+  const d = await api('/api/overview');
+  $('overview-cards').innerHTML = `
+    <div class="card"><div class="label">Total Commands</div><div class="value">${fmt(d.total_commands)}</div></div>
+    <div class="card"><div class="label">Today</div><div class="value green">${fmt(d.commands_today)}</div></div>
+    <div class="card"><div class="label">This Week</div><div class="value blue">${fmt(d.commands_this_week)}</div></div>
+    <div class="card"><div class="label">Active Commands</div><div class="value">${fmt(d.active_commands)}</div></div>
+    <div class="card"><div class="label">Avg Time</div><div class="value yellow">${d.avg_time_ms}ms</div></div>
+    <div class="card"><div class="label">Error Rate</div><div class="value ${d.error_rate>5?'red':d.error_rate>1?'yellow':'green'}">${d.error_rate}%</div></div>
+  `;
+  const perf = await api('/api/performance/over-time?days=30');
+  const ctx = $('overview-chart').getContext('2d');
+  if(overviewChart)overviewChart.destroy();
+  overviewChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: perf.items.map(i => i.date.slice(5)),
+      datasets: [{
+        label: 'Executions',
+        data: perf.items.map(i => i.executions),
+        borderColor: '#7c5cfc',
+        backgroundColor: 'rgba(124,92,252,.1)',
+        fill: true,
+        tension: .3,
+        pointRadius: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {legend:{display:false}},
+      scales: {
+        x: {grid:{color:'rgba(42,45,62,.5)'}, ticks:{color:'#5c5f75'}},
+        y: {grid:{color:'rgba(42,45,62,.5)'}, ticks:{color:'#5c5f75'}, beginAtZero:true}
+      }
+    }
+  });
+}
+
+// Commands
+let cmdState = {page:1,sort:'total_execs',order:'desc',search:'',total:0};
+async function loadCommands(page){
+  cmdState.page = page || cmdState.page;
+  cmdState.sort = $('cmd-sort').value;
+  cmdState.order = $('cmd-order').value;
+  cmdState.search = $('cmd-search').value;
+  const d = await api(`/api/commands?sort=${cmdState.sort}&order=${cmdState.order}&search=${encodeURIComponent(cmdState.search)}&page=${cmdState.page}&per_page=50`);
+  cmdState.total = d.total;
+  const tbody = $('cmd-body');
+  tbody.innerHTML = d.items.map(c => `<tr>
+    <td style="color:var(--text-primary);font-weight:500">${esc(c.command_name)}</td>
+    <td>${esc(c.cog_name||'')}</td>
+    <td style="color:var(--text-primary)">${fmt(c.total_execs)}</td>
+    <td>${fmt(c.unique_users)}</td>
+    <td>${c.avg_time_ms}ms</td>
+    <td>${c.p95_ms}ms</td>
+    <td>${timeAgo(c.last_used)}</td>
+    <td>${c.total_execs>0?((c.total_failures/c.total_execs*100).toFixed(1)):'0'}%</td>
+  </tr>`).join('');
+  $('cmd-count').textContent = `${d.total} commands`;
+  const totalPages = Math.ceil(d.total / d.per_page);
+  const pg = $('cmd-pagination');
+  pg.innerHTML = `
+    <button onclick="loadCommands(${cmdState.page-1})" ${cmdState.page<=1?'disabled':''}>&#9664;</button>
+    <span>Page ${cmdState.page} of ${totalPages||1}</span>
+    <button onclick="loadCommands(${cmdState.page+1})" ${cmdState.page>=totalPages?'disabled':''}>&#9654;</button>
+  `;
+}
+
+// Performance
+async function loadPerformance(){
+  const perf = await api('/api/performance/over-time?days=30');
+  const ctx = $('perf-chart').getContext('2d');
+  if(perfChart)perfChart.destroy();
+  perfChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: perf.items.map(i => i.date.slice(5)),
+      datasets: [
+        {label:'Avg Time (ms)',data:perf.items.map(i=>i.avg_time_ms),backgroundColor:'rgba(251,191,36,.6)',borderColor:'#fbbf24',borderWidth:1,yAxisID:'y'},
+        {label:'Executions',data:perf.items.map(i=>i.executions),backgroundColor:'rgba(124,92,252,.15)',borderColor:'#7c5cfc',borderWidth:1,yAxisID:'y1',type:'line',pointRadius:2,tension:.3}
+      ]
+    },
+    options: {
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#9094a8',boxWidth:12,font:{size:11}}}},
+      scales:{
+        x:{grid:{color:'rgba(42,45,62,.5)'},ticks:{color:'#5c5f75'}},
+        y:{grid:{color:'rgba(42,45,62,.5)'},ticks:{color:'#5c5f75'},beginAtZero:true,position:'left',title:{display:true,text:'ms',color:'#5c5f75'}},
+        y1:{grid:{display:false},ticks:{color:'#5c5f75'},beginAtZero:true,position:'right',title:{display:true,text:'count',color:'#5c5f75'}}
+      }
+    }
+  });
+  const slow = await api('/api/performance/summary');
+  $('perf-body').innerHTML = slow.items.map(c => `<tr>
+    <td style="color:var(--text-primary)">${esc(c.command_name)}</td>
+    <td>${esc(c.cog_name||'')}</td>
+    <td style="color:var(--yellow)">${c.avg_time_ms}ms</td>
+    <td>${c.p50_ms}ms</td>
+    <td style="color:var(--red)">${c.p95_ms}ms</td>
+    <td style="color:var(--red)">${c.p99_ms}ms</td>
+    <td>${c.max_duration}ms</td>
+    <td>${fmt(c.total_execs)}</td>
+  </tr>`).join('');
+}
+
+// Errors
+let errorFilter = '';
+async function loadErrors(){
+  const filter = $('err-search').value;
+  const d = await api(`/api/errors?limit=100${filter?'&command_name='+encodeURIComponent(filter):''}`);
+  const summary = await api('/api/errors/summary');
+  errorSummaryCache = summary;
+  $('err-count').textContent = `${summary.total_errors} total errors`;
+  $('error-cards').innerHTML = `
+    <div class="card"><div class="label">Total Errors</div><div class="value red">${fmt(summary.total_errors)}</div></div>
+    <div class="card"><div class="label">Top Exception</div><div class="value">${esc(summary.by_type[0]?.type||'none')}</div><div class="sub">${summary.by_type[0]?.count||0} occurrences</div></div>
+  `;
+  const ctx = $('error-chart').getContext('2d');
+  if(errorChart)errorChart.destroy();
+  errorChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: summary.by_type.slice(0,6).map(e=>e.type),
+      datasets: [{
+        data: summary.by_type.slice(0,6).map(e=>e.count),
+        backgroundColor: ['#f87171','#fb923c','#fbbf24','#60a5fa','#34d399','#7c5cfc'],
+        borderWidth:0
+      }]
+    },
+    options: {
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'right',labels:{color:'#9094a8',boxWidth:12,font:{size:11}}}
+      }
+    }
+  });
+  const list = $('err-list');
+  list.innerHTML = d.items.map(e => `<div class="error-item">
+    <div class="head">
+      <span class="time">${timeAgo(e.timestamp)}</span>
+      <span class="cmd">${esc(e.command_name)}</span>
+      <span class="badge red">${esc(e.exception_type)}</span>
+      <span style="color:var(--text-muted);font-size:.8rem">${esc(e.cog_name||'')}</span>
+    </div>
+    <div class="pre">${esc(e.traceback?.slice(0,300)||'')}</div>
+  </div>`).join('');
+}
+
+// Features
+let featureFilter = 'all';
+async function loadFeatures(filter){
+  featureFilter = filter || featureFilter;
+  const d = await api(`/api/features?filter=${featureFilter}`);
+  const typeCounts = {};
+  d.items.forEach(i => {const r=i.recommendation;typeCounts[r]=(typeCounts[r]||0)+1});
+  const all = d.items.length;
+
+  const pills = [
+    {f:'all',l:`All (${all})`},
+    {f:'keep',l:`Keep (${typeCounts.KEEP||0})`},
+    {f:'monitor',l:`Monitor (${typeCounts.MONITOR||0})`},
+    {f:'review',l:`Review (${typeCounts.REVIEW||0})`},
+    {f:'deprecated',l:`Deprecate (${typeCounts.DEPRECATE||0})`},
+    {f:'dead',l:`Delete (${typeCounts.DELETE||0})`},
+    {f:'unused_30',l:'Unused >30d'},
+    {f:'unused_90',l:'Unused >90d'},
+    {f:'low_usage',l:'Low Usage'},
+  ];
+  $('feature-pills').innerHTML = pills.map(p => `<button class="${featureFilter===p.f?'active':''}" onclick="loadFeatures('${p.f}')">${p.l}</button>`).join('');
+
+  function healthColor(s){return s>=80?'var(--green)':s>=60?'var(--yellow)':s>=40?'var(--orange)':s>=20?'var(--red)':'var(--text-muted)'}
+  function badgeClass(r){return r==='KEEP'?'green':r==='MONITOR'?'yellow':r==='REVIEW'?'orange':r==='DEPRECATE'?'red':'gray'}
+  $('feature-body').innerHTML = d.items.map(c => `<tr>
+    <td style="color:var(--text-primary);font-weight:500">${esc(c.command_name)}</td>
+    <td>${esc(c.cog_name||'')}</td>
+    <td><div class="health-bar"><div class="bar"><div class="fill" style="width:${c.health_score}%;background:${healthColor(c.health_score)}"></div></div><span class="score" style="color:${healthColor(c.health_score)}">${c.health_score}</span></div></td>
+    <td>${fmt(c.total_execs)}</td>
+    <td>${fmt(c.unique_users)}</td>
+    <td>${fmt(c.executions_30d)}</td>
+    <td>${fmt(c.executions_90d)}</td>
+    <td style="color:${c.trend==='increasing'?'var(--green)':c.trend==='declining'?'var(--red)':'var(--text-secondary)'}">${c.trend}</td>
+    <td><span class="badge ${badgeClass(c.recommendation)}">${c.recommendation}</span></td>
+    <td>${timeAgo(c.last_used)}</td>
+  </tr>`).join('');
+}
+
+// Cogs
+async function loadCogs(){
+  const d = await api('/api/cogs');
+  function pctColor(p){return p>30?'var(--green)':p>15?'var(--yellow)':p>5?'var(--orange)':'var(--text-muted)'}
+  function failColor(f){return f>5?'var(--red)':f>2?'var(--yellow)':'var(--green)'}
+  $('cog-grid').innerHTML = d.items.map(c => `<div class="cog-card">
+    <div class="name">${esc(c.cog_name)}</div>
+    <div class="stat-row"><span class="label">Executions</span><span class="value">${fmt(c.total_execs)}</span></div>
+    <div class="stat-row"><span class="label">Share</span><span class="value" style="color:${pctColor(c.pct)}">${c.pct}%</span></div>
+    <div class="stat-row"><span class="label">Commands</span><span class="value">${fmt(c.active_commands)}</span></div>
+    <div class="stat-row"><span class="label">Avg Latency</span><span class="value">${c.avg_latency_ms}ms</span></div>
+    <div class="stat-row"><span class="label">Failure Rate</span><span class="value" style="color:${failColor(c.failure_rate)}">${c.failure_rate}%</span></div>
+    <div class="pct-bar"><div class="fill" style="width:${Math.min(c.pct,100)}%;background:${pctColor(c.pct)}"></div></div>
+  </div>`).join('');
+}
+
+// Helpers
+function fmt(n){if(n==null)return '0';return n.toLocaleString()}
+function esc(s){if(!s)return '';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function timeAgo(iso){
+  if(!iso)return 'never';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = (now - d) / 1000;
+  if(diff < 60) return 'just now';
+  if(diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  if(diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  if(diff < 172800) return 'yesterday';
+  if(diff < 2592000) return `${Math.floor(diff/86400)}d ago`;
+  return d.toLocaleDateString();
+}
+
+// Init
+loadOverview();
+</script>
+</body>
+</html>

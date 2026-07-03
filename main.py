@@ -3,7 +3,6 @@ import io
 import json
 import os
 import random
-import sqlite3
 
 import discord
 from discord.ext import commands
@@ -14,11 +13,11 @@ from cogs.aux_battle import AuxBattle
 from cogs.bday import Birthday
 from cogs.data_utils import (
     base_variables,
-    deadlist_db_path,
     delete_guild_data,
+    delete_guild_deadlist,
+    delete_guild_invites,
     init_deadlist_db,
     init_invites_db,
-    invites_db_path,
     load_guild_data,
     load_invites,
     save_guild_data,
@@ -52,7 +51,15 @@ from utils.embeds import error_embed, info_embed, plain_embed
 from cogs.estate_cog import Estate
 from cogs.item_drop_cog import ItemDrop
 from cogs.channel_cog import ChannelMap
-from cogs.draft_cog import DraftCog
+import sys as _sys
+_main_dir = os.path.dirname(os.path.abspath(__file__))
+_fifa_dir = os.path.join(_main_dir, "fifa_data")
+if _main_dir not in _sys.path:
+    _sys.path.insert(0, _main_dir)
+if _fifa_dir not in _sys.path:
+    _sys.path.insert(0, _fifa_dir)
+from fifa_data.services.draft_cog import DraftCog
+from fifa_data.services.bracket import BracketCog
 
 from BOTC.cogs.role import RoleCog as BOTCRoleCog
 from BOTC.cogs.jinx import JinxCog as BOTCJinxCog
@@ -62,8 +69,24 @@ from BOTC.cogs.scripts import ScriptsCog as BOTCScriptsCog
 from BOTC.cogs.help import HelpCog as BOTCHelpCog
 from BOTC.cogs.game import BOTCGame
 
+from testing.cog import TestingCog
+
+from utils.analytics import init_analytics, get_analytics_service
+from utils.analytics.instrumentation import register_analytics_hooks
+from utils.analytics.config import AnalyticsConfig
+
+try:
+    from analytics_secrets import DASHBOARD_PASSWORD
+except ImportError:
+    DASHBOARD_PASSWORD = None
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=PREFIX, help_command=None, intents=intents)
+
+_analytics_config = AnalyticsConfig.from_env()
+if DASHBOARD_PASSWORD and not os.getenv("ANALYTICS_DASHBOARD_PASSWORD"):
+    _analytics_config.dashboard_password = DASHBOARD_PASSWORD
+_analytics_service = init_analytics(_analytics_config)
 
 init_invites_db()
 init_deadlist_db()
@@ -159,17 +182,8 @@ async def on_guild_remove(guild):
     guild_id = guild.id
     guild_id_str = str(guild.id)
 
-    conn_invites = sqlite3.connect(invites_db_path)
-    c_invites = conn_invites.cursor()
-    c_invites.execute('DELETE FROM invites WHERE guild_id = ?', (guild_id,))
-    conn_invites.commit()
-    conn_invites.close()
-
-    conn_deadlist = sqlite3.connect(deadlist_db_path)
-    c_deadlist = conn_deadlist.cursor()
-    c_deadlist.execute('DELETE FROM deadlist WHERE server = ?', (guild_id,))
-    conn_deadlist.commit()
-    conn_deadlist.close()
+    delete_guild_invites(guild_id)
+    delete_guild_deadlist(guild_id)
 
     presets_cog = bot.get_cog('Presets')
     if presets_cog:
@@ -644,6 +658,7 @@ async def startcog():
     await bot.add_cog(ChannelMap(bot))
     await bot.add_cog(VgIntro(bot))
     await bot.add_cog(DraftCog(bot))
+    await bot.add_cog(BracketCog(bot))
     await bot.add_cog(BOTCRoleCog(bot))
     await bot.add_cog(BOTCJinxCog(bot))
     await bot.add_cog(BOTCFabledCog(bot))
@@ -651,8 +666,15 @@ async def startcog():
     await bot.add_cog(BOTCScriptsCog(bot))
     await bot.add_cog(BOTCHelpCog(bot))
     await bot.add_cog(BOTCGame(bot))
+    await bot.add_cog(TestingCog(bot))
+    from cogs.analytics_cog import AnalyticsCog
+    await bot.add_cog(AnalyticsCog(bot))
 
 
 asyncio.run(startcog())
 
+if _analytics_service:
+    import asyncio as _asyncio
+    _asyncio.run(_analytics_service.initialize())
+    register_analytics_hooks(bot, _analytics_service)
 bot.run(TOKEN)
