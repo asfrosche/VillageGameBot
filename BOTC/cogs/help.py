@@ -85,12 +85,12 @@ async def _show_ref(ctx: commands.Context, ref_type: str):
     await ctx.send(embed=embed, files=files if files else None)
 
 
-def _build_help_embed() -> discord.Embed:
+def _page1_general() -> discord.Embed:
     embed = discord.Embed(
-        title="🐦 Blood on the Clocktower Commands",
+        title="🐦 Blood on the Clocktower Commands (1/3)",
+        description="**General — Role & Script Info**",
         color=discord.Color.teal(),
     )
-
     embed.add_field(
         name="`.rr <name>` / </role>",
         value="Look up a role by name or alias.\n"
@@ -134,53 +134,99 @@ def _build_help_embed() -> discord.Embed:
               "Usage: `.ref script`",
         inline=False,
     )
+    embed.set_footer(text="Page 1/3 • Use the buttons below to navigate.")
+    return embed
+
+
+def _page2_voting() -> discord.Embed:
+    embed = discord.Embed(
+        title="🐦 Blood on the Clocktower Commands (2/3)",
+        description="**Nominations & Voting**",
+        color=discord.Color.teal(),
+    )
     embed.add_field(
         name="── Voting ──",
         value="Players with the **Alive** Discord role vote via buttons on the nomination embed.\n"
-              "Sponsors can vote. Dead players can vote once if they still have a dead vote.",
+              "Sponsors can vote. Dead players can vote once if they still have a dead vote.\n"
+              "Anyone can preregister a vote at any time — it finalizes when the clock reaches them.",
         inline=False,
     )
     embed.add_field(
-        name="`.bnominate @player`",
-        value="[Admin] Start a nomination with voting buttons.\n"
-              "Usage: `.bnominate @player`\n"
-              "Creates a seating chart with Guilty/Not Guilty buttons, visual clock, accusation/defense fields. Expires after timeout.",
+        name="`.bnominate @nominator @nominee`",
+        value="[Admin] Create a new nomination with auto-assigned ID.\n"
+              "Usage: `.bnominate @asfro @target`\n"
+              "Creates embed with accusation/defense/voting fields. Multiple nominations can co-exist.",
         inline=False,
     )
     embed.add_field(
-        name="`.baccuse <text>`",
-        value="[Admin] Set the accusation for the current nomination.\n"
-              "Usage: `.baccuse I saw them with the murder weapon`\n"
-              "Max 1024 characters.",
+        name="`.baccuse <nom_id>`",
+        value="[Admin] Enter accusation mode for a nomination.\n"
+              "Next message from the **nominator** or a **Storyteller** in this channel becomes the accusation.\n"
+              "Usage: `.baccuse 1`",
         inline=False,
     )
     embed.add_field(
-        name="`.bdefend <text>`",
-        value="[Admin] Set the defense for the current nomination.\n"
-              "Usage: `.bdefend I was elsewhere at the time`\n"
-              "Max 1024 characters.",
+        name="`.beditaccuse <nom_id>`",
+        value="[Admin] Reset and re-enter accusation mode to replace the stored accusation.\n"
+              "Usage: `.beditaccuse 1`",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bdefend <nom_id>`",
+        value="[Admin] Enter defense mode for a nomination.\n"
+              "Next message from the **nominee** or a **Storyteller** in this channel becomes the defense.\n"
+              "Usage: `.bdefend 1`",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.beditdefend <nom_id>`",
+        value="[Admin] Reset and re-enter defense mode to replace the stored defense.\n"
+              "Usage: `.beditdefend 1`",
+        inline=False,
+    )
+    embed.add_field(
+        name="**Length**",
+        value="No character limit on storage. If text exceeds Discord's **1024-character embed field limit**, "
+              "it's truncated in the embed with `View Accusation` / `View Defense` buttons showing the full text.",
         inline=False,
     )
     embed.add_field(
         name="`.bnomtimeout <minutes>`",
-        value="[Admin] Set the nomination expiry timeout.\n"
+        value="[Admin] Set the nomination expiry timeout for this server.\n"
               "Usage: `.bnomtimeout 2`\n"
               "No default timeout — nomination runs until manually closed or timed out via this command. Minimum 1 minute.",
         inline=False,
     )
     embed.add_field(
-        name="`.bclose`",
-        value="[Admin] Close the current nomination early.\n"
-              "Usage: `.bclose`\n"
+        name="`.bnoms [nom_id]`",
+        value="Show nomination status.\n"
+              "With ID: show that nomination's embed (seating, votes, clock).\n"
+              "Without ID: list all active nominations with their status.",
+        inline=False,
+    )
+    embed.add_field(
+        name="`.bclose <nom_id>`",
+        value="[Admin] Close a nomination early.\n"
+              "Usage: `.bclose 1`\n"
               "Also available as a 🔒 Close Voting button on the nomination embed for Storytellers.",
         inline=False,
     )
     embed.add_field(
-        name="`.bnoms`",
-        value="Show current nomination status without creating a new message.\n"
-              "Usage: `.bnoms`\n"
-              "Displays seating chart, votes, clock position, and required guilty count.",
+        name="`.bvote <nom_id> @player guilty/notguilty`",
+        value="[Admin] Set or change a player's vote.\n"
+              "Usage: `.bvote 1 @bob guilty`\n"
+              "Works for offline players, overrides preregistered or finalized votes.",
         inline=False,
+    )
+    embed.set_footer(text="Page 2/3 • Use the buttons below to navigate.")
+    return embed
+
+
+def _page3_state() -> discord.Embed:
+    embed = discord.Embed(
+        title="🐦 Blood on the Clocktower Commands (3/3)",
+        description="**Seating & Player State**",
+        color=discord.Color.teal(),
     )
     embed.add_field(
         name="── Seating ──",
@@ -210,7 +256,7 @@ def _build_help_embed() -> discord.Embed:
         name="`.bkill @player`",
         value="[Admin] Mark a player as dead with double confirmation.\n"
               "Usage: `.bkill @alice`\n"
-              "Shows new neighbor pairs before confirming, then recreates threads skipping the dead player.",
+              "Removes their dead vote. Does not recreate neighbor threads.",
         inline=False,
     )
     embed.add_field(
@@ -240,9 +286,27 @@ def _build_help_embed() -> discord.Embed:
               "Shows who is dead and whether they still have a dead vote remaining.",
         inline=False,
     )
-
-    embed.set_footer(text="Use .botchelp or /help to see this message again.")
+    embed.set_footer(text="Page 3/3 • Use the buttons below to navigate.")
     return embed
+
+
+PAGES = [_page1_general, _page2_voting, _page3_state]
+
+
+class HelpView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+        self.page = 0
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = (self.page - 1) % len(PAGES)
+        await interaction.response.edit_message(embed=PAGES[self.page]())
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = (self.page + 1) % len(PAGES)
+        await interaction.response.edit_message(embed=PAGES[self.page]())
 
 
 class HelpCog(commands.Cog):
@@ -251,11 +315,11 @@ class HelpCog(commands.Cog):
 
     @app_commands.command(name="help", description="Show available BOTC commands")
     async def help(self, interaction: discord.Interaction):
-        await interaction.response.send_message(embed=_build_help_embed())
+        await interaction.response.send_message(embed=PAGES[0](), view=HelpView())
 
     @commands.command(name="botchelp")
     async def botchelp(self, ctx: commands.Context):
-        await ctx.send(embed=_build_help_embed())
+        await ctx.send(embed=PAGES[0](), view=HelpView())
 
     @commands.group(name="setref", invoke_without_command=True)
     async def setref(self, ctx: commands.Context, ref_type: str, *, target: str | None = None):
