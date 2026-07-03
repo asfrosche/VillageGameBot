@@ -10,6 +10,9 @@ analytics_secrets.py
 
 # Databases
 *.db
+
+# Coverage
+.coverage
 *.sqlite
 *.sqlite3
 
