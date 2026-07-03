@@ -24,7 +24,7 @@ from fifa_data.services.tactical_analysis import (
 from fifa_data.services.simulation_service import run_simulation
 
 
-HERE = Path(__file__).resolve().parents[1] / "fifa_data"
+HERE = Path(__file__).resolve().parents[2] / "fifa_data"
 
 
 def _make_player(name: str, country: str, position: str, attrs: dict) -> Player:

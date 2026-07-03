@@ -3,12 +3,12 @@ import sys
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MAY_DIR = os.path.dirname(HERE)
+MAY_DIR = os.path.dirname(os.path.dirname(HERE))
 FIFA_DATA = os.path.join(MAY_DIR, "fifa_data")
 sys.path.insert(0, MAY_DIR)
 sys.path.insert(0, FIFA_DATA)
 
-from cogs.draft_cog import (
+from fifa_data.services.draft_cog import (
     get_roster_counts, get_country_counts, get_remaining_slots,
     can_add_position, can_add_country, is_player_drafted,
     generate_snake_order, get_current_owner, get_next_owners,
@@ -256,7 +256,7 @@ class TestCountryNameMapping(unittest.TestCase):
 class TestParseSimulationArgs(unittest.TestCase):
     @staticmethod
     def parse(args):
-        from cogs.draft_cog import DraftCog
+        from fifa_data.services.draft_cog import DraftCog
         return DraftCog._parse_simulation_args(None, args)
 
     def test_no_args_returns_v1_defaults(self):

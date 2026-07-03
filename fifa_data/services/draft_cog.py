@@ -7,23 +7,10 @@ import os
 import re
 import asyncio
 import aiohttp
-import sys
 from datetime import datetime
 from discord.ext import commands
 
 logger = logging.getLogger(__name__)
-
-# Add fifa_data parent to path so we can import fifa_data.services.*
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(SCRIPT_DIR)
-for p in [
-    os.path.join(BASE_DIR, "fifa_data"),          # local: .../may/fifa_data
-    os.path.join(BASE_DIR, "..", "fifa_data"),     # local alternative
-    "/home/container/fifa_data",                   # server path
-]:
-    if os.path.isdir(p):
-        sys.path.insert(0, p)
-        break
 
 from fifa_data.services.simulation_service import run_simulation, run_monte_carlo, TEAM_METRICS, GROUPS
 from fifa_data.services.fantasy_service import FantasyService, FIFA_POSITION_MAP
@@ -35,8 +22,8 @@ from fifa_data.services.match_analytics import (
     get_eliminated_set, is_team_eliminated,
 )
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data", "data", "draft_data.json")
-FIFA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "draft_data.json")
+FIFA_DIR = os.path.dirname(os.path.dirname(__file__))
 
 POSITIONS = ["GK", "DEF", "MID", "FWD"]
 POSITION_LIMITS = {"GK": (1, 1), "DEF": (3, 5), "MID": (2, 5), "FWD": (1, 3)}
@@ -957,6 +944,7 @@ class DraftCog(commands.Cog):
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
+                logger.info("Loaded draft data from %s — %d guild(s) found", DATA_FILE, len(self.data))
             except (json.JSONDecodeError, IOError) as e:
                 logger.warning("Corrupt draft data file: %s — resetting", e)
                 backup = DATA_FILE + ".bak"
@@ -968,6 +956,7 @@ class DraftCog(commands.Cog):
                     pass
                 self.data = {}
         else:
+            logger.warning("Draft data file not found: %s", DATA_FILE)
             self.data = {}
         for draft in self.data.values():
             if draft.get("started") and not draft.get("ended"):
@@ -1743,8 +1732,10 @@ class DraftCog(commands.Cog):
     async def draftpoints(self, ctx):
         """Show fantasy points leaderboard for all draft teams."""
         draft = self._get_draft(ctx.guild.id)
-        if draft is None or not draft.get("started"):
-            return await ctx.send("No active draft.")
+        if draft is None:
+            return await ctx.send("No active draft found for this server (no draft data loaded).")
+        if not draft.get("started"):
+            return await ctx.send("No active draft (draft exists but has not been started).")
 
         await ctx.send("⏳ Fetching fantasy points...")
 
@@ -1783,6 +1774,8 @@ class DraftCog(commands.Cog):
                 (r["name"], r["net_points"], r["position"], r["squad_name"])
                 for r in resolved
             ]
+            pos_order = {p: i for i, p in enumerate(POSITIONS)}
+            details.sort(key=lambda x: (x[3] in eliminated, pos_order.get(x[2], 99), x[3] or "", x[0]))
             results.append((total, manager, details, not_played, knocked))
 
         results.sort(key=lambda x: x[0], reverse=True)
@@ -1799,9 +1792,9 @@ class DraftCog(commands.Cog):
                     icon = "⏳ "
                 else:
                     icon = ""
-                sf = f" {_flag(squad_name)} {squad_name}" if squad_name else ""
+                flag = f"{_flag(squad_name)} " if squad_name else ""
                 pts_str = f"{p}pts"
-                lines.append(f"{icon}{n}: {pts_str} ({pos}){sf}")
+                lines.append(f"{icon}{flag}{n}: {pts_str} ({pos})")
             val = "\n".join(lines) if lines else "No players drafted"
             val += f"\n**Total: {total} pts**"
             tags = []
@@ -2337,6 +2330,482 @@ class DraftCog(commands.Cog):
         embed2.set_footer(text="48 teams | 5 engines | 1 comprehensive output | .fsim v5 for the full picture")
         await ctx.send(embed=embed2)
 
+    @commands.command(aliases=["how", "simcalc"])
+    async def fsim_how(self, ctx):
+        """Explain how the simulation percentage split is calculated (multi-page deep-dive)."""
+        from fifa_data.services.manager_service import get_manager
+
+        def mgr_examples():
+            samples = ["Argentina", "France", "Brazil", "England", "Germany", "Spain", "Portugal", "Netherlands", "Belgium", "Croatia", "Morocco", "Japan"]
+            lines = []
+            for t in samples:
+                m = get_manager(t)
+                if m:
+                    lines.append(f"**{t}**: {m.name} ({m.source})")
+            return "\n".join(lines[:8])
+
+        pages = []
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 1 — Overview & Scale
+        # ──────────────────────────────────────────────────────────────────────
+        p1 = discord.Embed(title="How the Simulation % Works", color=0xff3fb9)
+        p1.set_author(name="World Cup 2026 — 48 Teams · 5 Engines · 7.1M+ Outcomes")
+        p1.description = (
+            "This is not a prediction. It is a **probability engine** — it runs the "
+            "entire 2026 World Cup tournament thousands of times and counts what happens. "
+            "Every goal, every upset, every penalty shootout is simulated from real data."
+        )
+        p1.add_field(name="📐 The Scale", value=(
+            "• **48 teams** across **12 groups** of 4\n"
+            "• **6 group matches per group** = 72 group matches\n"
+            "• Top 2 per group + 8 best 3rd-placed → **32 advance**\n"
+            "• **5 knockout rounds**: R32 → R16 → QF → SF → Final\n"
+            "• **+ 3rd-place playoff** between losing semi-finalists\n"
+            "• **~104 total matches** per tournament simulation\n"
+            "• Each match: 22 players, 90+ minutes, up to 7 phases (V5)"
+        ), inline=False)
+        p1.add_field(name="🧠 Quick Analogy", value=(
+            "Imagine flipping a biased coin 104 times in a row — each flip's bias "
+            "is determined by the teams' strength, form, tactics, and luck. "
+            "One full tournament = one sequence of 104 flips. Monte Carlo repeats "
+            "that sequence 500 times and records who wins most often."
+        ), inline=False)
+        p1.add_field(name="🗺️ Tournament Path to Champion", value=(
+            "```\n"
+            "Groups (72 matches)\n"
+            "   ↓  Top 2 per group + 8 best 3rd\n"
+            "Round of 32 (16 matches)\n"
+            "   ↓\n"
+            "Round of 16 (8 matches)\n"
+            "   ↓\n"
+            "Quarter-Finals (4 matches)\n"
+            "   ↓\n"
+            "Semi-Finals (2 matches)\n"
+            "   ↓\n"
+            "Final (1 match) → 🏆 Champion\n"
+            "```"
+        ), inline=False)
+        pages.append(p1)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 2 — Data Pipeline
+        # ──────────────────────────────────────────────────────────────────────
+        p2 = discord.Embed(title="The Data Pipeline", color=0xff3fb9)
+        p2.set_author(name="Where every number comes from")
+        p2.description = (
+            "The simulation does not pull numbers out of thin air. Every rating, "
+            "multiplier, and attribute comes from real-world data sources."
+        )
+        p2.add_field(name="🌐 1. FIFA API (matches.fifa.com)", value=(
+            "**Source of:** All 2026 World Cup match results (live)\n"
+            "**Fetched:** Every time `.fsim` is run (with cache fallback)\n"
+            "**Used for:** ELO/PELE updates, real group & knockout results\n"
+            "**Endpoint:** `api.fifa.com/api/v3/calendar/matches?idCompetition=17`\n"
+            "**Data:** Match status (0=completed), home/away scores, group, stage, date\n"
+            "**200 most recent matches** are fetched — includes all WC 2026 matches"
+        ), inline=False)
+        p2.add_field(name="⚽ 2. FC 26 Player Ratings", value=(
+            "**Source of:** Every player's individual stats (90+ attributes)\n"
+            "**Fetched:** From FC26 game data + fantasy API\n"
+            "**Used for:** V2, V3, V4, V5 engines — player-level strength\n"
+            "**Data includes:** PAC, SHO, PAS, DRI, DEF, PHY per player\n"
+            "**Position-aware:** GK has different formula than CB than ST\n"
+            "**~18,000 players** rated across all 48 World Cup squads"
+        ), inline=False)
+        p2.add_field(name="📊 3. ELO & PELE Ratings", value=(
+            "**Source of:** Historical team strength\n"
+            "**Initialized from:** `worldcupsimulator.py` (baseline ratings)\n"
+            "**Updated every run:** Real match results shift ELO/PELE by ±20 × goal margin\n"
+            "**ELO:** Classic chess-style rating for historical performance\n"
+            "**PELE:** Parallel ELO — same formula, provides stability\n"
+            "**Combined = (ELO + PELE) / 2** — averaged for match prediction\n"
+            "**All 48 teams** start at ~1500 and move up/down based on real results"
+        ), inline=False)
+        p2.add_field(name="👔 4. Manager Profiles", value=(
+            "**Source of:** Tactical identity per team\n"
+            "**62 managers** mapped to their national teams\n"
+            "**Attributes:** risk_tolerance, tactical_flexibility, pressing_preference, defensive_discipline\n"
+            "**Examples:**\n"
+            + mgr_examples()
+        ), inline=False)
+        pages.append(p2)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 3 — V1 Engine Deep Dive
+        # ──────────────────────────────────────────────────────────────────────
+        p3 = discord.Embed(title="V1 Engine — ELO/PELE", color=0xff3fb9)
+        p3.set_author(name="The simplest engine, the fastest sim")
+        p3.description = (
+            "V1 is the baseline. It ignores players, tactics, form — it only looks at "
+            "historical team strength and rolls the dice. Fastest engine (~10,000 sims/sec)."
+        )
+        p3.add_field(name="Step 1: Combined Team Rating", value=(
+            "For each team: `Combined = (ELO + PELE) / 2`\n\n"
+            "**Example:** If France has ELO=1750, PELE=1680 → Combined = 1715\n"
+            "If Paraguay has ELO=1420, PELE=1400 → Combined = 1410\n"
+            "**Difference = 1715 − 1410 = +305 (favours France)**"
+        ), inline=False)
+        p3.add_field(name="Step 2: Upset Factor", value=(
+            "The upset factor tilts the match toward the weaker team:\n"
+            "`upset = clamp(diff / 800 + 1.0, 0.4, 1.6)`\n\n"
+            "With diff = +305: `upset = 305/800 + 1.0 = 1.381`\n"
+            "France's attack gets ×1.381, Paraguay's gets ×max(0.2, 1.5−0.5×1.381)=×0.810\n\n"
+            "**Clamp range [0.4, 1.6]** — prevents extreme blowouts or total upsets."
+        ), inline=False)
+        p3.add_field(name="Step 3: Expected Goals (xG)", value=(
+            "Base xG = 1.1 goals per team (average WC match has ~2.2 total goals)\n\n"
+            "`France xG = 1.1 × 1.381 = 1.519`\n"
+            "`Paraguay xG = 1.1 × 0.810 = 0.891`\n\n"
+            "These are the **Poisson lambdas** (λ) — the average number of goals "
+            "each team would score if the match was replayed infinitely."
+        ), inline=False)
+        p3.add_field(name="Step 4: Poisson Distribution", value=(
+            "Goals in football follow a Poisson distribution:\n"
+            "`P(k goals) = e^(−λ) × λ^k / k!`\n\n"
+            "For France (λ=1.519):\n"
+            "• P(0 goals) = 21.9%  • P(1 goal) = 33.3%\n"
+            "• P(2 goals) = 25.3%  • P(3 goals) = 12.8%\n\n"
+            "For Paraguay (λ=0.891):\n"
+            "• P(0 goals) = 41.0%  • P(1 goal) = 36.5%\n"
+            "• P(2 goals) = 16.3%  • P(3 goals) = 4.8%\n\n"
+            "Combined → France wins ~58%, Draw ~23%, Paraguay wins ~19%\n"
+            "**(Knockout: draws go to extra time + penalties)**"
+        ), inline=False)
+        pages.append(p3)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 4 — V2 Engine Deep Dive
+        # ──────────────────────────────────────────────────────────────────────
+        p4 = discord.Embed(title="V2 Engine — Player Intelligence", color=0xff3fb9)
+        p4.set_author(name="Every player matters")
+        p4.description = (
+            "V2 moves beyond team-level ratings to individual players. "
+            "Each player is rated across 7 roles with position-specific formulas."
+        )
+        p4.add_field(name="7 Role Formulas", value=(
+            "Each player gets a rating for every position they can play:\n"
+            "**GK** = diving×0.35 + reflexes×0.30 + positioning×0.25 + handling×0.10\n"
+            "**CB** = def_awareness×0.30 + strength×0.20 + tackling×0.25 + heading×0.15 + pace×0.10\n"
+            "**FB** = pace×0.25 + tackling×0.20 + crossing×0.20 + stamina×0.15 + def_awareness×0.20\n"
+            "**CM** = passing×0.30 + vision×0.20 + stamina×0.15 + tackling×0.15 + dribbling×0.20\n"
+            "**DM** = tackling×0.30 + strength×0.20 + passing×0.20 + stamina×0.15 + vision×0.15\n"
+            "**WINGER** = pace×0.30 + dribbling×0.25 + crossing×0.20 + shooting×0.15 + stamina×0.10\n"
+            "**ST** = finishing×0.35 + pace×0.20 + heading×0.15 + strength×0.10 + dribbling×0.20\n\n"
+            "Each formula is **90+ FC26 attributes** mapped down to these core 5-6 per role."
+        ), inline=False)
+        p4.add_field(name="Star-Weighted Average", value=(
+            "Not all positions are equal — star players are weighted more:\n"
+            "`Attack = ST_rating × 1.5 + WINGER_rating × 1.0`\n"
+            "`Midfield = CM_rating × 1.2 + DM_rating × 1.0`\n"
+            "`Defense = CB_rating × 1.3 + FB_rating × 1.0`\n"
+            "`Goalkeeper = GK_rating × 1.0`\n\n"
+            "This means a world-class striker (Mbappé, Haaland) has **more impact** "
+            "on the match than an average full-back."
+        ), inline=False)
+        p4.add_field(name="Formation-Aware", value=(
+            "The engine reads actual formations (4-3-3, 3-5-2, 4-4-2, etc.) and "
+            "assigns the right number of players to each role group.\n\n"
+            "**4-3-3**: 1 ST + 2 Wingers + 3 CM + 2 CB + 2 FB + 1 GK\n"
+            "**3-5-2**: 2 ST + 0 Wingers + 5 CM + 3 CB + 0 FB + 1 GK\n\n"
+            "If a team is missing a player for their formation (e.g., no wingers in 4-3-3), "
+            "the engine fills with the best available alternative."
+        ), inline=False)
+        p4.add_field(name="From Ratings to xG", value=(
+            "`Attack_Ratio = Attack_A / Defense_B`\n"
+            "`xG_A = base_xg × Attack_Ratio ^ 3.0 × Midfield_Bonus_A`\n\n"
+            "The **^ 3.0** is a non-linear curve — a slight attacking advantage "
+            "produces a small xG boost, but a big advantage produces a massive one. "
+            "This models real football: dominating a match creates exponentially "
+            "more chances."
+        ), inline=False)
+        pages.append(p4)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 5 — V3 Engine Deep Dive
+        # ──────────────────────────────────────────────────────────────────────
+        p5 = discord.Embed(title="V3 Engine — Dynamic Team State", color=0xff3fb9)
+        p5.set_author(name="Chemistry · Experience · Form · Momentum · Continuity · Leadership")
+        p5.description = (
+            "V3 adds 6 dynamic modifiers on top of V2's player ratings. These capture "
+            "the 'vibe' of a team — how well they play together, not just how good "
+            "each individual is."
+        )
+        p5.add_field(name="🧪 Chemistry (Club Links)", value=(
+            "Players who play together at club level have higher chemistry.\n"
+            "**Example:** If France has 4 PSG players in the XI, those 4 get a chemistry "
+            "bonus. If a team has 0 shared club links, chemistry = 0%.\n"
+            "**Effect:** ±0% to ±15% on team rating. High chemistry = coordinated play."
+        ), inline=False)
+        p5.add_field(name="🎓 Experience (Tournament Mileage)", value=(
+            "Players with more caps and tournament experience handle pressure better.\n"
+            "Based on: caps count, previous WC appearances, age (veteran bonus).\n"
+            "**Effect:** ±0% to ±10%. Rookie teams (young squad, few caps) score lower."
+        ), inline=False)
+        p5.add_field(name="🔥 Form (Recent Matches)", value=(
+            "Players on a hot streak (scoring, assisting, clean sheets) get a boost. "
+            "Cold players get a penalty.\n"
+            "**Based on:** Last 5 real matches — goals, assists, MoTM, rating.\n"
+            "**Effect:** ±5% to +12% for in-form players, −5% to −10% for out-of-form."
+        ), inline=False)
+        p5.add_field(name="🌊 Momentum (Tournament Trajectory)", value=(
+            "Builds as the tournament progresses — winning builds momentum.\n"
+            "**Group stage win:** +3% · **Knockout win:** +5%\n"
+            "**Loss:** −3% · **Draw:** −1%\n"
+            "**Effect:** A team that cruises through groups gains momentum. "
+            "A team that scrapes through loses it."
+        ), inline=False)
+        p5.add_field(name="🔗 Continuity (Same XI)", value=(
+            "Teams that keep the same starting XI match after match develop rhythm.\n"
+            "**5+ same players:** +5% · **7+ same:** +8% · **9+ same:** +12%\n"
+            "**Effect:** Rewards settled teams, punishes rotation-heavy managers."
+        ), inline=False)
+        p5.add_field(name="👑 Leadership (Captain & Veterans)", value=(
+            "Presence of a strong captain and experienced leaders on the pitch.\n"
+            "Measured by: captain's rating, leadership trait, number of 30+ year-olds.\n"
+            "**Effect:** ±0% to +8%. Teams with no clear leader get no bonus."
+        ), inline=False)
+        p5.add_field(name="Combined Multiplier", value=(
+            "All 6 modifiers combine multiplicatively:\n"
+            "`Combined_Mult = (1 + NatMod) × (1 + Chem) × (1 + Exp) × (1 + Form) × (1 + Mom) × (1 + Cont) × (1 + Lead)`\n\n"
+            "**Typical range:** 0.85× to 1.25×\n"
+            "A team on 1.20× effectively plays **20% above** their base rating."
+        ), inline=False)
+        pages.append(p5)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 6 — V4 Engine Deep Dive
+        # ──────────────────────────────────────────────────────────────────────
+        p6 = discord.Embed(title="V4 Engine — Tactical Intelligence", color=0xff3fb9)
+        p6.set_author(name="Managers · Styles · Game Plans · Matchups")
+        p6.description = (
+            "V4 adds a tactical layer on top of V3. Each team has a manager with "
+            "a unique tactical profile, a preferred formation, and a game plan "
+            "that adapts to match context."
+        )
+        p6.add_field(name="👔 Manager Profiles", value=(
+            "Each manager has 4 core attributes (0.0–1.0):\n"
+            "• **risk_tolerance** — willingness to attack / commit men forward\n"
+            "• **tactical_flexibility** — ability to change plan mid-match\n"
+            "• **pressing_preference** — how high the team presses\n"
+            "• **defensive_discipline** — how well the team holds shape\n\n"
+            "**Effect:** A high-risk, high-press manager (e.g., Scaloni) creates "
+            "more chances but leaves defensive gaps. A low-risk, disciplined "
+            "manager (e.g., Deschamps) is harder to break down."
+        ), inline=False)
+        p6.add_field(name="📋 Game Plans (5 Styles)", value=(
+            "Each match, the manager chooses a game plan:\n"
+            "**Attacking** — +0.15 xG, −0.10 defensive penalty\n"
+            "**Balanced** — baseline, no modifiers\n"
+            "**Counter** — +0.05 xG on counters, −0.05 possession penalty\n"
+            "**Low Block** — −0.10 xG, +0.15 defensive boost\n"
+            "**High Press** — +0.10 xG, +0.05 defensive boost, stamina cost\n\n"
+            "The choice depends on: opponent strength, match context, and manager profile. "
+            "A defensive manager vs a stronger team will likely choose Low Block."
+        ), inline=False)
+        p6.add_field(name="🏟️ Match Context Modifiers", value=(
+            "The game plan adapts based on tournament context:\n"
+            "• **Group stage:** Baseline — both teams play their natural game\n"
+            "• **Knockout:** −0.01 xG — slightly more cautious\n"
+            "• **Must-win:** +0.02 xG, −0.015 def — desperation attack\n"
+            "• **Need draw:** −0.015 xG, +0.02 def — playing for a point\n"
+            "• **GD chase:** +0.025 xG, −0.015 def — chasing goal difference\n\n"
+            "These are small but compound over 6 group matches — a team that "
+            "needs a result plays differently from one that's already qualified."
+        ), inline=False)
+        p6.add_field(name="⚔️ Tactical Matchups", value=(
+            "Some styles counter others:\n"
+            "**High Press vs Low Block:** Press wins (+0.05 xG shift)\n"
+            "**Counter vs High Press:** Counter wins (+0.03 xG shift)\n"
+            "**Low Block vs Attacking:** Low Block neutralizes (−0.02 xG shift)\n\n"
+            "The matchup is resolved before each match and affects the xG "
+            "calculation for both teams."
+        ), inline=False)
+        pages.append(p6)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 7 — V5 Engine Deep Dive
+        # ──────────────────────────────────────────────────────────────────────
+        p7 = discord.Embed(title="V5 Engine — Match State Simulation", color=0xff3fb9)
+        p7.set_author(name="90 minutes · 7 phases · Fatigue · Cards · Subs · Momentum")
+        p7.description = (
+            "V5 is the most advanced engine. Instead of simulating a match as a single "
+            "xG → Poisson roll, it simulates the match minute-by-minute in 8 phases."
+        )
+        p7.add_field(name="⏱️ 8-Phase Structure", value=(
+            "Each match is divided into:\n"
+            "**Regular time:** 6 × 15-minute phases (0-15, 15-30, 30-45, 45-60, 60-75, 75-90)\n"
+            "**Extra time:** 2 × 15-minute phases (90-105, 105-120) — only if knockout and tied\n\n"
+            "**Each phase:** Both teams' xG is recalculated based on current match state "
+            "(who's winning, fatigue levels, cards, subs made, momentum)."
+        ), inline=False)
+        p7.add_field(name="💪 Fatigue System", value=(
+            "Every player has an energy level (100% → declines each phase):\n"
+            "• **0-30 min:** 100% energy\n"
+            "• **30-60 min:** −5% per phase\n"
+            "• **60-75 min:** −10% per phase\n"
+            "• **75-90 min:** −15% per phase\n"
+            "• **Extra time:** −20% per phase\n\n"
+            "Fatigue reduces: pace (−30%), shooting (−15%), defending (−20%), stamina (−50%)\n"
+            "A player below 40% energy plays at ~60% effectiveness."
+        ), inline=False)
+        p7.add_field(name="🟡 Cards & Discipline", value=(
+            "Yellow/red cards are probability-based:\n"
+            "**Yellow:** ~5% per player per match (higher for defenders, aggressive managers)\n"
+            "**Red:** ~0.5% per player per match (higher after yellow, reckless tackles)\n\n"
+            "**Effect of red card:** Team plays with 10 men — xG reduced by ~20% for remaining phases.\n"
+            "Cards accumulate across the tournament — a player booked in R32 is one "
+            "away from suspension in R16."
+        ), inline=False)
+        p7.add_field(name="🔄 Substitution AI", value=(
+            "The AI manager makes subs based on:\n"
+            "1. **Energy** — sub out players below 40% energy\n"
+            "2. **Cards** — sub out booked players (especially defenders)\n"
+            "3. **Scoreline** — losing? Bring on attackers. Winning? Bring on defenders.\n"
+            "4. **Rating** — sub out low-rated players\n\n"
+            "**3 subs per match** (standard) + 1 extra in extra time.\n"
+            "Each sub takes ~30 seconds of game time."
+        ), inline=False)
+        p7.add_field(name="🌊 In-Match Momentum", value=(
+            "Goals shift momentum for subsequent phases:\n"
+            "• **Goal scored:** +10% xG for 15 minutes (the high)\n"
+            "• **Goal conceded:** −5% xG for 15 minutes (the setback)\n"
+            "• **Red card:** −20% xG for rest of match\n"
+            "• **Missed penalty:** −8% xG for 15 minutes\n"
+            "• **Saved penalty (GK):** +5% xG for team, −5% for opponent\n\n"
+            "This creates realistic swings — a team that scores goes on the attack, "
+            "a team that concedes may crumble or rally."
+        ), inline=False)
+        p7.add_field(name="📊 Scoreline Intelligence", value=(
+            "Managers react to the scoreline in real-time:\n"
+            "• **Winning by 2+:** Sit back, counter-attack (defensive shift)\n"
+            "• **Losing by 1:** Push forward, high press\n"
+            "• **Losing by 2+:** Desperate attack (very high risk)\n"
+            "• **Draw (knockout):** Gradually more attacking as time runs out\n\n"
+            "These adjustments change the team's game plan for remaining phases."
+        ), inline=False)
+        p7.add_field(name="🔫 Penalty Shootouts", value=(
+            "If knockout match is tied after 120 minutes:\n"
+            "• Each penalty: 75% conversion rate (adjusted by player finishing, GK diving, pressure)\n"
+            "• 5 rounds each, sudden death if still tied\n"
+            "• GK with high reflexes saves more\n"
+            "• Players with high composure have higher conversion\n"
+            "**Result:** ~25% of knockout matches go to penalties (historically accurate)."
+        ), inline=False)
+        pages.append(p7)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 8 — Percentage Split & Monte Carlo
+        # ──────────────────────────────────────────────────────────────────────
+        p8 = discord.Embed(title="Monte Carlo & Percentage Split", color=0xff3fb9)
+        p8.set_author(name="Why 14.4% doesn't mean 'France wins 1 in 7'")
+        p8.description = (
+            "The percentages people see — champion probability, group win rate, "
+            "semi-final appearances — come from **Monte Carlo simulation**, not "
+            "mathematical formulas. Understanding this is key to reading the numbers correctly."
+        )
+        p8.add_field(name="🎲 What is Monte Carlo?", value=(
+            "Monte Carlo = run the same thing many times and count results.\n\n"
+            "**1 run** = one full tournament (all 104 matches, groups → knockout)\n"
+            "**N runs** = N different tournaments (different RNG each time)\n\n"
+            "After N runs, we ask: how many times did France win?\n"
+            "`Champion Probability = France_wins / N × 100`\n\n"
+            "With N=500 and France wins 72 times → **14.4%**"
+        ), inline=False)
+        p8.add_field(name="📊 What Each Stat Means", value=(
+            "**Champion %:** `times_team_won_tournament / N`\n"
+            "Sum of all teams' champion % = 100% (someone always wins)\n\n"
+            "**Semi-Final %:** `times_team_reached_SF / N`\n"
+            "Sum > 100% because 4 teams reach SF per tournament\n\n"
+            "**Group Win %:** `times_team_topped_their_group / N`\n"
+            "Exactly 12 group winners per tournament, so average group win % = 25%\n\n"
+            "**R32 %:** `times_team_advanced_from_group / N`\n"
+            "Top 2 per group (24) + 8 best 3rd = 32 teams advance per tournament"
+        ), inline=False)
+        p8.add_field(name="🔬 Statistical Significance", value=(
+            "With N=100 simulations:\n"
+            "• Margin of error ≈ ±10% for champion probability\n"
+            "• A 14.4% champion rate could be anywhere from 10-19%\n\n"
+            "With N=500 simulations:\n"
+            "• Margin of error ≈ ±4.5%\n"
+            "• 14.4% → reliable range 12-17%\n\n"
+            "With N=10,000 (head-to-head `.fsim detailed`):\n"
+            "• Margin of error ≈ ±1%\n"
+            "• Highly reliable for comparing two specific teams\n\n"
+            "**Recommendation:** Use `.montecarlo v5 500` for tournament champion %. "
+            "Use `.fsim detailed` for head-to-head matchups."
+        ), inline=False)
+        p8.add_field(name="🧮 Why Not Just Math?", value=(
+            "A full 48-team tournament has ~7.1 million possible outcome combinations "
+            "(each of the ~104 matches can end in any score). Computing the exact "
+            "probability distribution is mathematically intractable.\n\n"
+            "Monte Carlo approximates it by sampling the most likely paths many times. "
+            "500 runs covers the vast majority of realistic tournament outcomes."
+        ), inline=False)
+        pages.append(p8)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 9 — Technical Deep Dive & Edge Cases
+        # ──────────────────────────────────────────────────────────────────────
+        p9 = discord.Embed(title="Technical Deep Dive", color=0xff3fb9)
+        p9.set_author(name="ELO math, Poisson formulas, edge cases")
+        p9.description = (
+            "For the mathematically inclined — the actual formulas and edge cases "
+            "handled by the simulation."
+        )
+        p9.add_field(name="📐 ELO Update Formula", value=(
+            "After each real match:\n"
+            "`Δ = (W − Wₑ) × G × K`\n\n"
+            "**W** = actual result (1=win, 0.5=draw, 0=loss)\n"
+            "**Wₑ** = expected result = 1 / (1 + 10^((R₂−R₁)/400))\n"
+            "**G** = goal differential multiplier (1× for 1-goal, 1.5× for 2-goal, 2× for 3+)\n"
+            "**K** = 20 (K-factor, how fast ratings change)\n\n"
+            "**Example:** France (1750) beats Paraguay (1420) 3-0:\n"
+            "Wₑ = 1/(1+10^((1420-1750)/400)) = 0.87\n"
+            "Δ = (1.0 - 0.87) × 2.0 × 20 = +5.2\n"
+            "France new ELO = 1755 · Paraguay new ELO = 1415"
+        ), inline=False)
+        p9.add_field(name="📐 Poisson in Depth", value=(
+            "`P(k) = e^(−λ) × λ^k / k!`\n\n"
+            "Used to convert xG into actual goals. Key property:\n"
+            "**Mean = Variance** — if λ=1.5, the standard deviation is √1.5 = 1.22 goals\n\n"
+            "Match result probability (two independent Poissons):\n"
+            "`P(Team A wins) = Σ_i Σ_j>i P_A(i) × P_B(j)`\n"
+            "`P(Draw) = Σ_i P_A(i) × P_B(i)`\n\n"
+            "For knockout matches, draws are resolved via extra time + penalties:\n"
+            "`P(A wins in ET) = P(draw in 90min) × P(A scores in ET) × P(B doesn't)`\n"
+            "`P(A wins on pens) = P(draw after 120min) × P(A wins shootout)`"
+        ), inline=False)
+        p9.add_field(name="🔄 Engine Version Comparison", value=(
+            "**V1:** ~10,000 sims/sec · Team-level only · Best for quick Monte Carlo\n"
+            "**V2:** ~5,000 sims/sec · Player-level · Best for squad quality analysis\n"
+            "**V3:** ~2,000 sims/sec · Dynamic state · Best for form/chemistry awareness\n"
+            "**V4:** ~1,500 sims/sec · Tactical layer · Best for tactical matchups\n"
+            "**V5:** ~200 sims/sec · Full match simulation · Best for realistic scorelines\n\n"
+            "**Accuracy vs Speed tradeoff:** V1 is 50× faster than V5 but ignores "
+            "players, tactics, and match state. Use V5 for detailed analysis, "
+            "V1 for fast Monte Carlo champion probability."
+        ), inline=False)
+        p9.add_field(name="⚠️ Edge Cases Handled", value=(
+            "**Same team drawn twice:** Impossible — knockout bracket prevents rematches until final\n"
+            "**All group games 0-0:** Extremely unlikely (Poisson with λ≥0.8 → P(0-0) < 10%)\n"
+            "**Team qualifies before last group game:** Still simulates remaining matches (affects 3rd-place ranking)\n"
+            "**Penalty shootout never ends:** Capped at 20 rounds, then sudden death with reduced conversion\n"
+            "**Player injured in warmup:** Rare event (~0.1%), substitute takes their place\n"
+            "**Manager sent off:** Manager ban affects next match only (assistant takes over)"
+        ), inline=False)
+        pages.append(p9)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # Send as paginated view
+        # ──────────────────────────────────────────────────────────────────────
+        total = len(pages)
+        for i, embed in enumerate(pages):
+            embed.title = f"{i+1}/{total} {embed.title}"
+        view = _ReportView(pages, ctx.author.id)
+        msg = await ctx.send(embed=pages[0], view=view)
+        view.message = msg
+
     @commands.command(aliases=["sim", "fsim"])
     async def simulate(self, ctx, *, args: str = None):
         """Run tournament simulation: `.simulate [v1|v2|v3|v4|v5] [fast|animated|detailed] [debug]` or `.fsim ...`."""
@@ -2348,6 +2817,8 @@ class DraftCog(commands.Cog):
         tokens = args.split() if args and args.strip() else []
         if tokens and tokens[0].lower() == "detailed":
             return await self._simulate_detailed(ctx, tokens[1:])
+        if tokens and tokens[0].lower() in ("how", "explain"):
+            return await self.fsim_how(ctx)
 
         model, presentation, debug = self._parse_simulation_args(args)
         if model is None:
@@ -2355,7 +2826,7 @@ class DraftCog(commands.Cog):
 
         status_msg = await ctx.send(f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n⏳ Fetching latest FIFA data...")
 
-        fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+        fifa_dir = os.path.dirname(os.path.dirname(__file__))
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -2482,7 +2953,7 @@ class DraftCog(commands.Cog):
                 ) as r:
                     squads_raw = await r.json()
 
-            fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+            fifa_dir = os.path.dirname(os.path.dirname(__file__))
             results = match_data.get("Results", [])
             completed, upcoming = [], []
             for m in results:
@@ -2706,6 +3177,7 @@ class DraftCog(commands.Cog):
     def _build_report_pages(self, report: "SimulationReport") -> list[discord.Embed]:
         raw: list[discord.Embed] = []
         raw.append(self._page_prediction(report))
+        raw.append(self._page_how_is_calculated(report))
         raw.append(self._page_model_edge(report))
         if report.v2:
             raw.append(self._page_squad_quality(report))
@@ -2786,6 +3258,138 @@ class DraftCog(commands.Cog):
             inline=True,
         )
         embed.set_footer(text=f"Model: {report.version.upper()} | {report.version_label}")
+        return embed
+
+    def _page_how_is_calculated(self, report: "SimulationReport") -> discord.Embed:
+        embed = self._page_header(report, "How This % Is Calculated")
+        is_ko = report.knockout
+
+        # ── V1 (ELO/PELE) breakdown ────────────────────────────────────────────
+        if report.v1:
+            v1 = report.v1
+            upset = v1.upset_factor
+            base_goals = 1.1
+            lam1 = base_goals * upset
+            lam2 = base_goals * max(0.20, 1.5 - 0.5 * upset)
+
+            # Approximate win/draw probabilities from Poisson
+            import math
+            def poisson_prob(lam, k):
+                return math.exp(-lam) * (lam ** k) / math.factorial(k)
+
+            def match_probs(la, lb, max_g=10):
+                pw = pd = pl = 0.0
+                for ga in range(max_g + 1):
+                    pa = poisson_prob(la, ga)
+                    for gb in range(max_g + 1):
+                        pb = poisson_prob(lb, gb)
+                        prob = pa * pb
+                        if ga > gb: pw += prob
+                        elif ga == gb: pd += prob
+                        else: pl += prob
+                if is_ko:
+                    et_scale = 0.3
+                    et_draw = pd
+                    et_wins = pw
+                    et_loss = pl
+                    pw = 0
+                    pd = 0
+                    pl = 0
+                    for ga in range(max_g + 1):
+                        pa = poisson_prob(la * et_scale, ga)
+                        for gb in range(max_g + 1):
+                            pb = poisson_prob(lb * et_scale, gb)
+                            prob = pa * pb
+                            if ga > gb: pw += prob * et_draw
+                            elif ga < gb: pl += prob * et_draw
+                            else:
+                                pw += prob * et_draw * 0.53
+                                pl += prob * et_draw * 0.47
+                    pw += et_wins
+                    pl += et_loss
+                return pw * 100, pd * 100, pl * 100
+
+            pw, pd, pl = match_probs(lam1, lam2)
+
+            diff = v1.combined_diff
+            embed.description = (
+                f"**Step 1: Team Ratings**\n"
+                f"`{report.flag_a} {report.team_a}:`  ELO={v1.elo_a:.0f}  +  PELE={v1.pele_a:.0f}  =  **Combined {v1.combined_a:.0f}**\n"
+                f"`{report.flag_b} {report.team_b}:`  ELO={v1.elo_b:.0f}  +  PELE={v1.pele_b:.0f}  =  **Combined {v1.combined_b:.0f}**\n\n"
+                f"**Step 2: Rating Difference**\n"
+                f"`{v1.combined_a:.0f} − {v1.combined_b:.0f} = {diff:+.0f}`\n"
+                f"The bigger the gap, the more the stronger team is favoured.\n\n"
+                f"**Step 3: Upset Factor**\n"
+                f"`diff / 800 + 1.0 = {diff:.0f}/800 + 1.0 = {diff/800+1:.3f}`\n"
+                f"→ clamped to [{0.4}, {1.6}] = **{upset:.3f}**\n"
+                f"(Higher = stronger attack, lower = weaker attack)\n\n"
+                f"**Step 4: Expected Goals (xG)**\n"
+                f"`{report.flag_a}: base 1.1 × {upset:.3f} = {lam1:.4f} xG`\n"
+                f"`{report.flag_b}: base 1.1 × max(0.2, 1.5−0.5×{upset:.3f}) = {lam2:.4f} xG`\n\n"
+                f"**Step 5: Poisson → Win %**\n"
+                f"xG feeds a Poisson distribution (goals are random but cluster around the average)\n\n"
+                f"{'─' * 28}"
+            )
+            lines = []
+            bar = lambda p: "█" * max(1, round(p / 100 * 10)) if p > 0 else ""
+            lines.append(f"```{report.flag_a} {report.team_a}: {pw:5.1f}%  {bar(pw)}")
+            lines.append(f"{'Draw':15s}  {pd:5.1f}%  {bar(pd)}")
+            lines.append(f"{report.flag_b} {report.team_b}: {pl:5.1f}%  {bar(pl)}```")
+            if is_ko:
+                lines.append(f"*Knockout: draws go to extra time + penalties (modelled above)*")
+            lines.append("")
+            lines.append("**How to read this page:**")
+            lines.append("1. Take both teams' ELO + PELE ratings → combined score")
+            lines.append("2. Compare them → upset factor → expected goals (xG)")
+            lines.append("3. Poisson randomness turns xG into a percentage")
+            lines.append("4. Simulate 10,000+ matches to get reliable %")
+            embed.add_field(name="Match Outcome (Poisson Estimate)", value="\n".join(lines), inline=False)
+            embed.add_field(name="Where Do ELO & PELE Come From?", value=(
+                "**ELO** = historical head-to-head results (updated from real WC matches)\n"
+                "**PELE** = a parallel ELO rating for extra stability\n"
+                "Both start at 1500 for a new team and move up/down based on match results."
+            ), inline=False)
+
+        # ── V3+ breakdown ──────────────────────────────────────────────────────
+        elif report.v3:
+            v3 = report.v3
+            base_steps = [
+                f"**Base:** Each player rated → averaged by role group",
+                f"**Star Weighting:** Stars (ST, CM, CB) weighted more than squad players",
+            ]
+            if hasattr(v3, 'nationality_modifier_a'):
+                nm_a = v3.nationality_modifier_a
+                nm_b = v3.nationality_modifier_b
+                base_steps.append(f"**National Modifier:** `{report.team_a}: {nm_a:+.2%}  |  {report.team_b}: {nm_b:+.2%}`")
+            base_steps.append(f"**ELO/PELE Multiplier:** From real match results (up to ±{3.0}×)")
+            base_steps.append(f"**Combined x{report.v3.combined_mult_a:.3f} vs x{report.v3.combined_mult_b:.3f}**")
+
+            embed.description = (
+                f"**V3 Engine — Strength = Ratings × Multipliers**\n\n"
+                + "\n".join(base_steps)
+                + "\n\n**Dynamic State Modifiers:**\n"
+            )
+
+            lines = []
+            comps = report.v3.components if hasattr(report.v3, 'components') else []
+            for c in comps:
+                icon = {"chemistry": "🧪", "experience": "🎓", "form": "🔥", "momentum": "🌊", "continuity": "🔗", "leadership": "👑"}.get(c.name, "📊")
+                lines.append(f"{icon} **{c.name.title()}**:  {report.flag_a} {c.value_a:+.2%}  vs  {report.flag_b} {c.value_b:+.2%}")
+            embed.add_field(name="Per-Component Breakdown", value="\n".join(lines) if lines else "No data", inline=False)
+
+            embed.add_field(name="Then: Expected Goals (xG)", value=(
+                "1. Star-weighted Attack ÷ (Defense×0.7 + GK×0.3) → attack ratio\n"
+                "2. `ratio ^ 3.0` → non-linear curve (diminishing returns)\n"
+                "3. × Midfield control bonus\n"
+                "4. × Dynamic multiplier\n"
+                "5. × National modifier\n"
+                "6. × ELO dampening factor\n"
+                "→ Final xG for each team → Poisson → Win%"
+            ), inline=False)
+
+        else:
+            embed.description = "Full breakdown not available for this engine version. Try `v1` for the clearest step-by-step."
+
         return embed
 
     def _page_model_edge(self, report: "SimulationReport") -> discord.Embed:
@@ -3236,7 +3840,7 @@ class DraftCog(commands.Cog):
             TacticalAdjustmentData, V51ReportData,
         )
 
-        fifa_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fifa_data")
+        fifa_dir = os.path.dirname(os.path.dirname(__file__))
         report = SimulationReport(version=version, team_a=team_a, team_b=team_b, knockout=knockout, simulations=simulations)
 
         # === Pre-match analysis: capture engine state before any simulations ===

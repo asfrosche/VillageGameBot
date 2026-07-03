@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parents[1] / "fifa_data"
+HERE = Path(__file__).resolve().parents[2] / "fifa_data"
 
 
 # ── Utilities ───────────────────────────────────────────────────────────────

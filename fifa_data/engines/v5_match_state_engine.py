@@ -44,6 +44,7 @@ class V5MatchStateEngine(MatchEngine):
         self._v4 = V4TacticalEngine(data_dir=resolved, squads=self.squads, team_metrics=team_metrics)
 
         self.minimum_lambda = self._v4.minimum_lambda
+        self.max_xg = 4.0
         self.extra_time_lambda_scale = self._v4.extra_time_lambda_scale
         self.tiebreaker_base_probability = self._v4.tiebreaker_base_probability
         self.tiebreaker_delta_scale = self._v4.tiebreaker_delta_scale
@@ -129,8 +130,8 @@ class V5MatchStateEngine(MatchEngine):
         )
         self._v4.last_tactical_report = tactical_report
 
-        lambda1 = max(self.minimum_lambda, tactical_report.final_xg_a)
-        lambda2 = max(self.minimum_lambda, tactical_report.final_xg_b)
+        lambda1 = max(self.minimum_lambda, min(tactical_report.final_xg_a, self.max_xg))
+        lambda2 = max(self.minimum_lambda, min(tactical_report.final_xg_b, self.max_xg))
 
         manager1 = get_manager(team1)
         manager2 = get_manager(team2)
@@ -138,112 +139,9 @@ class V5MatchStateEngine(MatchEngine):
         state.game_plan_a = tactical_report.game_plan_a
         state.game_plan_b = tactical_report.game_plan_b
 
-        phases = PHASE_ORDER
-        if is_knockout:
-            pass
-
-        for phase in phases:
-            state.current_phase = phase
-            state.record_phase()
-            state.minute = self._phase_midpoint(phase)
-
-            is_et_phase = phase in EXTRA_TIME_PHASES
-
-            press_intensity_a = self.fatigue_service.get_pressing_intensity(state.game_plan_a)
-            press_intensity_b = self.fatigue_service.get_pressing_intensity(state.game_plan_b)
-            match_intensity = self.fatigue_service.get_match_intensity(state.momentum_a)
-
-            self.fatigue_service.apply_phase_fatigue(
-                squad1.current_starting_xi, state.team_a_players,
-                is_extra_time=is_et_phase,
-                match_intensity=match_intensity,
-                pressing_intensity=press_intensity_a,
-            )
-            self.fatigue_service.apply_phase_fatigue(
-                squad2.current_starting_xi, state.team_b_players,
-                is_extra_time=is_et_phase,
-                match_intensity=match_intensity,
-                pressing_intensity=press_intensity_b,
-            )
-
-            self.momentum_service.decay_momentum()
-            state.momentum_a = self.momentum_service.team_a_momentum
-            state.momentum_b = self.momentum_service.team_b_momentum
-
-            scoreline_state_a = state.scoreline.description_for_team(team1, team1, team2)
-            scoreline_state_b = state.scoreline.description_for_team(team2, team1, team2)
-
-            phase_lambda_a = self._compute_phase_xg(
-                lambda1, state, team1, squad1,
-                scoreline_state_a, state.momentum_a,
-            )
-            phase_lambda_b = self._compute_phase_xg(
-                lambda2, state, team2, squad2,
-                scoreline_state_b, state.momentum_b,
-            )
-
-            phase_events = self.event_engine.generate_phase_events(
-                state, squad1, squad2,
-                phase_lambda_a, phase_lambda_b,
-                phase_lambda_a, phase_lambda_b,
-                phase, is_et_phase,
-            )
-            state.events.extend(phase_events)
-
-            state.momentum_a = self.momentum_service.team_a_momentum
-            state.momentum_b = self.momentum_service.team_b_momentum
-
-            phase_minute = int(self._phase_midpoint(phase))
-            subs1 = self.substitution_service.evaluate_substitutions(
-                team1, squad1, state.team_a_players,
-                scoreline_state_a, phase_minute, manager1,
-                state.game_plan_a, state.red_card_count_a, is_et_phase,
-            )
-            subs2 = self.substitution_service.evaluate_substitutions(
-                team2, squad2, state.team_b_players,
-                scoreline_state_b, phase_minute, manager2,
-                state.game_plan_b, state.red_card_count_b, is_et_phase,
-            )
-
-            for sub in subs1 + subs2:
-                state.substitutions.append(sub)
-                off_name = sub.player_off
-                on_name = sub.player_on
-                state.events.append(MatchEvent(
-                    minute=sub.minute,
-                    team=sub.team,
-                    event_type=EventType.SUBSTITUTION,
-                    player_name=on_name,
-                    data={"player_off": off_name, "player_on": on_name, "reason": sub.reason},
-                ))
-
-            new_plan_a = self.match_state_service.evaluate_manager_reaction(
-                manager1, scoreline_state_a, phase_minute, state.game_plan_a,
-            )
-            if new_plan_a and new_plan_a != state.game_plan_a:
-                old_plan = state.game_plan_a
-                state.game_plan_a = new_plan_a
-                state.game_plan_history_a.append((phase_minute, new_plan_a))
-                state.events.append(MatchEvent(
-                    minute=phase_minute,
-                    team=team1,
-                    event_type=EventType.TACTICAL_CHANGE,
-                    detail=f"{old_plan} -> {new_plan_a}",
-                ))
-
-            new_plan_b = self.match_state_service.evaluate_manager_reaction(
-                manager2, scoreline_state_b, phase_minute, state.game_plan_b,
-            )
-            if new_plan_b and new_plan_b != state.game_plan_b:
-                old_plan = state.game_plan_b
-                state.game_plan_b = new_plan_b
-                state.game_plan_history_b.append((phase_minute, new_plan_b))
-                state.events.append(MatchEvent(
-                    minute=phase_minute,
-                    team=team2,
-                    event_type=EventType.TACTICAL_CHANGE,
-                    detail=f"{old_plan} -> {new_plan_b}",
-                ))
+        for phase in PHASE_ORDER:
+            self._run_phase(state, team1, team2, squad1, squad2, phase,
+                            lambda1, lambda2, manager1, manager2)
 
         g1 = state.scoreline.goals_a
         g2 = state.scoreline.goals_b
@@ -254,65 +152,13 @@ class V5MatchStateEngine(MatchEngine):
         penalty_shootout_b: list[str] = []
 
         if not can_draw and g1 == g2:
-            et_phases = EXTRA_TIME_PHASES
-            for phase in et_phases:
-                state.current_phase = phase
-                state.record_phase()
-                state.is_extra_time = True
-                state.minute = self._phase_midpoint(phase)
-
-                press_intensity_a = self.fatigue_service.get_pressing_intensity(state.game_plan_a)
-                press_intensity_b = self.fatigue_service.get_pressing_intensity(state.game_plan_b)
-                match_intensity = self.fatigue_service.get_match_intensity(state.momentum_a)
-
-                self.fatigue_service.apply_phase_fatigue(
-                    squad1.current_starting_xi, state.team_a_players,
-                    is_extra_time=True, match_intensity=match_intensity * 1.3,
-                    pressing_intensity=press_intensity_a,
-                )
-                self.fatigue_service.apply_phase_fatigue(
-                    squad2.current_starting_xi, state.team_b_players,
-                    is_extra_time=True, match_intensity=match_intensity * 1.3,
-                    pressing_intensity=press_intensity_b,
-                )
-
-                self.momentum_service.decay_momentum()
-                state.momentum_a = self.momentum_service.team_a_momentum
-                state.momentum_b = self.momentum_service.team_b_momentum
-
-                scoreline_state_a = state.scoreline.description_for_team(team1, team1, team2)
-                scoreline_state_b = state.scoreline.description_for_team(team2, team1, team2)
-
+            state.is_extra_time = True
+            for phase in EXTRA_TIME_PHASES:
                 et_lambda1 = lambda1 * self.extra_time_lambda_scale * 0.7
                 et_lambda2 = lambda2 * self.extra_time_lambda_scale * 0.7
-
-                et_events = self.event_engine.generate_phase_events(
-                    state, squad1, squad2,
-                    et_lambda1, et_lambda2, et_lambda1, et_lambda2,
-                    phase, True,
-                )
-                state.events.extend(et_events)
-
-                phase_minute = int(self._phase_midpoint(phase))
-                subs1 = self.substitution_service.evaluate_substitutions(
-                    team1, squad1, state.team_a_players,
-                    scoreline_state_a, phase_minute, manager1,
-                    state.game_plan_a, state.red_card_count_a, True,
-                )
-                subs2 = self.substitution_service.evaluate_substitutions(
-                    team2, squad2, state.team_b_players,
-                    scoreline_state_b, phase_minute, manager2,
-                    state.game_plan_b, state.red_card_count_b, True,
-                )
-                for sub in subs1 + subs2:
-                    state.substitutions.append(sub)
-                    state.events.append(MatchEvent(
-                        minute=sub.minute,
-                        team=sub.team,
-                        event_type=EventType.SUBSTITUTION,
-                        player_name=sub.player_on,
-                        data={"player_off": sub.player_off, "player_on": sub.player_on, "reason": sub.reason},
-                    ))
+                self._run_phase(state, team1, team2, squad1, squad2, phase,
+                                et_lambda1, et_lambda2, manager1, manager2,
+                                is_extra_time=True)
 
             g1 = state.scoreline.goals_a
             g2 = state.scoreline.goals_b
@@ -346,6 +192,125 @@ class V5MatchStateEngine(MatchEngine):
         self._v4.last_match_debug = self.last_match_debug
 
         return score, state, state.events
+
+    def _run_phase(
+        self,
+        state: MatchState,
+        team1: str,
+        team2: str,
+        squad1: Squad,
+        squad2: Squad,
+        phase: MatchPhase,
+        lambda1: float,
+        lambda2: float,
+        manager1: ManagerProfile,
+        manager2: ManagerProfile,
+        is_extra_time: bool = False,
+    ) -> None:
+        state.current_phase = phase
+        state.record_phase()
+        state.minute = self._phase_midpoint(phase)
+
+        press_intensity_a = self.fatigue_service.get_pressing_intensity(state.game_plan_a)
+        press_intensity_b = self.fatigue_service.get_pressing_intensity(state.game_plan_b)
+        match_intensity = self.fatigue_service.get_match_intensity(state.momentum_a)
+        fatigue_mult = 1.3 if is_extra_time else 1.0
+
+        self.fatigue_service.apply_phase_fatigue(
+            squad1.current_starting_xi, state.team_a_players,
+            is_extra_time=is_extra_time,
+            match_intensity=match_intensity * fatigue_mult,
+            pressing_intensity=press_intensity_a,
+        )
+        self.fatigue_service.apply_phase_fatigue(
+            squad2.current_starting_xi, state.team_b_players,
+            is_extra_time=is_extra_time,
+            match_intensity=match_intensity * fatigue_mult,
+            pressing_intensity=press_intensity_b,
+        )
+
+        self.momentum_service.decay_momentum()
+        state.momentum_a = self.momentum_service.team_a_momentum
+        state.momentum_b = self.momentum_service.team_b_momentum
+
+        scoreline_state_a = state.scoreline.description_for_team(team1, team1, team2)
+        scoreline_state_b = state.scoreline.description_for_team(team2, team1, team2)
+
+        if is_extra_time:
+            phase_lambda_a = lambda1
+            phase_lambda_b = lambda2
+        else:
+            phase_lambda_a = self._compute_phase_xg(
+                lambda1, state, team1, squad1,
+                scoreline_state_a, state.momentum_a,
+            )
+            phase_lambda_b = self._compute_phase_xg(
+                lambda2, state, team2, squad2,
+                scoreline_state_b, state.momentum_b,
+            )
+
+        phase_events = self.event_engine.generate_phase_events(
+            state, squad1, squad2,
+            phase_lambda_a, phase_lambda_b,
+            phase_lambda_a, phase_lambda_b,
+            phase, is_extra_time,
+        )
+        state.events.extend(phase_events)
+
+        state.momentum_a = self.momentum_service.team_a_momentum
+        state.momentum_b = self.momentum_service.team_b_momentum
+
+        phase_minute = int(self._phase_midpoint(phase))
+        subs1 = self.substitution_service.evaluate_substitutions(
+            team1, squad1, state.team_a_players,
+            scoreline_state_a, phase_minute, manager1,
+            state.game_plan_a, state.red_card_count_a, is_extra_time,
+        )
+        subs2 = self.substitution_service.evaluate_substitutions(
+            team2, squad2, state.team_b_players,
+            scoreline_state_b, phase_minute, manager2,
+            state.game_plan_b, state.red_card_count_b, is_extra_time,
+        )
+        for sub in subs1 + subs2:
+            state.substitutions.append(sub)
+            off_name = sub.player_off
+            on_name = sub.player_on
+            state.events.append(MatchEvent(
+                minute=sub.minute,
+                team=sub.team,
+                event_type=EventType.SUBSTITUTION,
+                player_name=on_name,
+                data={"player_off": off_name, "player_on": on_name, "reason": sub.reason},
+            ))
+
+        if not is_extra_time:
+            new_plan_a = self.match_state_service.evaluate_manager_reaction(
+                manager1, scoreline_state_a, phase_minute, state.game_plan_a,
+            )
+            if new_plan_a and new_plan_a != state.game_plan_a:
+                old_plan = state.game_plan_a
+                state.game_plan_a = new_plan_a
+                state.game_plan_history_a.append((phase_minute, new_plan_a))
+                state.events.append(MatchEvent(
+                    minute=phase_minute,
+                    team=team1,
+                    event_type=EventType.TACTICAL_CHANGE,
+                    detail=f"{old_plan} -> {new_plan_a}",
+                ))
+
+            new_plan_b = self.match_state_service.evaluate_manager_reaction(
+                manager2, scoreline_state_b, phase_minute, state.game_plan_b,
+            )
+            if new_plan_b and new_plan_b != state.game_plan_b:
+                old_plan = state.game_plan_b
+                state.game_plan_b = new_plan_b
+                state.game_plan_history_b.append((phase_minute, new_plan_b))
+                state.events.append(MatchEvent(
+                    minute=phase_minute,
+                    team=team2,
+                    event_type=EventType.TACTICAL_CHANGE,
+                    detail=f"{old_plan} -> {new_plan_b}",
+                ))
 
     def _compute_phase_xg(
         self,

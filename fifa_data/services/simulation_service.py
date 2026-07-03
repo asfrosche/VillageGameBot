@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 
@@ -7,19 +6,10 @@ from ..engines.v2_player_engine import V2PlayerMatchEngine
 from ..engines.v3_dynamic_engine import V3DynamicEngine
 from ..engines.v4_tactical_engine import V4TacticalEngine
 from ..engines.v5_match_state_engine import V5MatchStateEngine
+from ._match_config import MATCHES_TEAM_MAP, update_elo_from_matches
 from .orchestrator import TournamentOrchestrator
 
 HERE = Path(__file__).resolve().parents[1]
-
-MATCHES_TEAM_MAP = {
-    "USA": "United States",
-    "Cabo Verde": "Cape Verde",
-    "Bosnia and Herzegovina": "Bosnia-Herzegovina",
-    "South Korea": "Korea Republic",
-    "Czech Republic": "Czechia",
-    "Turkey": "Türkiye",
-    "Iran": "IR Iran",
-}
 
 TEAM_METRICS = {}
 GROUPS = {}
@@ -47,44 +37,6 @@ def reset_metrics():
     _load_worldcup_data()
 
 
-def update_elo_from_matches(matches_file=None):
-    if matches_file is None:
-        matches_file = os.path.join(HERE, "data", "matches.json")
-    with open(matches_file, encoding="utf-8") as f:
-        data = json.load(f)
-    completed = data.get("completed", [])
-    k_elo = 20
-    k_pele = 20
-    for match in completed:
-        home_name = MATCHES_TEAM_MAP.get(match["home"]["name"], match["home"]["name"])
-        away_name = MATCHES_TEAM_MAP.get(match["away"]["name"], match["away"]["name"])
-        if home_name not in TEAM_METRICS or away_name not in TEAM_METRICS:
-            continue
-        home_goals = match["home"]["score"]
-        away_goals = match["away"]["score"]
-        r1 = (TEAM_METRICS[home_name]["ELO"] + TEAM_METRICS[home_name]["PELE"]) / 2
-        r2 = (TEAM_METRICS[away_name]["ELO"] + TEAM_METRICS[away_name]["PELE"]) / 2
-        we1 = 1 / (1 + 10 ** ((r2 - r1) / 400))
-        if home_goals > away_goals:
-            w1 = 1.0
-        elif home_goals < away_goals:
-            w1 = 0.0
-        else:
-            w1 = 0.5
-        gd = abs(home_goals - away_goals)
-        if gd <= 1:
-            g_mult = 1.0
-        elif gd == 2:
-            g_mult = 1.5
-        else:
-            g_mult = 2.0
-        delta = (w1 - we1) * g_mult
-        TEAM_METRICS[home_name]["ELO"] = round(TEAM_METRICS[home_name]["ELO"] + k_elo * delta)
-        TEAM_METRICS[away_name]["ELO"] = round(TEAM_METRICS[away_name]["ELO"] - k_elo * delta)
-        TEAM_METRICS[home_name]["PELE"] = round(TEAM_METRICS[home_name]["PELE"] + k_pele * delta)
-        TEAM_METRICS[away_name]["PELE"] = round(TEAM_METRICS[away_name]["PELE"] - k_pele * delta)
-
-
 def _v1_engine():
     return V1EloMatchEngine(TEAM_METRICS)
 
@@ -102,7 +54,7 @@ def run_simulation(model="v1", debug=False):
     """Run the full simulation and return structured data."""
     normalized_model = (model or "v1").lower()
     # Update ELO/PELE from real match results for all models
-    update_elo_from_matches()
+    update_elo_from_matches(TEAM_METRICS)
     if normalized_model == "v1":
         engine = _v1_engine()
     elif normalized_model == "v2":
@@ -140,7 +92,7 @@ def run_monte_carlo(model="v5", n=100, verbose=True):
     from collections import defaultdict
     import time
 
-    update_elo_from_matches()
+    update_elo_from_matches(TEAM_METRICS)
 
     champion = defaultdict(int)
     final_four = defaultdict(int)

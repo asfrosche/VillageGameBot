@@ -30,7 +30,8 @@ class TournamentOrchestrator:
         self.last_match_debugs = []
         self._debug = debug
         matches_data = self._load_matches()
-        real_results = self._real_group_results(matches_data)
+        real_group_results = self._real_group_results(matches_data)
+        real_ko_results = self._real_knockout_results(matches_data)
 
         groups_data = {}
         group_winners = {}
@@ -50,7 +51,7 @@ class TournamentOrchestrator:
             ]
             matches = []
             for team1, team2 in match_list:
-                real = self._get_real_result(real_results, gid, team1, team2)
+                real = self._get_real_result(real_group_results, gid, team1, team2)
                 if real:
                     goals1, goals2 = real
                     is_real = True
@@ -105,7 +106,7 @@ class TournamentOrchestrator:
 
         all_third.sort(key=lambda item: (item[2], item[3], item[4]), reverse=True)
         best_thirds = all_third[:8]
-        knockout = self._resolve_knockout(group_winners, group_runners, best_thirds)
+        knockout = self._resolve_knockout(group_winners, group_runners, best_thirds, real_ko_results)
 
         third_place = self._third_place_match(knockout)
         champion = None
@@ -113,7 +114,7 @@ class TournamentOrchestrator:
             champion = knockout[4][0]["winner"]
 
         stats = {
-            "real_count": len(real_results),
+            "real_count": len(real_group_results) + len(real_ko_results),
             "total_group_matches": sum(6 for _ in self.groups),
             "knockout_matches": sum(len([match for match in round_matches if match]) for round_matches in knockout),
             "third_place": 1 if third_place else 0,
@@ -166,11 +167,23 @@ class TournamentOrchestrator:
             return goals2, goals1
         return None
 
+    def _real_knockout_results(self, matches_data: dict[str, object]) -> dict[tuple[str, str], tuple[int, int]]:
+        """Build a lookup of all completed matches by (team1, team2) regardless of stage."""
+        results: dict[tuple[str, str], tuple[int, int]] = {}
+        for match in matches_data.get("completed", []):
+            home = self._map_team_name(match.get("home", {}).get("name", ""))
+            away = self._map_team_name(match.get("away", {}).get("name", ""))
+            hs = int(match.get("home", {}).get("score", 0))
+            aas = int(match.get("away", {}).get("score", 0))
+            results[(home, away)] = (hs, aas)
+        return results
+
     def _resolve_knockout(
         self,
         group_winners: dict[str, str],
         group_runners: dict[str, str],
         best_thirds: list[tuple[object, ...]],
+        real_ko_results: dict[tuple[str, str], tuple[int, int]] | None = None,
     ) -> list[list[dict[str, object] | None]]:
         slots = [
             "3ABCDF",
@@ -212,6 +225,8 @@ class TournamentOrchestrator:
                 return group_runners.get(code[1:], "TBD")
             return thirds_map.get(code, "TBD")
 
+        real_ko = real_ko_results or {}
+
         round_names = ["R32", "R16", "QF", "SF", "Final"]
         knockout: list[list[dict[str, object] | None]] = []
         current_pairs = [(resolve_team(pair[0]), resolve_team(pair[1])) for pair in bracket]
@@ -223,13 +238,24 @@ class TournamentOrchestrator:
                     matches.append(None)
                     next_pairs.append(None)
                     continue
-                goals1, goals2 = self.match_engine.simulate_match(
-                    team1,
-                    team2,
-                    can_draw=(round_name == "R32"),
-                )
-                self._capture_debug(self._debug)
-                self.match_engine.notify_match(team1, team2, goals1, goals2, False)
+                key = (team1, team2)
+                rev_key = (team2, team1)
+                if key in real_ko:
+                    goals1, goals2 = real_ko[key]
+                    is_real = True
+                elif rev_key in real_ko:
+                    g2, g1 = real_ko[rev_key]
+                    goals1, goals2 = g1, g2
+                    is_real = True
+                else:
+                    goals1, goals2 = self.match_engine.simulate_match(
+                        team1,
+                        team2,
+                        can_draw=(round_name == "R32"),
+                    )
+                    is_real = False
+                    self._capture_debug(self._debug)
+                self.match_engine.notify_match(team1, team2, goals1, goals2, is_real)
                 winner = team1 if goals1 > goals2 else (team2 if goals2 > goals1 else random.choice([team1, team2]))
                 home_minutes, away_minutes = self.generate_goal_minutes(goals1, goals2)
                 matches.append(
@@ -241,7 +267,7 @@ class TournamentOrchestrator:
                         "home_goal_minutes": home_minutes,
                         "away_goal_minutes": away_minutes,
                         "winner": winner,
-                        "is_real": False,
+                        "is_real": is_real,
                     }
                 )
                 next_pairs.append(winner)

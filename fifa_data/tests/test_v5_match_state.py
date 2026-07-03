@@ -17,7 +17,7 @@ from fifa_data.services.substitution_manager import FatigueService, Substitution
 from fifa_data.services.tactical_analysis import compute_tactical_matchup
 
 
-HERE = Path(__file__).resolve().parents[1] / "fifa_data"
+HERE = Path(__file__).resolve().parents[2] / "fifa_data"
 
 
 def _make_player(name: str, country: str, position: str, attrs: dict) -> Player:
