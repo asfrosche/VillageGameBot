@@ -1822,12 +1822,14 @@ class Other(commands.Cog):
 
     async def help_botc(self, ctx):
         try:
-            from BOTC.cogs.help import _build_help_embed
-            embed = _build_help_embed()
+            from BOTC.cogs.help import PAGES, HelpView
+            embed = PAGES[0]()
+            view = HelpView()
         except ImportError:
             embed = discord.Embed(title="🐦 Blood on the Clocktower", color=0x008080)
             embed.description = "See `.botchelp` for all BOTC commands."
-        await self.send_help_page(ctx, embed, self.help_botc)
+            view = None
+        await ctx.send(embed=embed, view=view)
 
 
 class NarrationColorView(discord.ui.View):

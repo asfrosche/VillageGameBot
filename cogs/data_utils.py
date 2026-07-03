@@ -1,14 +1,4 @@
-import os
-import json
-import sqlite3
-
-from utils.bot_db import (
-    delete_guild_data as _delete_guild_data,
-    get_guild_data as _get_guild_data,
-    init_db as _init_db,
-    migrate_legacy_json as _migrate_legacy_json,
-    upsert_guild_data as _upsert_guild_data,
-)
+from utils import bot_db as _bot_db
 
 base_variables = {
     "overseer_role_name": 'Overseer',
@@ -85,16 +75,16 @@ base_variables = {
 
 def load_guild_data(guild_id):
     _ensure_db_ready()
-    return _get_guild_data(int(guild_id))
+    return _bot_db.get_guild_data(int(guild_id))
 
 def save_guild_data(guild_id, data):
     _ensure_db_ready()
-    _upsert_guild_data(int(guild_id), data)
+    _bot_db.upsert_guild_data(int(guild_id), data)
 
 
 def delete_guild_data(guild_id):
     _ensure_db_ready()
-    _delete_guild_data(int(guild_id))
+    _bot_db.delete_guild_data(int(guild_id))
 
 
 _DB_READY = False
@@ -104,77 +94,33 @@ def _ensure_db_ready() -> None:
     global _DB_READY
     if _DB_READY:
         return
-    _init_db()
-    # One-time migration from legacy JSON settings
-    _migrate_legacy_json()
+    _bot_db.init_db()
+    _bot_db.migrate_legacy_json()
     _DB_READY = True
 
-invites_db_path = 'db/invites.db'
-
 def init_invites_db():
-    conn = sqlite3.connect(invites_db_path)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS invites (
-                    guild_id INTEGER,
-                    invite_code TEXT,
-                    uses INTEGER,
-                    PRIMARY KEY (guild_id, invite_code)
-                )''')
-    conn.commit()
-    conn.close()
+    pass
 
 def load_invites(guild_id):
-    conn = sqlite3.connect(invites_db_path)
-    c = conn.cursor()
-    c.execute('SELECT invite_code, uses FROM invites WHERE guild_id = ?', (guild_id,))
-    invites = {row[0]: row[1] for row in c.fetchall()}
-    conn.close()
-    return invites
+    return _bot_db.load_invites(guild_id)
 
 def save_invites(guild_id, invites):
-    conn = sqlite3.connect(invites_db_path)
-    c = conn.cursor()
-    c.execute('DELETE FROM invites WHERE guild_id = ?', (guild_id,))
-    for code, uses in invites.items():
-        c.execute('INSERT INTO invites (guild_id, invite_code, uses) VALUES (?, ?, ?)', (guild_id, code, uses))
-    conn.commit()
-    conn.close()
+    _bot_db.save_invites(guild_id, invites)
 
-deadlist_db_path = 'db/deadlist.db'
+def delete_guild_invites(guild_id):
+    _bot_db.delete_guild_invites(guild_id)
 
 def init_deadlist_db():
-    conn = sqlite3.connect(deadlist_db_path)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS deadlist (
-                    player TEXT,
-                    team TEXT,
-                    role TEXT,
-                    server INTEGER
-                )''')
-    conn.commit()
-    conn.close()
+    pass
 
 def add_player(player, team, role, server):
-    conn = sqlite3.connect(deadlist_db_path)
-    c = conn.cursor()
-    c.execute("INSERT INTO deadlist (player, team, role, server) VALUES (?, ?, ?, ?)", 
-                (player, team, role, server))
-    conn.commit()
-    conn.close()
+    _bot_db.add_player(player, team, role, server)
 
 def remove_player(player, server):
-    conn = sqlite3.connect(deadlist_db_path)
-    c = conn.cursor()
-    c.execute("DELETE FROM deadlist WHERE player=? AND server=?", 
-                (player, server))
-    conn.commit()
-    conn.close()
+    _bot_db.remove_player(player, server)
 
 def get_team_players(team, server):
-    conn = sqlite3.connect(deadlist_db_path)
-    c = conn.cursor()
-    c.execute("SELECT player, role FROM deadlist WHERE team=? AND server=?", 
-                (team, server))
-    results = c.fetchall()
-    conn.close()
-    return results
+    return _bot_db.get_team_players(team, server)
+
+def delete_guild_deadlist(server):
+    _bot_db.delete_guild_deadlist(server)

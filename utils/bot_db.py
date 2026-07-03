@@ -225,6 +225,31 @@ def init_db() -> None:
             )
             """
         )
+
+        # Invites tracking (migrated from invites.db)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invites (
+                guild_id INTEGER NOT NULL,
+                invite_code TEXT NOT NULL,
+                uses INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, invite_code)
+            )
+            """
+        )
+
+        # Deadlist (migrated from deadlist.db)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deadlist (
+                player TEXT NOT NULL,
+                team TEXT NOT NULL,
+                role TEXT NOT NULL,
+                server INTEGER NOT NULL
+            )
+            """
+        )
+
         conn.commit()
 
 
@@ -1658,3 +1683,80 @@ def get_actions_for_channel(
                 }
             )
         return out
+
+
+# ---------------------------------------------------------------------------
+# Invites tracking (consolidated from invites.db)
+# ---------------------------------------------------------------------------
+
+
+def load_invites(guild_id: int) -> dict[str, int]:
+    _ensure_ready()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT invite_code, uses FROM invites WHERE guild_id = ?",
+            (guild_id,),
+        ).fetchall()
+        return {r["invite_code"]: int(r["uses"]) for r in rows}
+
+
+def save_invites(guild_id: int, invites: dict[str, int]) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM invites WHERE guild_id = ?", (guild_id,))
+        for code, uses in invites.items():
+            cur.execute(
+                "INSERT INTO invites (guild_id, invite_code, uses) VALUES (?, ?, ?)",
+                (guild_id, code, uses),
+            )
+        conn.commit()
+
+
+def delete_guild_invites(guild_id: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute("DELETE FROM invites WHERE guild_id = ?", (guild_id,))
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Deadlist (consolidated from deadlist.db)
+# ---------------------------------------------------------------------------
+
+
+def add_player(player: str, team: str, role: str, server: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO deadlist (player, team, role, server) VALUES (?, ?, ?, ?)",
+            (player, team, role, server),
+        )
+        conn.commit()
+
+
+def remove_player(player: str, server: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM deadlist WHERE player = ? AND server = ?",
+            (player, server),
+        )
+        conn.commit()
+
+
+def get_team_players(team: str, server: int) -> list[tuple[str, str]]:
+    _ensure_ready()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT player, role FROM deadlist WHERE team = ? AND server = ?",
+            (team, server),
+        ).fetchall()
+        return [(r["player"], r["role"]) for r in rows]
+
+
+def delete_guild_deadlist(server: int) -> None:
+    _ensure_ready()
+    with _connect() as conn:
+        conn.execute("DELETE FROM deadlist WHERE server = ?", (server,))
+        conn.commit()
