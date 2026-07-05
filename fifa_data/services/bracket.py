@@ -318,6 +318,7 @@ RED = (209, 73, 58)
 BLUE = (84, 113, 168)
 GREEN = (61, 139, 87)
 WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 
 ROUND_COLORS = {
     "Round of 32": GOLD, "Round of 16": MUTED, "Quarter-final": BLUE,
@@ -406,7 +407,13 @@ def _get_flag(team: str) -> Image.Image | None:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
             flag = Image.open(io.BytesIO(resp.content))
-            flag = flag.resize((FLAG_DIAMETER, FLAG_DIAMETER), Image.LANCZOS)
+            w, h = flag.size
+            scale = FLAG_DIAMETER / min(w, h)
+            nw, nh = int(w * scale), int(h * scale)
+            flag = flag.resize((nw, nh), Image.LANCZOS)
+            left = (nw - FLAG_DIAMETER) // 2
+            top = (nh - FLAG_DIAMETER) // 2
+            flag = flag.crop((left, top, left + FLAG_DIAMETER, top + FLAG_DIAMETER))
             flag = flag.convert("RGBA")
             _flag_cache[team] = flag
             return flag
@@ -427,11 +434,13 @@ def draw_flag_circle(
     is_winner: bool = False,
     eliminated: bool = False,
     font: ImageFont.ImageFont | None = None,
+    text_color: tuple[int, int, int] | None = None,
 ) -> None:
     cx, cy = int(center[0]), int(center[1])
     border = border_color or (GOLD if is_winner else WHITE)
     r = FLAG_RADIUS
     diam = FLAG_DIAMETER
+    ink = text_color or INK
 
     flag = _get_flag(team)
     if flag:
@@ -450,20 +459,49 @@ def draw_flag_circle(
             txt = SHORT.get(team, team[:3].upper())
             bb = font.getbbox(txt)
             tw = (bb[2] - bb[0]) / 2 if bb else 0
-            draw.text((cx - tw, cy - 12), txt, fill=INK, font=font)
+            draw.text((cx - tw, cy - 12), txt, fill=ink, font=font)
 
 
-def render_png(ko_matches: list[dict]) -> bytes:
+def render_png(ko_matches: list[dict], style: str = "light") -> bytes:
     if Image is None:
         raise RuntimeError("Pillow not installed")
 
+    is_dark = style == "dark"
     model = _build_model(ko_matches)
 
     SZ = 2400
     CX, CY = SZ // 2, SZ // 2
     SC = SZ / 2
 
-    img = Image.new("RGB", (SZ, SZ), BG)
+    # Colour scheme
+    if is_dark:
+        BG_COLOR = (20, 20, 25)
+        INK_COLOR = (220, 218, 214)
+        LINE_COLOR = (255, 255, 255)
+        MUTED_COLOR = (160, 155, 145)
+        BORDER_NORMAL = WHITE
+    else:
+        BG_COLOR = BG
+        INK_COLOR = INK
+        LINE_COLOR = LINE
+        MUTED_COLOR = MUTED
+        BORDER_NORMAL = BLACK
+
+    if is_dark:
+        bg_path = os.path.join(os.path.dirname(FIFA_DIR), "assets", "contour_wall.jpg")
+        bg_raw = Image.open(bg_path).convert("RGB")
+        bw, bh = bg_raw.size
+        scale = SZ / min(bw, bh)
+        nw, nh = int(bw * scale), int(bh * scale)
+        bg_raw = bg_raw.resize((nw, nh), Image.LANCZOS)
+        left = (nw - SZ) // 2
+        top = (nh - SZ) // 2
+        bg_raw = bg_raw.crop((left, top, left + SZ, top + SZ))
+        img = Image.new("RGB", (SZ, SZ), BG_COLOR)
+        img.paste(bg_raw, (0, 0), bg_raw if bg_raw.mode == "RGBA" else None)
+    else:
+        img = Image.new("RGB", (SZ, SZ), BG_COLOR)
+
     draw = ImageDraw.Draw(img)
 
     f_bold, f_score, f_title, f_champ = _load_fonts()
@@ -509,23 +547,24 @@ def render_png(ko_matches: list[dict]) -> bytes:
         C1, C2 = p2px(*_pt(rc, a1c)), p2px(*_pt(rc, a2c))
         P = p2px(*_pt(rp, ap))
 
-        draw.line([C1, A1], fill=LINE, width=4)
-        draw.line([C2, A2], fill=LINE, width=4)
+        draw.line([C1, A1], fill=LINE_COLOR, width=4)
+        draw.line([C2, A2], fill=LINE_COLOR, width=4)
 
         ctrl = (2 * P[0] - 0.5 * (A1[0] + A2[0]), 2 * P[1] - 0.5 * (A1[1] + A2[1]))
         prev = A1
         for j in range(1, 41):
             ptc = _bezier(j / 40, A1, A2, ctrl)
-            draw.line([prev, ptc], fill=LINE, width=4)
+            draw.line([prev, ptc], fill=LINE_COLOR, width=4)
             prev = ptc
 
     # Center lines
     sf1 = p2px(*_pt(RADIUS[4], _angle_of(101)))
     sf2 = p2px(*_pt(RADIUS[4], _angle_of(102)))
-    draw.line([(CX, CY), sf1], fill=LINE, width=4)
-    draw.line([(CX, CY), sf2], fill=LINE, width=4)
+    draw.line([(CX, CY), sf1], fill=LINE_COLOR, width=4)
+    draw.line([(CX, CY), sf2], fill=LINE_COLOR, width=4)
 
-    def _draw_label(d, cx, cy, text, font, fill=INK):
+    def _draw_label(d, cx, cy, text, font, fill=None):
+        fill = fill or INK_COLOR
         bb = font.getbbox(text)
         tw = (bb[2] - bb[0]) / 2 if bb else 0
         d.text((cx - tw, cy - 12), text, fill=fill, font=font)
@@ -538,9 +577,20 @@ def render_png(ko_matches: list[dict]) -> bytes:
         px, py = pos[num]
         if nd["winner"]:
             draw_flag_circle(img, draw, (px, py), nd["winner"],
-                             is_winner=True, font=f_bold)
+                             is_winner=True, font=f_bold,
+                             text_color=INK_COLOR)
         else:
-            draw.ellipse([px - 10, py - 10, px + 10, py + 10], fill=LINE)
+            draw.ellipse([px - 10, py - 10, px + 10, py + 10], fill=LINE_COLOR)
+        # Score label for inner-round matches (skip R32 — handled in outer flags)
+        if num not in R32SET:
+            score_text = _score_label(nd.get("score"))
+            if score_text:
+                ang = _angle_of(num)
+                lvl = 2 if num <= 96 else 3 if num <= 100 else 4 if num <= 102 else 5
+                sp = p2px(*_pt(RADIUS[lvl] + 0.10, ang))
+                bb = f_score.getbbox(score_text)
+                sw = (bb[2] - bb[0]) / 2 if bb else 0
+                draw.text((sp[0] - sw, sp[1] - 11), score_text, fill=INK_COLOR, font=f_score)
 
     # ── Outer flags (with flagcdn images) ──
     for fd in flag_data:
@@ -551,11 +601,12 @@ def render_png(ko_matches: list[dict]) -> bytes:
 
         draw_flag_circle(
             img, draw, (fx, fy), team,
-            border_color=GOLD if (win == team) else WHITE,
-            fallback_fill=ROUND_COLORS.get(nd.get("round", "Round of 32"), MUTED),
+            border_color=GOLD if (win == team) else BORDER_NORMAL,
+            fallback_fill=ROUND_COLORS.get(nd.get("round", "Round of 32"), MUTED_COLOR),
             is_winner=(win == team),
             eliminated=(win is not None and win != team),
             font=f_bold,
+            text_color=INK_COLOR,
         )
 
         # Score label (drawn at the match-node level)
@@ -567,7 +618,7 @@ def render_png(ko_matches: list[dict]) -> bytes:
             sp = p2px(*_pt(RADIUS[slvl] + 0.04, ang))
             bb = f_score.getbbox(score_text)
             sw = (bb[2] - bb[0]) / 2 if bb else 0
-            draw.text((sp[0] - sw, sp[1] - 11), score_text, fill=INK, font=f_score)
+            draw.text((sp[0] - sw, sp[1] - 11), score_text, fill=INK_COLOR, font=f_score)
 
     # ── Center: champion or trophy ──
     final_nd = model[ROOT]
@@ -580,7 +631,7 @@ def render_png(ko_matches: list[dict]) -> bytes:
         _draw_label(draw, CX, CY + 40, "CHAMPIONS", f_bold, GOLD)
     else:
         r = 55
-        draw.ellipse([CX - r, CY - r, CX + r, CY + r], fill=None, outline=LINE, width=4)
+        draw.ellipse([CX - r, CY - r, CX + r, CY + r], fill=None, outline=LINE_COLOR, width=4)
         _draw_label(draw, CX, CY, "🏆", f_title)
 
     buf = io.BytesIO()
@@ -959,14 +1010,22 @@ class BracketCog(commands.Cog):
     # ------------------------------------------------------------------
 
     @commands.command(name="bracket")
-    async def bracket(self, ctx: commands.Context) -> None:
+    async def bracket(self, ctx: commands.Context, mode: str = "light") -> None:
         if Image is None:
             await ctx.send("Pillow is required but not installed.")
+            return
+
+        mode = mode.strip().lower()
+        if mode not in ("light", "dark"):
+            await ctx.send("Usage: `.bracket [light|dark]` — default is `light`.")
             return
 
         async with ctx.typing():
             step = "initialising"
             try:
+                step = "ensure_fresh_data"
+                await ensure_fresh_data()
+
                 step = "load_local_matches"
                 local = load_local_matches()
                 if not local:
@@ -977,13 +1036,14 @@ class BracketCog(commands.Cog):
                 ko = build_bracket_data(local)
 
                 step = "render_png"
-                png = render_png(ko)
-                logger.info("[bracket] rendered %d bytes", len(png))
+                png = render_png(ko, style=mode)
+                logger.info("[bracket] rendered %d bytes (%s)", len(png), mode)
 
                 step = "discord_upload"
+                fname = "bracket_dark.png" if mode == "dark" else "bracket.png"
                 with io.BytesIO(png) as fp:
                     fp.seek(0)
-                    await ctx.send(file=discord.File(fp, filename="bracket.png"))
+                    await ctx.send(file=discord.File(fp, filename=fname))
                 logger.info("[bracket] done")
 
             except Exception:
@@ -1001,98 +1061,101 @@ class BracketCog(commands.Cog):
     # .brackets  — Playwright renderer (needs chromium installed)
     # ------------------------------------------------------------------
 
-    @commands.command(name="brackets")
-    async def brackets(self, ctx: commands.Context) -> None:
-        """Render the bracket via Playwright + local index.html (needs chromium installed)."""
-        if not await self.ensure_playwright_ready():
-            missing_count = len(self._pw_info.get("ldd_not_found", []))
-            detail = ""
-            if missing_count:
-                detail = f" ({missing_count} missing system libraries — container lacks them)"
-            elif self._pw_error:
-                detail = f" — {self._pw_error}"
-            await ctx.send(
-                f"**Playwright is unavailable{detail}.** "
-                f"The `.bracket` command works without Playwright."
-            )
-            return
-
-        async with ctx.typing():
-            playwright_obj = None
-            browser = None
-            step = "initialising"
-            try:
-                step = "load_local_matches"
-                local = load_local_matches()
-                if not local:
-                    await ctx.send("No match data found.")
-                    return
-
-                step = "build_bracket_data"
-                ko_matches = build_bracket_data(local)
-
-                step = "playwright_start"
-                from playwright.async_api import async_playwright
-                playwright_obj = await async_playwright().start()
-
-                step = "chromium_launch"
-                browser = await playwright_obj.chromium.launch(headless=True)
-
-                step = "browser_context"
-                context = await browser.new_context(
-                    viewport={"width": 1200, "height": 1200},
-                )
-                page = await context.new_page()
-
-                step = "page_navigate"
-                html_path = INDEX_HTML.replace("\\", "/")
-                if not html_path.startswith("/"):
-                    html_path = "/" + html_path
-                file_url = "file://" + html_path
-                await page.goto(file_url, wait_until="load", timeout=15000)
-                await page.wait_for_timeout(1000)
-
-                step = "page_evaluate"
-                await page.evaluate(
-                    """(data) => {
-                        if (typeof render !== 'function' || typeof buildModel !== 'function' || typeof normalize !== 'function') {
-                            throw new Error("Page render functions not found");
-                        }
-                        render(buildModel(normalize(data)));
-                    }""",
-                    ko_matches,
-                )
-
-                step = "settle"
-                await page.wait_for_timeout(2500)
-
-                step = "screenshot"
-                stage_el = page.locator("#stage")
-                if await stage_el.count() == 0:
-                    raise RuntimeError("#stage element not found")
-                png = await stage_el.screenshot(type="png", omit_background=True)
-                logger.info("[brackets] captured %d bytes", len(png))
-
-                step = "discord_upload"
-                with io.BytesIO(png) as fp:
-                    fp.seek(0)
-                    await ctx.send(file=discord.File(fp, filename="bracket.png"))
-                logger.info("[brackets] done")
-
-            except Exception:
-                logger.exception("[brackets] crashed at '%s'", step)
-                await ctx.send(f"**Brackets command failed** at step `{step}`. Check the bot logs.")
-            finally:
-                if browser is not None:
-                    try:
-                        await browser.close()
-                    except Exception:
-                        pass
-                if playwright_obj is not None:
-                    try:
-                        await playwright_obj.stop()
-                    except Exception:
-                        pass
+    # @commands.command(name="brackets")
+    # async def brackets(self, ctx: commands.Context) -> None:
+    #     """Render the bracket via Playwright + local index.html (needs chromium installed)."""
+    #     if not await self.ensure_playwright_ready():
+    #         missing_count = len(self._pw_info.get("ldd_not_found", []))
+    #         detail = ""
+    #         if missing_count:
+    #             detail = f" ({missing_count} missing system libraries — container lacks them)"
+    #         elif self._pw_error:
+    #             detail = f" — {self._pw_error}"
+    #         await ctx.send(
+    #             f"**Playwright is unavailable{detail}.** "
+    #             f"The `.bracket` command works without Playwright."
+    #         )
+    #         return
+    #
+    #     async with ctx.typing():
+    #         playwright_obj = None
+    #         browser = None
+    #         step = "initialising"
+    #         try:
+    #             step = "ensure_fresh_data"
+    #             await ensure_fresh_data()
+    #
+    #             step = "load_local_matches"
+    #             local = load_local_matches()
+    #             if not local:
+    #                 await ctx.send("No match data found.")
+    #                 return
+    #
+    #             step = "build_bracket_data"
+    #             ko_matches = build_bracket_data(local)
+    #
+    #             step = "playwright_start"
+    #             from playwright.async_api import async_playwright
+    #             playwright_obj = await async_playwright().start()
+    #
+    #             step = "chromium_launch"
+    #             browser = await playwright_obj.chromium.launch(headless=True)
+    #
+    #             step = "browser_context"
+    #             context = await browser.new_context(
+    #                 viewport={"width": 1200, "height": 1200},
+    #             )
+    #             page = await context.new_page()
+    #
+    #             step = "page_navigate"
+    #             html_path = INDEX_HTML.replace("\\", "/")
+    #             if not html_path.startswith("/"):
+    #                 html_path = "/" + html_path
+    #             file_url = "file://" + html_path
+    #             await page.goto(file_url, wait_until="load", timeout=15000)
+    #             await page.wait_for_timeout(1000)
+    #
+    #             step = "page_evaluate"
+    #             await page.evaluate(
+    #                 """(data) => {
+    #                     if (typeof render !== 'function' || typeof buildModel !== 'function' || typeof normalize !== 'function') {
+    #                         throw new Error("Page render functions not found");
+    #                     }
+    #                     render(buildModel(normalize(data)));
+    #                 }""",
+    #                 ko_matches,
+    #             )
+    #
+    #             step = "settle"
+    #             await page.wait_for_timeout(2500)
+    #
+    #             step = "screenshot"
+    #             stage_el = page.locator("#stage")
+    #             if await stage_el.count() == 0:
+    #                 raise RuntimeError("#stage element not found")
+    #             png = await stage_el.screenshot(type="png", omit_background=True)
+    #             logger.info("[brackets] captured %d bytes", len(png))
+    #
+    #             step = "discord_upload"
+    #             with io.BytesIO(png) as fp:
+    #                 fp.seek(0)
+    #                 await ctx.send(file=discord.File(fp, filename="bracket.png"))
+    #             logger.info("[brackets] done")
+    #
+    #         except Exception:
+    #             logger.exception("[brackets] crashed at '%s'", step)
+    #             await ctx.send(f"**Brackets command failed** at step `{step}`. Check the bot logs.")
+    #         finally:
+    #             if browser is not None:
+    #                 try:
+    #                     await browser.close()
+    #                 except Exception:
+    #                     pass
+    #             if playwright_obj is not None:
+    #                 try:
+    #                     await playwright_obj.stop()
+    #                 except Exception:
+    #                     pass
 
 
 async def setup(bot: commands.Bot) -> None:
