@@ -16,6 +16,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from fifa_data.services.match_analytics import ensure_fresh_data
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -77,6 +79,7 @@ NAME_NORMALIZE: dict[str, str] = {
     "Türkiye": "Turkey",
     "Korea Republic": "South Korea",
     "United States": "USA",
+    "Congo DR": "DR Congo",
 }
 
 # ---------------------------------------------------------------------------
@@ -208,6 +211,7 @@ def build_bracket_data(local: list[dict]) -> list[dict]:
     idx = _build_local_index(local)
     result: list[dict] = []
 
+    # First pass: populate R32 from API data
     for num, skel in R32_SKELETON.items():
         entry = dict(skel)
         entry["num"] = num
@@ -224,6 +228,7 @@ def build_bracket_data(local: list[dict]) -> list[dict]:
                 entry["score"] = _make_score(hs, as_, lm.get("winner"), home.get("id"), away.get("id"))
         result.append(entry)
 
+    # Add inner-round skeleton entries (no team names yet)
     for num, skel in INNER_SKELETON.items():
         entry = dict(skel)
         entry["num"] = num
@@ -231,6 +236,26 @@ def build_bracket_data(local: list[dict]) -> list[dict]:
         result.append(entry)
 
     result.sort(key=lambda x: x["num"])
+
+    # Build a temporary model so we know which teams advanced to inner rounds
+    model = _build_model(result)
+
+    # Second pass: match inner rounds from API data using resolved participants
+    for entry in result:
+        if entry["num"] in INNER_SKELETON:
+            nd = model.get(entry["num"])
+            if nd and nd["participants"] and all(nd["participants"]):
+                t1, t2 = _norm(nd["participants"][0]), _norm(nd["participants"][1])
+                key = frozenset([t1, t2])
+                lm = idx.get(key)
+                if lm is not None:
+                    home = lm.get("home", {}) or {}
+                    away = lm.get("away", {}) or {}
+                    hs = home.get("score")
+                    as_ = away.get("score")
+                    if hs is not None and as_ is not None:
+                        entry["score"] = _make_score(hs, as_, lm.get("winner"), home.get("id"), away.get("id"))
+
     return result
 
 
