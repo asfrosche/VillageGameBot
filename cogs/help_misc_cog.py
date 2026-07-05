@@ -77,6 +77,7 @@ COMMAND_INDEX = [
     (".preset", "Add/remove/edit presets with optional ability category", "Presets", ["preset", "ability", "template"]),
     (".ospreset", "View/reorder/remove all presets", "Presets", ["preset", "os", "admin", "manage"]),
     (".ospresetsort", "Reorder preset display categories", "Presets", ["preset", "sort", "order", "admin"]),
+    (".ospresetcategories", "Add or remove custom preset categories", "Presets", ["preset", "category", "custom", "admin"]),
     (".vote @player", "Vote or change your vote", "Voting", ["vote", "cast", "change"]),
     (".abstain", "Abstain from voting", "Voting", ["abstain", "skip", "vote"]),
     (".manipulate @target @vote", "Manipulate a player's vote", "Voting", ["manipulate", "control", "force"]),
@@ -310,6 +311,29 @@ COMMAND_INDEX = [
     (".simulate / .sim / .fsim", "Simulate tournament (ELO/players/dynamic/tactical/match state)", "Draft", ["simulate", "sim", "fsim", "tournament"]),
     (".fsim detailed", "Head-to-head Monte Carlo analysis", "Draft", ["simulate", "detailed", "head", "head"]),
     (".simhelp / .sim help", "Simulation model descriptions (V1-V5)", "Draft", ["simulate", "help", "models"]),
+    (".analytics", "Match analytics, trends and visualizations", "Analytics", ["analytics", "match", "trends", "stats", "fifa"]),
+    (".bracket", "Render the knockout bracket as a PNG", "World Cup", ["bracket", "knockout", "png", "render"]),
+    (".brackets", "Render bracket via Playwright (needs Chromium)", "World Cup", ["bracket", "knockout", "playwright", "html"]),
+    (".searchhelp / .sh <kw>", "Search commands by keyword", "Other", ["search", "find", "keyword", "help"]),
+    (".libit", "Browse the Italian game library", "Library & Stats", ["library", "italian", "browse", "libit"]),
+    (".libit add", "Add a new game (IT)", "Library & Stats", ["library", "italian", "add", "admin"]),
+    (".libit summary", "Summary of all games (IT)", "Library & Stats", ["library", "italian", "summary"]),
+    (".libit edit <#> <field> <val>", "Edit a game field (IT)", "Library & Stats", ["library", "italian", "edit", "admin"]),
+    (".libit delete <#>", "Delete a game (IT)", "Library & Stats", ["library", "italian", "delete", "admin"]),
+    (".libit deletegame <#>", "Delete a game alt (IT)", "Library & Stats", ["library", "italian", "delete", "admin"]),
+    (".libit setwin <#> <team>", "Set winning team (IT)", "Library & Stats", ["library", "italian", "win", "admin"]),
+    (".libit search <term>", "Search by name or player (IT)", "Library & Stats", ["library", "italian", "search"]),
+    (".libit idsearch <id>", "Search by game ID (IT)", "Library & Stats", ["library", "italian", "id"]),
+    (".libit migrateaccount", "Move stats to new account (IT)", "Library & Stats", ["library", "italian", "migrate"]),
+    (".libit mergeaccount", "Merge two accounts' stats (IT)", "Library & Stats", ["library", "italian", "merge"]),
+    (".libit syncname", "Sync display name (IT)", "Library & Stats", ["library", "italian", "sync"]),
+    (".libit bulksyncnames", "Bulk sync all names (IT)", "Library & Stats", ["library", "italian", "bulk", "admin"]),
+    (".statsit [@player]", "View player statistics (IT)", "Library & Stats", ["stats", "italian", "player"]),
+    (".winrateit", "Winrate stats by team (IT)", "Library & Stats", ["winrate", "italian", "team"]),
+    (".relationsit [@user]", "Allies and nemeses (IT)", "Library & Stats", ["relations", "italian", "ally"]),
+    (".missingidsit", "Games with missing player IDs (IT)", "Library & Stats", ["missing", "ids", "italian", "admin"]),
+    (".badnamesit", "List bad/unnamed players (IT)", "Library & Stats", ["bad", "names", "italian", "admin"]),
+    (".removebadnameit <name>", "Remove a bad name (IT)", "Library & Stats", ["remove", "bad", "name", "italian", "admin"]),
 ]
 
 
@@ -1083,7 +1107,7 @@ class Other(commands.Cog):
         embed.add_field(name="⚔️ - Games (Aux, Senet)", value="18 Commands\n`.help2 games`", inline=True)
         embed.add_field(name="🎂 - Birthdays", value="6 Commands\n`.help2 birthdays`", inline=True)
         embed.add_field(name="📅 - Calendar & Intro", value="4 Commands\n`.help2 calendar`", inline=True)
-        embed.set_footer(text="Village Game • Use `.help2 {category}` for details")
+        embed.set_footer(text="Village Game • Use `.help2 {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embed, self.help2)
 
     @commands.command(name="searchhelp", aliases=["sh"])
@@ -1243,7 +1267,7 @@ class Other(commands.Cog):
         embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
         embedh.add_field(name="🏆 - Draft", value="20 Commands\n`.help draft`", inline=True)
         embedh.add_field(name="🐦 - Blood on the Clocktower", value="All Commands\n`.help botc`", inline=True)
-        embedh.set_footer(text="Village Game • You can also use `.help {category}` to select the category")
+        embedh.set_footer(text="Village Game • Use `.help {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
     async def help_setup(self, ctx):
@@ -1370,7 +1394,8 @@ class Other(commands.Cog):
         ), inline=False)
         embedpres.add_field(name="Admin Commands", value=(
             "**`.ospreset`** ─ View/reorder/remove all presets\n"
-            "**`.ospresetsort`** ─ Reorder preset display categories"
+            "**`.ospresetsort`** ─ Reorder preset display categories\n"
+            "**`.ospresetcategories`** ─ Add/remove custom preset categories"
         ), inline=False)
         embedpres.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedpres, self.help_presets)
