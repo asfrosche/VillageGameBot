@@ -39,3 +39,64 @@ class TestPresets:
         method = getattr(presets_cog.Presets, 'ospresetsort')
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
+
+    def test_ospresetcategories_exists(self):
+        """Verify ospresetcategories command exists on the cog."""
+        assert hasattr(presets_cog.Presets, 'ospresetcategories')
+
+    def test_ospresetcategories_has_help(self):
+        """Verify ospresetcategories command has help text."""
+        method = getattr(presets_cog.Presets, 'ospresetcategories')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    def test_resolve_category_display_with_none(self):
+        """Verify resolve_category_display handles None correctly."""
+        assert presets_cog.resolve_category_display(None) == "Uncategorized"
+
+    def test_resolve_category_display_with_custom_category(self):
+        """Verify resolve_category_display returns custom category if it exists."""
+        custom_cats = ["CustomPower"]
+        presets_cog.CATEGORY_DISPLAY["CustomPower"] = "CustomPower (custom)"
+        try:
+            result = presets_cog.resolve_category_display("CustomPower", custom_cats)
+            assert result == "CustomPower (custom)"
+        finally:
+            presets_cog.CATEGORY_DISPLAY.pop("CustomPower", None)
+
+    def test_resolve_category_display_with_uncategorized_custom(self):
+        """Verify resolve_category_display returns custom category not in default display."""
+        custom_cats = ["CustomPower"]
+        assert presets_cog.resolve_category_display("CustomPower", custom_cats) == "CustomPower"
+
+    def test_get_custom_categories_default(self):
+        """Verify _get_custom_categories returns empty list by default."""
+        cog = presets_cog.Presets(None)
+        with patch('cogs.presets_cog.load_guild_data', return_value={}):
+            result = cog._get_custom_categories("123")
+            assert result == []
+
+    def test_set_custom_categories(self):
+        """Verify _set_custom_categories saves custom categories."""
+        cog = presets_cog.Presets(None)
+        mock_save = MagicMock()
+        with patch('cogs.presets_cog.load_guild_data', return_value={}):
+            with patch('cogs.presets_cog.save_guild_data', mock_save):
+                cog._set_custom_categories("123", ["Custom1", "Custom2"])
+                assert mock_save.called
+                saved_data = mock_save.call_args[0][1]
+                assert saved_data.get("preset_custom_categories") == ["Custom1", "Custom2"]
+
+    def test_get_all_categories(self):
+        """Verify _get_all_categories merges default and custom categories."""
+        cog = presets_cog.Presets(None)
+        with patch.object(cog, '_get_custom_categories', return_value=["CustomPower"]):
+            result = cog._get_all_categories("123")
+            assert "CustomPower" in result
+            assert len(result) > len(presets_cog.ABILITY_CATEGORIES)
+
+    def test_ospresetcategories_requires_admin(self):
+        """Verify ospresetcategories command requires administrator permission."""
+        method = getattr(presets_cog.Presets, 'ospresetcategories')
+        checks = getattr(method, 'checks', None)
+        assert checks is not None, "Command should have permission checks"

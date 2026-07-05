@@ -49,8 +49,15 @@ DEFAULT_CATEGORY_ORDER = [
 ]
 
 
-def resolve_category_display(stored_cat):
-    return CATEGORY_DISPLAY.get(stored_cat, "Other")
+def resolve_category_display(stored_cat, custom_categories=None):
+    if stored_cat is None:
+        return "Uncategorized"
+    display = CATEGORY_DISPLAY.get(stored_cat)
+    if display:
+        return display
+    if custom_categories and stored_cat in custom_categories:
+        return stored_cat
+    return "Other"
 
 # Ensure DB dir exists
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -97,15 +104,48 @@ class Presets(commands.Cog):
     def _get_category_order(self, guild_id: str) -> List[str]:
         gid = int(guild_id)
         data = load_guild_data(gid)
-        if not data:
-            return list(DEFAULT_CATEGORY_ORDER)
-        return list(data.get("preset_category_order") or DEFAULT_CATEGORY_ORDER)
+        if data and data.get("preset_category_order"):
+            order = list(data["preset_category_order"])
+        else:
+            order = list(DEFAULT_CATEGORY_ORDER)
+        disabled = self._get_disabled_default_categories(guild_id)
+        order = [c for c in order if c not in disabled]
+        custom = self._get_custom_categories(guild_id)
+        for c in custom:
+            if c not in order:
+                order.append(c)
+        return order
 
     def _set_category_order(self, guild_id: str, order: List[str]) -> None:
         gid = int(guild_id)
         data = load_guild_data(gid) or {}
         data["preset_category_order"] = order
         save_guild_data(gid, data)
+
+    # ------------- Custom category helpers -------------
+    def _get_custom_categories(self, guild_id: str) -> List[str]:
+        data = load_guild_data(int(guild_id)) or {}
+        return list(data.get("preset_custom_categories", []))
+
+    def _set_custom_categories(self, guild_id: str, cats: List[str]) -> None:
+        data = load_guild_data(int(guild_id)) or {}
+        data["preset_custom_categories"] = cats
+        save_guild_data(int(guild_id), data)
+
+    def _get_disabled_default_categories(self, guild_id: str) -> List[str]:
+        data = load_guild_data(int(guild_id)) or {}
+        return list(data.get("preset_disabled_default_categories", []))
+
+    def _set_disabled_default_categories(self, guild_id: str, cats: List[str]) -> None:
+        data = load_guild_data(int(guild_id)) or {}
+        data["preset_disabled_default_categories"] = cats
+        save_guild_data(int(guild_id), data)
+
+    def _get_all_categories(self, guild_id: str) -> List[str]:
+        disabled = self._get_disabled_default_categories(guild_id)
+        custom = self._get_custom_categories(guild_id)
+        enabled_defaults = [c for c in ABILITY_CATEGORIES if c not in disabled]
+        return enabled_defaults + [c for c in custom if c not in ABILITY_CATEGORIES]
 
     # ------------- DB helpers -------------
     def _load_presets(self, guild_id: str) -> List[Dict[str, Any]]:
@@ -210,15 +250,16 @@ class Presets(commands.Cog):
             conn.close()
 
     # ------------- UI helpers -------------
-    def _build_pages(self, presets: List[Dict[str, Any]], channel_id: str) -> List[str]:
+    def _build_pages(self, presets: List[Dict[str, Any]], channel_id: str, guild_id: str = "") -> List[str]:
         filtered = [p for p in presets if p["channel_id"] == channel_id]
+        custom_cats = self._get_custom_categories(guild_id) if guild_id else None
         pages: List[str] = []
         for i in range(0, len(filtered), ITEMS_PER_PAGE):
             chunk = filtered[i:i + ITEMS_PER_PAGE]
             lines = []
             for j, p in enumerate(chunk):
                 text = p['preset_info'][:297] + '...' if len(p['preset_info']) > 300 else p['preset_info']
-                display = resolve_category_display(p.get("category"))
+                display = resolve_category_display(p.get("category"), custom_cats)
                 cat_badge = f" `[{display}]`" if display != "Uncategorized" else ""
                 lines.append(f"**{i + j + 1}.**{cat_badge} {text}")
             pages.append("\n".join(lines) if lines else "No presets on this channel.")
@@ -236,14 +277,15 @@ class Presets(commands.Cog):
         embed.set_footer(text=f"{FOOTER_TEXT} — Page {page_index + 1}/{total_pages}")
         return embed
 
-    def _build_guild_pages(self, presets: List[Dict[str, Any]]) -> List[str]:
+    def _build_guild_pages(self, presets: List[Dict[str, Any]], guild_id: str = "") -> List[str]:
+        custom_cats = self._get_custom_categories(guild_id) if guild_id else None
         pages: List[str] = []
         prev_display: Optional[str] = None
         for i in range(0, len(presets), ITEMS_PER_PAGE):
             chunk = presets[i:i + ITEMS_PER_PAGE]
             lines: List[str] = []
             for j, p in enumerate(chunk):
-                display = resolve_category_display(p.get("category"))
+                display = resolve_category_display(p.get("category"), custom_cats)
                 if display != prev_display:
                     lines.append(f"**__{display}__**")
                     prev_display = display
@@ -291,7 +333,7 @@ class Presets(commands.Cog):
         guild_id = str(guild.id)
         presets = self._load_presets(guild_id)
         channel_id = str(channel.id)
-        pages = self._build_pages(presets, channel_id)
+        pages = self._build_pages(presets, channel_id, guild_id)
         current_page = 0
         embed = self._embed_for_page(pages[current_page], current_page, len(pages))
         if isinstance(sender, commands.Context):
@@ -312,7 +354,7 @@ class Presets(commands.Cog):
         async def refresh():
             nonlocal pages, presets, current_page
             presets = self._load_presets(guild_id)
-            pages = self._build_pages(presets, channel_id)
+            pages = self._build_pages(presets, channel_id, guild_id)
             if current_page >= len(pages):
                 current_page = len(pages) - 1 if pages else 0
             try:
@@ -418,10 +460,11 @@ class Presets(commands.Cog):
 
         # ---- Callbacks ----
         async def add_cb(i: discord.Interaction):
+            all_cats = self._get_all_categories(guild_id)
             options = [
                 discord.SelectOption(label="❓ Not Sure / Uncategorized", value="__none__"),
             ]
-            for cat in ABILITY_CATEGORIES:
+            for cat in all_cats:
                 options.append(discord.SelectOption(label=cat, value=cat))
 
             select = Select(placeholder="Choose an ability category (optional)", options=options, min_values=1, max_values=1)
@@ -597,9 +640,10 @@ class Presets(commands.Cog):
         # Sort by configured category order (uncategorized last)
         category_order = self._get_category_order(guild_id)
         order_idx = {c: i for i, c in enumerate(category_order)}
+        _sort_custom_cats = self._get_custom_categories(guild_id)
 
         def _preset_sort_key(p):
-            display = resolve_category_display(p.get("category"))
+            display = resolve_category_display(p.get("category"), _sort_custom_cats)
             if display == "Uncategorized":
                 return (len(category_order), p.get("position", 0))
             idx = order_idx.get(display, len(category_order))
@@ -612,7 +656,7 @@ class Presets(commands.Cog):
             embed.set_footer(text=f"{FOOTER_TEXT} — Page {page_index + 1}/{total_pages}")
             return embed
 
-        pages = self._build_guild_pages(presets)
+        pages = self._build_guild_pages(presets, guild_id)
         current_page = 0
         embed = _embed_for_guild_page(pages[current_page], current_page, len(pages))
         msg = await ctx.send(embed=embed)
@@ -629,7 +673,7 @@ class Presets(commands.Cog):
             nonlocal presets, pages, current_page
             presets = self._load_presets(guild_id)
             presets.sort(key=_preset_sort_key)
-            pages = self._build_guild_pages(presets)
+            pages = self._build_guild_pages(presets, guild_id)
             if current_page >= len(pages):
                 current_page = len(pages) - 1 if pages else 0
             try:
@@ -934,5 +978,195 @@ class Presets(commands.Cog):
         view.add_item(up_btn)
         view.add_item(down_btn)
         view.add_item(reset_btn)
+        view.add_item(close_btn)
+        await msg.edit(view=view)
+
+    # ---------- Admin command: manage custom categories ----------
+    @commands.command(name="ospresetcategories")
+    @commands.has_permissions(administrator=True)
+    async def ospresetcategories(self, ctx: commands.Context):
+        """Add or remove custom preset categories for this server."""
+        guild_id = _guild_key(ctx)
+        custom_cats = self._get_custom_categories(guild_id)
+
+        def _embed(custom):
+            disabled = self._get_disabled_default_categories(guild_id)
+            lines = ["**Default Categories:**"]
+            for c in ABILITY_CATEGORIES:
+                if c in disabled:
+                    lines.append(f"~{c}~ *(disabled)*")
+                else:
+                    lines.append(f"{c}")
+            lines.append("")
+            lines.append("**Custom Categories:**")
+            if custom:
+                for i, c in enumerate(custom):
+                    lines.append(f"{i+1}. {c}")
+            else:
+                lines.append("*(none — use Add to create one)*")
+            lines.append("")
+            emb = discord.Embed(
+                title="Preset Categories",
+                description="\n".join(lines),
+                color=EMBED_COLOR,
+                timestamp=datetime.utcnow(),
+            )
+            emb.set_footer(text=FOOTER_TEXT)
+            return emb
+
+        msg = await ctx.send(embed=_embed(custom_cats))
+
+        view = View(timeout=180)
+        add_btn = Button(label="Add Category", style=discord.ButtonStyle.success, emoji="➕")
+        remove_btn = Button(label="Remove Category", style=discord.ButtonStyle.danger, emoji="➖")
+        close_btn = Button(label="Close", style=discord.ButtonStyle.secondary)
+
+        async def refresh(interaction=None, components=None, resolved=None):
+            nonlocal custom_cats
+            custom_cats = self._get_custom_categories(guild_id)
+            try:
+                await msg.edit(embed=_embed(custom_cats), view=view)
+            except Exception as e:
+                print(f"[DEBUG ospresetcategories] refresh error: {e}")
+                pass
+
+        async def add_cb(i: discord.Interaction):
+            modal = AddCategoryModal(cog=self, guild_id=guild_id, refresh_cb=refresh)
+            await i.response.send_modal(modal)
+
+        async def remove_cb(i: discord.Interaction):
+            nonlocal custom_cats
+            all_cats = self._get_all_categories(guild_id)
+            if not all_cats:
+                await i.response.send_message("No categories to remove.", ephemeral=True)
+                return
+            options = [discord.SelectOption(label=c, value=c) for c in all_cats]
+            select = Select(placeholder="Pick a category to remove/disable", options=options, min_values=1, max_values=1)
+
+            async def sel_cb(sel_i: discord.Interaction):
+                if not sel_i.data or "values" not in sel_i.data or not sel_i.data["values"]:
+                    await sel_i.response.defer()
+                    return
+                cat_to_remove = sel_i.data["values"][0]
+                is_default = cat_to_remove in ABILITY_CATEGORIES
+                # Find presets using this category
+                presets = self._load_presets(guild_id)
+                affected = [p for p in presets if p.get("category") == cat_to_remove]
+                if affected:
+                    # Ask which category to reassign them to
+                    remaining = [c for c in self._get_all_categories(guild_id) if c != cat_to_remove]
+                    reassign_opts = [discord.SelectOption(label=c, value=c) for c in remaining]
+                    reassign_opts.append(discord.SelectOption(label="Uncategorized (no category)", value="__none__"))
+                    reassign_sel = Select(
+                        placeholder=f"Reassign {len(affected)} preset(s) to...",
+                        options=reassign_opts, min_values=1, max_values=1,
+                    )
+
+                    async def reassign_cb(r_i: discord.Interaction):
+                        if not r_i.data or "values" not in r_i.data or not r_i.data["values"]:
+                            await r_i.response.defer()
+                            return
+                        target = r_i.data["values"][0]
+                        new_cat = None if target == "__none__" else target
+                        conn = sqlite3.connect(DB_PATH)
+                        try:
+                            conn.execute(
+                                "UPDATE presets SET category = ? WHERE guild_id = ? AND category = ?",
+                                (new_cat, guild_id, cat_to_remove),
+                            )
+                            conn.commit()
+                        finally:
+                            conn.close()
+                        await _do_remove(cat_to_remove, is_default)
+                        await r_i.response.defer()
+                        await refresh()
+
+                    reassign_sel.callback = reassign_cb
+                    rv = View(timeout=60)
+                    rv.add_item(reassign_sel)
+                    try:
+                        await sel_i.response.send_message(
+                            f"**{len(affected)} preset(s)** use `{cat_to_remove}`. Choose a new category:",
+                            view=rv, ephemeral=True,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    await _do_remove(cat_to_remove, is_default)
+                    await sel_i.response.defer()
+                    await refresh()
+
+            async def _do_remove(cat: str, is_default: bool):
+                if is_default:
+                    disabled = self._get_disabled_default_categories(guild_id)
+                    if cat not in disabled:
+                        disabled.append(cat)
+                        self._set_disabled_default_categories(guild_id, disabled)
+                else:
+                    remaining = [c for c in self._get_custom_categories(guild_id) if c != cat]
+                    self._set_custom_categories(guild_id, remaining)
+                order = self._get_category_order(guild_id)
+                if cat in order:
+                    order.remove(cat)
+                    self._set_category_order(guild_id, order)
+
+            select.callback = sel_cb
+            v = View(timeout=60)
+            v.add_item(select)
+            await i.response.send_message("Select a category to remove/disable:", view=v, ephemeral=True)
+
+        async def close_cb(i: discord.Interaction):
+            try:
+                await i.response.defer()
+                await msg.delete()
+            except Exception:
+                pass
+
+        class AddCategoryModal(Modal, title="Add Custom Category"):
+            def __init__(self, cog, guild_id, refresh_cb):
+                super().__init__()
+                self.name_input = TextInput(label="Category name", max_length=50)
+                self.add_item(self.name_input)
+                self._cog = cog
+                self._guild_id = guild_id
+                self._refresh_view = refresh_cb
+
+            async def on_submit(self, interaction: discord.Interaction):
+                name = self.name_input.value.strip()
+                print(f"[DEBUG ospresetcategories] Submitted name='{name}'")
+                if not name:
+                    return await interaction.response.send_message("Name cannot be empty.", ephemeral=True)
+                # Check if it's a disabled default — re-enable it
+                disabled = self._cog._get_disabled_default_categories(self._guild_id)
+                if name in disabled:
+                    disabled.remove(name)
+                    self._cog._set_disabled_default_categories(self._guild_id, disabled)
+                    print(f"[DEBUG ospresetcategories] Re-enabled default category '{name}'")
+                    await interaction.response.defer()
+                    await self._refresh_view()
+                    return
+                all_cats = self._cog._get_all_categories(self._guild_id)
+                if name in all_cats:
+                    return await interaction.response.send_message(f"Category `{name}` already exists.", ephemeral=True)
+                current = self._cog._get_custom_categories(self._guild_id)
+                current.append(name)
+                self._cog._set_custom_categories(self._guild_id, current)
+                print(f"[DEBUG ospresetcategories] Added category '{name}' to guild {self._guild_id}")
+                await interaction.response.defer()
+                await self._refresh_view()
+
+            async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+                print(f"[ERROR ospresetcategories modal] {error}")
+                try:
+                    await interaction.response.send_message(f"Error: {error}", ephemeral=True)
+                except Exception:
+                    pass
+
+        add_btn.callback = add_cb
+        remove_btn.callback = remove_cb
+        close_btn.callback = close_cb
+
+        view.add_item(add_btn)
+        view.add_item(remove_btn)
         view.add_item(close_btn)
         await msg.edit(view=view)
