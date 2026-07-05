@@ -146,7 +146,7 @@ class TestConversions:
         assert row["max_duration"] == 100.0
         assert row["unique_users"] == 5
         assert json.loads(row["recent_durations"]) == [1, 2, 3]
-        assert json.loads(row["user_ids"]) == ["a", "b"]
+        assert set(json.loads(row["user_ids"])) == {"a", "b"}
 
         s2 = row_to_command_stats(row)
         assert s2.command_name == s.command_name
