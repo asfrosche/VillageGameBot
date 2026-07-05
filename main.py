@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 
+# Core data utilities (guild settings, invites, deadlist)
 from cogs.actions_logging_cog import ActionsLogging
 from cogs.aux_battle import AuxBattle
 from cogs.bday import Birthday
@@ -58,9 +59,11 @@ if _main_dir not in _sys.path:
     _sys.path.insert(0, _main_dir)
 if _fifa_dir not in _sys.path:
     _sys.path.insert(0, _fifa_dir)
+# FIFA World Cup simulation cogs
 from fifa_data.services.draft_cog import DraftCog
 from fifa_data.services.bracket import BracketCog
 
+# Blood on the Clocktower cogs
 from BOTC.cogs.role import RoleCog as BOTCRoleCog
 from BOTC.cogs.jinx import JinxCog as BOTCJinxCog
 from BOTC.cogs.fabled import FabledCog as BOTCFabledCog
@@ -71,10 +74,12 @@ from BOTC.cogs.game import BOTCGame
 
 from testing.cog import TestingCog
 
+# Analytics / dashboard
 from utils.analytics import init_analytics, get_analytics_service
 from utils.analytics.instrumentation import register_analytics_hooks
 from utils.analytics.config import AnalyticsConfig
 
+# Optional analytics secrets (dashboard password)
 try:
     from analytics_secrets import DASHBOARD_PASSWORD
 except ImportError:
@@ -88,20 +93,25 @@ if DASHBOARD_PASSWORD and not os.getenv("ANALYTICS_DASHBOARD_PASSWORD"):
     _analytics_config.dashboard_password = DASHBOARD_PASSWORD
 _analytics_service = init_analytics(_analytics_config)
 
+# Initialize databases on startup
 init_invites_db()
 init_deadlist_db()
 
+# ── Event: on_ready ──────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
+    # Sync slash commands
     try:
         await bot.tree.sync()
     except Exception as e:
         print(f"Error syncing slash commands: {e}")
+    # Ensure every guild has default settings
     for guild in bot.guilds:
         guild_data = load_guild_data(guild.id)
         if guild_data is None:
             guild_data = base_variables
             save_guild_data(guild.id, guild_data)
+    # Snapshot current invites for join tracking
     for guild in bot.guilds:
         current_invites = await guild.invites()
         invites = {invite.code: invite.uses for invite in current_invites}
@@ -134,7 +144,7 @@ async def on_ready():
         print(f"Errore caricamento Overseer cog: {e}")
     
 
-
+# ── Event: on_guild_join ─────────────────────────────────────────────────────
 @bot.event
 async def on_guild_join(guild):
     bidet = bot.get_user(450772749829537793)
@@ -147,14 +157,14 @@ async def on_guild_join(guild):
         )
         embedw.add_field(
             name="My default prefix is:",
-            value=f"`{bot.command_prefix}`\nIt can be changed by an admin by using the `.prefix` command👾",
+            value=f"`{bot.command_prefix}`\nIt can be changed by an admin by using the `.prefix` command",
             inline=False,
         )
         embedw.add_field(
             name="Commands:",
             value=(
-                "Get started with `.help` command, it will send you all commands of the bot!🤖\n"
-                "Then use the `.help {category}` command to go further into commands🏳️"
+                "Get started with `.help` command, it will send you all commands of the bot!\n"
+                "Then use the `.help {category}` command to go further into commands"
             ),
             inline=False,
         )
@@ -166,13 +176,13 @@ async def on_guild_join(guild):
             )
         )
         await welcome_channel.send(embed=embedw)
-    # Ensure default guild settings exist
     if load_guild_data(guild.id) is None:
         save_guild_data(guild.id, base_variables)
     current_invites = await guild.invites()
     invites = {invite.code: invite.uses for invite in current_invites}
     save_invites(guild.id, invites)
 
+# ── Event: on_guild_remove ───────────────────────────────────────────────────
 @bot.event
 async def on_guild_remove(guild):
     bidet = bot.get_user(450772749829537793)
@@ -198,7 +208,6 @@ async def on_guild_remove(guild):
         await nominations_cog.conn.execute("DELETE FROM tokens WHERE guild_id = ?", (guild_id,))
         await nominations_cog.conn.commit()
 
-    # Clean up persisted settings
     try:
         delete_target_channel(guild_id)
     except Exception:
@@ -210,6 +219,7 @@ async def on_guild_remove(guild):
     if bidet:
         await bidet.send(f"{guild.name} data deleted")
 
+# ── Helper: safe_reply (handles deleted parent message) ──────────────────────
 async def safe_reply(ctx, **kwargs):
     try:
         await ctx.reply(**kwargs)
@@ -222,6 +232,7 @@ async def safe_reply(ctx, **kwargs):
         else:
             raise
 
+# ── Event: on_command_error ──────────────────────────────────────────────────
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -259,10 +270,13 @@ async def on_command_error(ctx, error):
 
     print(f"Error: {error}")
 
+# ── Event: on_message ───────────────────────────────────────────────────────
 @bot.event
 async def on_message(message):
+    # Ignore bot's own messages and a specific user ID
     if message.author == bot.user or message.author.id == 408785106942164992:
         return
+    # Handle DMs
     if not message.guild:
         if message.content.startswith(bot.command_prefix):
             await bot.invoke(await bot.get_context(message))
@@ -273,6 +287,7 @@ async def on_message(message):
             await bot.invoke(await bot.get_context(message))
         return
     content = message.content.lower()
+    # Pin/unpin via reply
     if content in ("pin", "unpin") and message.reference and message.reference.message_id:
         try:
             replied_message = await message.channel.fetch_message(message.reference.message_id)
@@ -292,7 +307,8 @@ async def on_message(message):
         except discord.Forbidden:
             print("Not enough perms")
         except discord.HTTPException:
-            print("Network error")   
+            print("Network error")
+    # Overseer bot (user ID 292953664492929025) auto-whisper/fireworks/move-in
     if message.author.id == 292953664492929025:
         rc_category   = discord.utils.get(message.guild.categories, name=guild_data.get("rc_category_name"))
         dead_category = discord.utils.get(message.guild.categories, name=guild_data.get("dead_category_name"))
@@ -316,6 +332,7 @@ async def on_message(message):
     if message.content.startswith(bot.command_prefix):
         await bot.invoke(await bot.get_context(message))
 
+# ── Event: on_message_delete ─────────────────────────────────────────────────
 @bot.event
 async def on_message_delete(message):
     if message.author == bot.user or message.author.id == 292953664492929025:
@@ -348,6 +365,7 @@ async def on_message_delete(message):
                         file=discord.File(log_file, filename="deleted_message.txt"),
                     )
 
+# ── Event: on_message_edit ───────────────────────────────────────────────────
 @bot.event
 async def on_message_edit(message_before, message_after):
     if message_before.author == bot.user or message_before.author.id == 292953664492929025 or message_before.content == message_after.content:
@@ -390,6 +408,7 @@ async def on_message_edit(message_before, message_after):
                         file=discord.File(log_file, filename="edited_message.txt"),
                     )
 
+# ── Event: on_member_join (track inviter) ────────────────────────────────────
 @bot.event
 async def on_member_join(member):
     guild_data = load_guild_data(member.guild.id)
@@ -408,13 +427,13 @@ async def on_member_join(member):
     if join_logs_channel:
         if inviter:
             await join_logs_channel.send(
-                f"## User Joined ➕\n"
+                f"## User Joined +\n"
                 f"**Name:** {member.mention} `{member.name}`\n"
                 f"**Invited by:** {inviter.mention} `{inviter.name}`"
             )
         else:
             await join_logs_channel.send(
-                f"## User Joined ➕\n"
+                f"## User Joined +\n"
                 f"**Name:** {member.mention} `{member.name}`"
             )
     updated_invites = {invite.code: invite.uses for invite in new_invites}
@@ -435,6 +454,7 @@ async def on_invite_delete(invite):
         del current_invites[invite.code]
         save_invites(guild_id, current_invites)
 
+# ── Event: on_member_remove ──────────────────────────────────────────────────
 @bot.event
 async def on_member_remove(member):
     if member.id == 1165666436379836506:
@@ -445,9 +465,10 @@ async def on_member_remove(member):
         leave_logs_channel = discord.utils.get(member.guild.channels, name=leave_logs_channel_name)
         if leave_logs_channel:
             await leave_logs_channel.send(
-                f"## User Left ➖\n**Name:** {member.mention} `{member.name}`"
+                f"## User Left -\n**Name:** {member.mention} `{member.name}`"
             )
 
+# ── Event: on_command (logging) ──────────────────────────────────────────────
 @bot.event
 async def on_command(ctx):
     if ctx.guild:
@@ -455,6 +476,7 @@ async def on_command(ctx):
     if isinstance(ctx.channel, discord.DMChannel):
         print(f'By {ctx.author}: {ctx.command}')
 
+# ── Whisper UI: multi-page member select ─────────────────────────────────────
 class WhisperTargetSelectView(discord.ui.View):
     def __init__(self, origin_message: discord.Message, guild_data: dict, timeout: int = 300):
         super().__init__(timeout=timeout)
@@ -597,12 +619,10 @@ async def whisper(message, guild_data, mentioned_user_id, user_response1, author
                 embed.add_field(name="Someone sent you a whisper:", value=f'{user_response1}', inline=False)
             await channel.send(f"{user.mention}")
             await channel.send(embed=embed)
-            # Log the whisper
             embedlog = info_embed()
             embedlog.add_field(name=f"{author.mention} sent a whisper to {user.mention}:", value=f'{user_response1}\n\n{channel.mention}', inline=False)
             await whisper_logs_channel.send(embed=embedlog)
 
-#fireworks_gifs = ['https://tenor.com/view/fireworks-gif-13143174', 'https://tenor.com/view/fireworks-explosions-lights-gif-17712639', 'https://tenor.com/view/fireworks-firework-night-aesthetic-anime-gif-19222229', 'https://tenor.com/view/firework-2020-2021-2019-fireworks-gif-19768402', 'https://tenor.com/view/firework-gif-21770535', 'https://tenor.com/view/pyroworks-fireworks-mania-firework-happy-new-year-new-year-gif-4556811341928768447', 'https://tenor.com/view/firework-anime-gif-24295480', 'https://tenor.com/view/firework-feuerwerk-s1nnr3-s1nn3rv3-pyroworks-gif-20635964', 'https://tenor.com/view/sono-bisque-doll-wa-koi-wo-suru-fireworks-anime-my-dress-up-darling-festival-gif-25800144']
 fireworks_gifs = ['https://tenor.com/view/lanterns-flying-lantern-chinese-lantern-gif-9054613', 'https://tenor.com/view/lanterns-lights-peace-gif-15906930', 'https://tenor.com/view/lantern-lights-ceremony-lanterns-magic-giant-gif-14420747', 'https://tenor.com/view/lanterns-ceremony-lights-memorial-cp-vy0i2xp-uc-gif-14420759', 'https://tenor.com/view/maga-communist-chinese-lanterns-gif-26663664', 'https://tenor.com/view/tangled-tangled-movie-lanterns-tangled-lanterns-i-see-the-light-gif-12379369862241479266']
 
 async def fireworks(message, guild_data):
@@ -628,6 +648,7 @@ async def fireworks(message, guild_data):
                     await message.channel.send('Done')
                     break
 
+# ── Cog Registration ─────────────────────────────────────────────────────────
 async def startcog():
     await bot.add_cog(ActionsLogging(bot))
     await bot.add_cog(Setup(bot))
