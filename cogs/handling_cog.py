@@ -12,6 +12,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def decay(self, ctx, house: discord.TextChannel = None):
+        """Move a house to the inaccessible category and remove its members."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             inaccessible_houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["inaccessible_houses_category_name"])
@@ -58,6 +59,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def destroy(self, ctx, house: discord.TextChannel = None):
+        """Destroy a house and announce with an explosion GIF."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if not guild_data:
@@ -111,6 +113,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def fdestroy(self, ctx, house: discord.TextChannel = None):
+        """Force-destroy a house instantly without member cleanup."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have enough perms to use this command")
         guild_data = load_guild_data(ctx.guild.id)
@@ -142,6 +145,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def rebuild(self, ctx, house: discord.TextChannel = None):
+        """Restore a destroyed or decayed house to the houses category."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if not guild_data:
@@ -177,6 +181,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def newpc(self, ctx, pc_type: str, name: str, *rolechats: discord.TextChannel):
+        """Create a new public or private PC with optional RC members."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -227,6 +232,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def close(self, ctx, chat: discord.TextChannel = None):
+        """Close a PC by moving it to Old PCs and removing members."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             old_pcs_category = discord.utils.get(ctx.guild.categories, name=guild_data["old_pcs_category_name"])
@@ -269,6 +275,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def public(self, ctx, channel: discord.TextChannel = None):
+        """Grant read-only access to a channel for all player roles."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -299,6 +306,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def private(self, ctx, channel: discord.TextChannel = None):
+        """Restrict a channel to default role only."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -320,6 +328,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def setowner(self, ctx, channel1: discord.TextChannel, channel2: discord.TextChannel = None):
+        """Set channel owners from members in another channel."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -345,6 +354,7 @@ class Handling(commands.Cog):
 
     @commands.command()
     async def end(self, ctx, channel: discord.TextChannel = None):
+        """Remove all non-owner members from a channel."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return

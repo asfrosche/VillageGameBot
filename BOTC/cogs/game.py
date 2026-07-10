@@ -35,7 +35,8 @@ class Nomination:
     nominee_id: int
     accusation: str = "No accusation."
     defense: str = "No defense."
-    votes: dict[int, bool] = field(default_factory=dict)
+    votes: dict[int, str] = field(default_factory=dict)
+    conditions: dict[int, str] = field(default_factory=dict)
     finalized: set[int] = field(default_factory=set)
     current_clock_index: int = 0
     closed: bool = False
@@ -107,6 +108,24 @@ def _username(user_id: int) -> str:
     return f"<@{user_id}>"
 
 
+# ── Condition Modal ──────────────────────────────────────────────────────────
+
+class ConditionModal(discord.ui.Modal, title="Conditional Vote"):
+    condition = discord.ui.TextInput(
+        label="What is your condition?",
+        style=discord.TextStyle.short,
+        max_length=200,
+        placeholder="e.g. I vote guilty if the Mayor voted guilty",
+    )
+
+    def __init__(self, vote_view: VoteView):
+        super().__init__()
+        self.vote_view = vote_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.vote_view._submit_conditional(interaction, self.condition.value)
+
+
 # ── Vote View ────────────────────────────────────────────────────────────────
 
 class ViewAccuseButton(discord.ui.Button):
@@ -141,36 +160,27 @@ class VoteView(discord.ui.View):
         if len(nom.defense) > ACCUSE_MAX_LEN:
             self.add_item(ViewDefendButton())
 
-    def _refresh_alive_info(self, guild: discord.Guild):
-        guild_data = load_guild_data(self.guild_id)
-        if not guild_data:
-            return
-        role_name = guild_data.get("alive_role_name")
-        if not role_name:
-            return
-        role = discord.utils.get(guild.roles, name=role_name)
-        if not role:
-            return
-        self._alive_count = sum(1 for m in role.members if not m.bot)
+    def _refresh_alive_info(self, guild: discord.Guild = None):
+        gs = self.cog._get_state(self.guild_id)
+        self._alive_count = sum(
+            1 for uid in gs.seating_order
+            if uid in gs.players and not gs.players[uid].dead
+        )
         self._required = math.ceil(self._alive_count / 2)
 
-    def _vote_icon(self, uid: int) -> str:
-        ps = self.cog._get_state(self.guild_id).players.get(uid)
+    def _vote_icon(self, uid: int, condition: str = "") -> str:
         vote = self.nom.votes.get(uid)
-        if uid in self.nom.finalized:
-            if vote is True:
-                return "✅"
-            if vote is False:
-                return "❌"
-        if vote is True:
-            return "◐"
-        if vote is False:
-            return "◑"
-        if ps and ps.dead:
-            return "☠️🗳️" if ps.has_dead_vote else "☠️"
-        if ps and ps.sponsor_id is not None:
-            return "⭐"
-        return "—"
+        locked = uid in self.nom.finalized
+        if vote == "guilty":
+            return "🔒🟥" if locked else "🟥"
+        if vote == "notguilty":
+            return "🔒🟩" if locked else "🟩"
+        if vote == "conditional":
+            cond_text = f" {condition}" if condition else ""
+            return f"🔒🟨{cond_text}" if locked else f"🟨{cond_text}"
+        if vote == "novote":
+            return "🔒⚪" if locked else "⚪"
+        return "⬜"
 
     def _build_seating_chart(self, gs: GameState) -> str:
         if not gs.seating_order:
@@ -182,8 +192,11 @@ class VoteView(discord.ui.View):
         lines = []
         for uid in ordered:
             marker = "🕦 " if uid == current_target else "   "
-            icon = self._vote_icon(uid)
-            lines.append(f"{marker}{_username(uid)} {icon}")
+            ps = gs.players.get(uid)
+            prefix = "☠️" if ps and ps.dead else ""
+            cond = self.nom.conditions.get(uid, "")
+            icon = self._vote_icon(uid, cond)
+            lines.append(f"{marker}{prefix}{_username(uid)} {icon}")
         return "\n".join(lines)
 
     def _format_text(self, text: str) -> str:
@@ -219,14 +232,20 @@ class VoteView(discord.ui.View):
             inline=False,
         )
 
-        finalized_guilty = sum(1 for uid in self.nom.finalized if self.nom.votes.get(uid))
-        finalized_notguilty = sum(1 for uid in self.nom.finalized if self.nom.votes.get(uid) is False)
-        pending = len(self.nom.votes) - len(self.nom.finalized)
+        guilty = sum(1 for v in self.nom.votes.values() if v == "guilty")
+        notguilty = sum(1 for v in self.nom.votes.values() if v == "notguilty")
+        cond_count = sum(1 for v in self.nom.votes.values() if v == "conditional")
+        novote = sum(1 for v in self.nom.votes.values() if v == "novote")
+        pending = self._alive_count - len(self.nom.votes)
+        if pending < 0:
+            pending = 0
+
         clock_order = get_clock_order(gs.seating_order, self.nom.nominee_id) if gs.seating_order else []
         clock_name = _username(clock_order[self.nom.current_clock_index]) if clock_order else "—"
         status = "Closed" if self.nom.closed else f"Clock: {clock_name}"
         embed.set_footer(
-            text=f"🟥 {finalized_guilty}  🟩 {finalized_notguilty}  |  Pending: {pending}  |  Need: {self._required}  |  {status}"
+            text=f"🟥{guilty} 🟩{notguilty} 🟨{cond_count} ⚪{novote}  |  "
+                 f"⬜{pending}  |  Need: {self._required}  |  {status}"
         )
         return embed
 
@@ -260,38 +279,75 @@ class VoteView(discord.ui.View):
         if key in self.cog._tasks:
             self.cog._tasks[key].cancel()
 
-    async def _vote(self, interaction: discord.Interaction, guilty: bool):
+    async def _cast_vote(self, interaction: discord.Interaction, vote_type: str, condition: str = ""):
         if self.nom.closed:
             return await interaction.response.send_message("Voting is closed.", ephemeral=True)
+
+        uid = interaction.user.id
+        if uid in self.nom.finalized:
+            return await interaction.response.send_message(
+                "Your vote has been locked (the clock has passed you). You cannot change it.", ephemeral=True
+            )
+
         if not await self._has_alive_role(interaction.user):
             return await interaction.response.send_message("Only alive players can vote.", ephemeral=True)
-        ps = self.cog._get_state(self.guild_id).players.get(interaction.user.id)
+
+        ps = self.cog._get_state(self.guild_id).players.get(uid)
         if not can_vote(ps):
             if ps and ps.dead:
                 return await interaction.response.send_message("You are dead and have no dead vote left.", ephemeral=True)
             return await interaction.response.send_message("You cannot vote.", ephemeral=True)
-        self._refresh_alive_info(interaction.guild)
-        self.nom.votes[interaction.user.id] = guilty
+
+        if vote_type == "conditional" and ps and ps.dead:
+            return await interaction.response.send_message("Dead players cannot cast conditional votes.", ephemeral=True)
+
+        ghost_used = False
         if ps and ps.dead and ps.has_dead_vote:
-            ps.has_dead_vote = False
-            self.cog._save()
+            old_vote = self.nom.votes.get(uid)
+            if vote_type in ("guilty", "notguilty") and old_vote not in ("guilty", "notguilty"):
+                ps.has_dead_vote = False
+                ghost_used = True
+                self.cog._save()
+
+        self._refresh_alive_info()
+        self.nom.votes[uid] = vote_type
+        if vote_type == "conditional" and condition:
+            self.nom.conditions[uid] = condition
+        elif uid in self.nom.conditions:
+            del self.nom.conditions[uid]
 
         gs = self.cog._get_state(self.guild_id)
         clock_order = get_clock_order(gs.seating_order, self.nom.nominee_id)
-        if clock_order:
+        if clock_order and clock_order[self.nom.current_clock_index] == uid:
             for _ in range(len(clock_order)):
                 self.nom.current_clock_index = (self.nom.current_clock_index + 1) % len(clock_order)
                 target = clock_order[self.nom.current_clock_index]
                 tps = gs.players.get(target)
-                if target in self.nom.votes and target not in self.nom.finalized:
+                if target in self.nom.finalized:
+                    continue
+                if target in self.nom.votes:
                     self.nom.finalized.add(target)
                     continue
                 if target != self.nom.nominee_id and can_vote(tps):
                     break
 
         await self._refresh_ui()
-        label = "Guilty" if guilty else "Not Guilty"
-        await interaction.response.send_message(f"You voted **{label}**. Click the other button to change your vote.", ephemeral=True)
+
+        if ghost_used:
+            nom_msg = self.cog._messages.get((self.guild_id, self.nom.id))
+            if nom_msg:
+                await nom_msg.channel.send(f"💀 {_username(uid)} has used their ghost vote!")
+
+        labels = {"guilty": "Guilty", "notguilty": "Not Guilty", "conditional": "Conditional", "novote": "No Vote"}
+        label = labels.get(vote_type, vote_type)
+        msg = f"You voted **{label}**."
+        if vote_type == "conditional" and condition:
+            msg += f" Condition: {condition}"
+        msg += " You can change your vote before the clock passes you."
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    async def _submit_conditional(self, interaction: discord.Interaction, condition: str):
+        await self._cast_vote(interaction, "conditional", condition.strip())
 
     async def _advance_clock(self, interaction: discord.Interaction):
         if not interaction.user.guild_permissions.administrator:
@@ -304,7 +360,9 @@ class VoteView(discord.ui.View):
             self.nom.current_clock_index = (self.nom.current_clock_index + 1) % len(clock_order)
             target = clock_order[self.nom.current_clock_index]
             tps = gs.players.get(target)
-            if target in self.nom.votes and target not in self.nom.finalized:
+            if target in self.nom.finalized:
+                continue
+            if target in self.nom.votes:
                 self.nom.finalized.add(target)
                 continue
             if target != self.nom.nominee_id and can_vote(tps):
@@ -322,19 +380,35 @@ class VoteView(discord.ui.View):
         for _ in range(len(clock_order)):
             self.nom.current_clock_index = (self.nom.current_clock_index - 1) % len(clock_order)
             target = clock_order[self.nom.current_clock_index]
-            ps = gs.players.get(target)
-            if target != self.nom.nominee_id and can_vote(ps):
-                break
+            if target in self.nom.finalized:
+                continue
+            break
         await self._refresh_ui()
         await interaction.response.defer()
 
-    @discord.ui.button(label="🟥 Guilty", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="✅ Guilty", style=discord.ButtonStyle.danger, row=0)
     async def guilty_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._vote(interaction, True)
+        await self._cast_vote(interaction, "guilty")
 
-    @discord.ui.button(label="🟩 Not Guilty", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="❌ Not Guilty", style=discord.ButtonStyle.success, row=0)
     async def notguilty_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._vote(interaction, False)
+        await self._cast_vote(interaction, "notguilty")
+
+    @discord.ui.button(label="🔶 Conditional", style=discord.ButtonStyle.secondary, row=0)
+    async def conditional_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.nom.closed:
+            return await interaction.response.send_message("Voting is closed.", ephemeral=True)
+        uid = interaction.user.id
+        if uid in self.nom.finalized:
+            return await interaction.response.send_message("Your vote has been locked. You cannot change it.", ephemeral=True)
+        ps = self.cog._get_state(self.guild_id).players.get(uid)
+        if ps and ps.dead:
+            return await interaction.response.send_message("Dead players cannot cast conditional votes.", ephemeral=True)
+        await interaction.response.send_modal(ConditionModal(self))
+
+    @discord.ui.button(label="⚪ No Vote", style=discord.ButtonStyle.secondary, row=0)
+    async def novote_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._cast_vote(interaction, "novote")
 
     @discord.ui.button(label="⏩ Advance Clock", style=discord.ButtonStyle.secondary, row=1)
     async def advance_clock_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -350,6 +424,42 @@ class VoteView(discord.ui.View):
             return await interaction.response.send_message("Only the Storyteller can close voting.", ephemeral=True)
         await self._close()
         await interaction.response.send_message("🔒 Voting closed.", ephemeral=True)
+
+
+# ── New Game Confirmation View ───────────────────────────────────────────────
+
+class NewGameConfirmView(discord.ui.View):
+    def __init__(self, cog: BOTCGame, ctx: commands.Context, members: list[discord.Member], no_threads: bool, active_count: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.ctx = ctx
+        self.members = members
+        self.no_threads = no_threads
+        self.active_count = active_count
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user != self.ctx.author:
+            await interaction.response.send_message("Only the command author can confirm or cancel.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._start_new_game(self.ctx, self.members, self.no_threads, self.active_count)
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="❌ Cancelled. No changes were made.", embed=None, view=None)
 
 
 # ── Cog ──────────────────────────────────────────────────────────────────────
@@ -412,6 +522,17 @@ class BOTCGame(commands.Cog):
             f"{alive[i].display_name}-{alive[(i + 1) % len(alive)].display_name}"
             for i in range(len(alive))
         ]
+
+    async def _archive_neighbor_threads(self, guild: discord.Guild):
+        channel = discord.utils.get(guild.text_channels, name="🌞daytime-chat")
+        if not channel:
+            return
+        for thread in channel.threads:
+            if thread.name.startswith("neighbor-"):
+                try:
+                    await thread.edit(archived=True)
+                except Exception:
+                    pass
 
     async def _create_neighbor_threads(self, ctx: commands.Context, gs: GameState):
         alive = self._get_alive_members(ctx.guild, gs)
@@ -479,27 +600,113 @@ class BOTCGame(commands.Cog):
         await self._create_neighbor_threads(ctx, gs)
 
     @commands.command(name="bseating")
-    async def bseating(self, ctx: commands.Context):
-        """Show the current seating order."""
-        gs = self._get_state(ctx.guild.id)
-        if not gs.seating_order:
-            return await ctx.send("No seating order set. Use `.bsetseating @p1 @p2 ...`")
-        lines = []
-        for i, uid in enumerate(gs.seating_order):
-            member = ctx.guild.get_member(uid)
-            name = member.display_name if member else f"<unknown {uid}>"
-            ps = gs.players.get(uid)
-            tags = []
-            if ps and ps.dead:
-                tags.append("☠️")
-            if ps and ps.sponsor_id is not None:
-                sponsor_member = ctx.guild.get_member(ps.sponsor_id)
-                sponsor_name = sponsor_member.display_name if sponsor_member else f"<unknown {ps.sponsor_id}>"
-                tags.append(f"→ sponsor: {sponsor_name}")
-            tag_str = " ".join(tags)
-            tag_str = f" {tag_str}" if tag_str else ""
-            lines.append(f"{i+1}. {name}{tag_str}")
-        await ctx.send("\n".join(lines))
+    @commands.has_permissions(administrator=True)
+    async def bseating(self, ctx: commands.Context, *args):
+        """Start a new BOTC game or show the current seating order.
+        Usage: .bseating [nothreads] @P1 @P2 @P3 ..."""
+        if not args:
+            gs = self._get_state(ctx.guild.id)
+            if not gs.seating_order:
+                return await ctx.send("No seating order set. Use `.bseating @p1 @p2 ...` to start a new game.")
+            lines = []
+            for i, uid in enumerate(gs.seating_order):
+                member = ctx.guild.get_member(uid)
+                name = member.display_name if member else f"<unknown {uid}>"
+                ps = gs.players.get(uid)
+                tags = []
+                if ps and ps.dead:
+                    tags.append("☠️")
+                if ps and ps.sponsor_id is not None:
+                    sponsor_member = ctx.guild.get_member(ps.sponsor_id)
+                    sponsor_name = sponsor_member.display_name if sponsor_member else f"<unknown {ps.sponsor_id}>"
+                    tags.append(f"→ sponsor: {sponsor_name}")
+                tag_str = " ".join(tags)
+                tag_str = f" {tag_str}" if tag_str else ""
+                lines.append(f"{i+1}. {name}{tag_str}")
+            await ctx.send("\n".join(lines))
+            return
+
+        no_threads = False
+        member_args = list(args)
+        if member_args[0].lower() == "nothreads":
+            no_threads = True
+            member_args = member_args[1:]
+            if not member_args:
+                return await ctx.send("Usage: `.bseating [nothreads] @P1 @P2 @P3 ...`")
+
+        converter = commands.MemberConverter()
+        members = []
+        for a in member_args:
+            try:
+                m = await converter.convert(ctx, a)
+                members.append(m)
+            except Exception:
+                return await ctx.send(f"Could not find member: {a}")
+
+        if len(members) < 3:
+            return await ctx.send("Need at least 3 players.")
+
+        active_noms = [v for (gid, _), v in self._views.items() if gid == ctx.guild.id and not v.nom.closed]
+        active_count = len(active_noms)
+
+        embed = discord.Embed(
+            title="🎲 New BOTC Game",
+            description="Are you sure you want to start a new Blood on the Clocktower game?",
+            color=discord.Color.teal(),
+        )
+        names = "\n".join(f"{i+1}. {m.display_name}" for i, m in enumerate(members))
+        embed.add_field(name="Seating Order", value=names, inline=False)
+        embed.add_field(name="Neighbour Threads", value="✅ Enabled" if not no_threads else "❌ Disabled", inline=False)
+        if not no_threads:
+            embed.add_field(name="Tip", value="Use `.bseating nothreads @players...` to start without neighbour threads.", inline=False)
+        if active_count > 0:
+            embed.add_field(
+                name="⚠️ Active Nominations",
+                value=f"Starting a new game will cancel **{active_count}** active nomination(s).",
+                inline=False,
+            )
+        embed.set_footer(text="This will reset all player states and clear all nominations.")
+
+        view = NewGameConfirmView(self, ctx, members, no_threads, active_count)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    async def _start_new_game(self, ctx: commands.Context, members: list[discord.Member], no_threads: bool, active_count: int):
+        guild_id = ctx.guild.id
+        gs = self._get_state(guild_id)
+
+        gs.seating_order = [m.id for m in members]
+        gs.players = {}
+        for m in members:
+            gs.players[m.id] = PlayerState(user_id=m.id)
+
+        to_remove = [(gid, nid) for (gid, nid) in list(self._views.keys()) if gid == guild_id]
+        for key in to_remove:
+            if key in self._tasks:
+                self._tasks[key].cancel()
+            self._messages.pop(key, None)
+            self._views.pop(key, None)
+            self._tasks.pop(key, None)
+
+        self._nom_ids[guild_id] = 0
+        self._save()
+
+        if not no_threads:
+            await self._archive_neighbor_threads(ctx.guild)
+            await self._create_neighbor_threads(ctx, gs)
+
+        embed = discord.Embed(
+            title="🎲 New BOTC Game Started",
+            color=discord.Color.teal(),
+        )
+        embed.add_field(name="Players", value=str(len(members)), inline=True)
+        embed.add_field(name="Neighbour Threads", value="Enabled" if not no_threads else "Disabled", inline=True)
+        embed.add_field(name="Ghost Votes", value="Reset", inline=True)
+        embed.add_field(name="Sponsors", value="Cleared", inline=True)
+        embed.add_field(name="Active Nominations", value="Cleared", inline=True)
+        names = ", ".join(m.display_name for m in members)
+        embed.set_footer(text=names)
+        await ctx.send(embed=embed)
 
     # ── Player State ─────────────────────────────────────────────────────────
 
@@ -592,7 +799,6 @@ class BOTCGame(commands.Cog):
         return sorted(out, key=lambda x: x[0])
 
     @commands.command(name="bnominate")
-    @commands.has_permissions(administrator=True)
     async def bnominate(self, ctx: commands.Context, nominator: discord.Member, *, target: discord.Member):
         """Nominate a player. Usage: .bnominate @nominator @nominee"""
         if nominator == target:
@@ -622,7 +828,6 @@ class BOTCGame(commands.Cog):
         await ctx.send(f"✅ Nomination #{nom_id} created. Use `.baccuse {nom_id}` to set the accusation.")
 
     @commands.command(name="baccuse")
-    @commands.has_permissions(administrator=True)
     async def baccuse(self, ctx: commands.Context, nom_id: int, *, text: str = ""):
         """Set accusation for a nomination. Omit text to enter pending mode. Usage: .baccuse <nom_id> [text]"""
         view = self._get_nomination(ctx.guild.id, nom_id)
@@ -644,7 +849,6 @@ class BOTCGame(commands.Cog):
         await ctx.send(f"✏️ Awaiting accusation for #{nom_id} from the nominator or a Storyteller.")
 
     @commands.command(name="bdefend")
-    @commands.has_permissions(administrator=True)
     async def bdefend(self, ctx: commands.Context, nom_id: int, *, text: str = ""):
         """Set defense for a nomination. Omit text to enter pending mode. Usage: .bdefend <nom_id> [text]"""
         view = self._get_nomination(ctx.guild.id, nom_id)
@@ -758,22 +962,27 @@ class BOTCGame(commands.Cog):
 
     @commands.command(name="bvote")
     @commands.has_permissions(administrator=True)
-    async def bvote(self, ctx: commands.Context, nom_id: int, player: discord.Member, guilty: str):
-        """Set or change a player's vote. Usage: .bvote <nom_id> @player guilty/notguilty"""
+    async def bvote(self, ctx: commands.Context, nom_id: int, player: discord.Member, vote: str, *, condition: str = ""):
+        """Set or change a player's vote. Usage: .bvote <nom_id> @player guilty/notguilty/conditional/novote [condition]"""
         view = self._get_nomination(ctx.guild.id, nom_id)
         if not view or view.nom.closed:
             await ctx.send(f"No active nomination #{nom_id}.")
             return
-        if guilty.lower() not in ("guilty", "notguilty"):
-            await ctx.send("Vote must be `guilty` or `notguilty`.")
+        vote_lower = vote.lower()
+        if vote_lower not in ("guilty", "notguilty", "conditional", "novote"):
+            await ctx.send("Vote must be `guilty`, `notguilty`, `conditional`, or `novote`.")
             return
-        val = guilty.lower() == "guilty"
-        view.nom.votes[player.id] = val
-        if player.id in view.nom.finalized:
-            pass  # keep finalized status
-        view._refresh_alive_info(ctx.guild)
+        view.nom.votes[player.id] = vote_lower
+        if vote_lower == "conditional" and condition:
+            view.nom.conditions[player.id] = condition
+        elif player.id in view.nom.conditions:
+            del view.nom.conditions[player.id]
+        view._refresh_alive_info()
         await view._refresh_ui()
-        await ctx.send(f"✅ Vote set for {player.display_name}: **{guilty.capitalize()}**")
+        msg = f"✅ Vote set for {player.display_name}: **{vote_lower.capitalize()}**"
+        if condition:
+            msg += f" (condition: {condition})"
+        await ctx.send(msg)
 
     def _is_command(self, message: discord.Message) -> bool:
         prefix = self.bot.command_prefix

@@ -283,6 +283,7 @@ class ItemDrop(commands.Cog):
 
     @commands.command(name='dropitem')
     async def dropitem(self, ctx, channel: discord.TextChannel, log_channel: discord.TextChannel, name: str, description: str, count: int, showpickups: bool, duration_str: str = None):
+        """Drop an interactive item in the channel (see docs for available items)."""
         guild_data = load_guild_data(ctx.guild.id)
         overseer_role_name = guild_data.get("overseer_role_name", "Overseer") if guild_data else "Overseer"
         overseer_role = discord.utils.get(ctx.guild.roles, name=overseer_role_name)

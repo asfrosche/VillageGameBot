@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import subprocess
 import threading
 from pathlib import Path
 
@@ -19,6 +21,8 @@ _server: uvicorn.Server | None = None
 _thread: threading.Thread | None = None
 _timer: threading.Timer | None = None
 _LOCK = threading.Lock()
+_tunnel_url: str | None = None
+_tunnel_process: subprocess.Popen | None = None
 _SHUTDOWN_TIMEOUT = 600  # 10 minutes
 
 
@@ -69,6 +73,10 @@ def start_dashboard(config: DashboardConfig | None = None) -> None:
             _thread.start()
             logger.info("Dashboard started on %s:%s", cfg.host, cfg.port)
 
+            if cfg.tunnel_enabled:
+                tunnel_thread = threading.Thread(target=_start_tunnel, args=(cfg,), daemon=True)
+                tunnel_thread.start()
+
         _timer = threading.Timer(_SHUTDOWN_TIMEOUT, _stop_dashboard)
         _timer.daemon = True
         _timer.start()
@@ -83,6 +91,7 @@ def stop_dashboard() -> None:
 
 def _stop_dashboard() -> None:
     global _server, _thread
+    _stop_tunnel()
     if _server:
         try:
             _server.should_exit = True
@@ -98,6 +107,56 @@ def _cancel_timer() -> None:
     if _timer:
         _timer.cancel()
         _timer = None
+
+
+# ── Tunnel (localhost.run) ──────────────────────────────────────────────────
+
+
+def _start_tunnel(config: DashboardConfig) -> str | None:
+    global _tunnel_process, _tunnel_url
+    _tunnel_url = None
+    try:
+        proc = subprocess.Popen(
+            ["ssh", "-o", "StrictHostKeyChecking=no",
+             "-o", "ServerAliveInterval=30",
+             "-R", f"80:localhost:{config.port}",
+             "nokey@localhost.run"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        _tunnel_process = proc
+        for line in iter(proc.stdout.readline, ""):
+            m = re.search(r"https://(?!admin\.)[a-zA-Z0-9-]+\.(?:lhr\.life|localhost\.run)", line)
+            if m:
+                _tunnel_url = m.group(0)
+                logger.info("Tunnel URL: %s", _tunnel_url)
+                return _tunnel_url
+            logger.debug("Tunnel: %s", line.rstrip())
+    except Exception as exc:
+        logger.warning("Tunnel failed: %s", exc)
+    return None
+
+
+def _stop_tunnel() -> None:
+    global _tunnel_process, _tunnel_url
+    if _tunnel_process:
+        try:
+            _tunnel_process.terminate()
+            _tunnel_process.wait(timeout=5)
+        except Exception:
+            try:
+                _tunnel_process.kill()
+            except Exception:
+                pass
+        _tunnel_process = None
+    _tunnel_url = None
+
+
+def get_tunnel_url() -> str | None:
+    return _tunnel_url
+
+
+# ── Legacy runner ───────────────────────────────────────────────────────────
 
 
 def run_dashboard(config: DashboardConfig | None = None) -> None:

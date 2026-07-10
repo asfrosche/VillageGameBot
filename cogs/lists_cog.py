@@ -10,6 +10,7 @@ class Lists(commands.Cog):
 
     @commands.command(aliases=["p"])
     async def playerlist(self, ctx, format: str = None):
+        """List all alive members in the server."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded.")
@@ -34,6 +35,7 @@ class Lists(commands.Cog):
 
     @commands.command()
     async def sponsorlist(self, ctx, format: str = None):
+        """List all sponsor members."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded")
@@ -54,6 +56,7 @@ class Lists(commands.Cog):
 
     @commands.command()
     async def setuphouselist(self, ctx):
+        """Initialize the house list from existing house channels (admin only)."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -74,6 +77,7 @@ class Lists(commands.Cog):
 
     @commands.command()
     async def houselistadd(self, ctx, house: discord.TextChannel = None):
+        """Add a house to the visitable house list (admin only)."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -97,6 +101,7 @@ class Lists(commands.Cog):
 
     @commands.command()
     async def houselistremove(self, ctx, house: discord.TextChannel = None):
+        """Remove a house from the visitable house list (admin only)."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -115,6 +120,7 @@ class Lists(commands.Cog):
 
     @commands.command(aliases=["hl"])
     async def houselist(self, ctx):
+        """Show all currently visitable houses."""
         guild_data = load_guild_data(ctx.guild.id)
         if "houselist" in guild_data:
             houses = guild_data["houselist"]
@@ -127,6 +133,7 @@ class Lists(commands.Cog):
 
     @commands.command(aliases=["d"])
     async def deadlist(self, ctx, action: str = None, player: str = None, team: str = None, *, role: str = None):
+        """Show list of dead players along with their roles."""
         if action is None:
             embed = discord.Embed(title="Deadlist", color=0xff3fb9, timestamp=datetime.now())
             embed.set_footer(text="Village Game")
@@ -196,6 +203,7 @@ class Lists(commands.Cog):
 
     @commands.command(name='map')
     async def map_command(self, ctx):
+        """Show the game map overview."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded.")

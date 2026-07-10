@@ -292,6 +292,7 @@ class Utility(commands.Cog):
 
     @commands.command(aliases=['purge'])
     async def broom(self, ctx, from_id: int = None, to_id: int = None):
+        """Delete the replied-to message and log it."""
         if not ctx.author.guild_permissions.manage_messages:
             return await ctx.send("You need Manage Messages permission to use this command.")
         guild_data = load_guild_data(ctx.guild.id)
@@ -390,6 +391,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def log(self, ctx, arg1: str = None, arg2: str = None, arg3: str = None):
+        """Log a range of messages (by count, source channel, or send to channel)."""
         args = [arg for arg in [arg1, arg2, arg3] if arg is not None]
         send_channel = ctx.channel
         source_channel = ctx.channel
@@ -467,6 +469,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def day(self, ctx):
+        """Unlock all day-phase channels."""
         self.bot.dispatch("phase_change", "day") # added for meetupmatrix.py
         await self._manage_channels(ctx, True)
         guild_data = load_guild_data(ctx.guild.id)
@@ -476,6 +479,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def night(self, ctx):
+        """Lock all day-phase channels."""
         self.bot.dispatch("phase_change", "night") # added for meetupmatrix.py
         await self._manage_channels(ctx, False)
 
@@ -605,6 +609,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def whisper(self, ctx, receiver_channel: discord.TextChannel, *, message: str):
+        """Send an anonymous whisper to a channel."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -654,6 +659,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def switch(self, ctx):
+        """Toggle between Player and Sponsor roles."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -678,6 +684,7 @@ class Utility(commands.Cog):
     # Comando dead
     @commands.command()
     async def dead(self, ctx):
+        """Move the current channel's RC to the Dead category."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -776,6 +783,7 @@ class Utility(commands.Cog):
     # Comando dead
     @commands.command()
     async def deadc(self, ctx, current_house: discord.TextChannel = None):
+        """Move an RC to the Dead category (admin only)."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -867,6 +875,7 @@ class Utility(commands.Cog):
     # Comando deadrole
     @commands.command()
     async def deadrole(self, ctx, *args):
+        """Mark a player as dead, remove their house, and pin a corpse message."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command.")
             return
@@ -962,6 +971,7 @@ class Utility(commands.Cog):
     
     @commands.command()
     async def addrole(self, ctx, role: discord.Role, *members):
+        """Give a role to one or more members."""
         if ctx.author.guild_permissions.administrator:
             response = f"{role.mention} role successfully added"
             if 'everyone' in members:
@@ -985,12 +995,14 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def removerole(self, ctx, role: discord.Role, member: discord.Member):
+        """Remove a role from a member (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return
         await member.remove_roles(role)
         
     @commands.command()
     async def addchannelperms(self, ctx, role: discord.Role, channel: discord.TextChannel, type: str = "r"):
+        """Set read (R) or send (S) permissions for a role in a channel."""
         if ctx.author.guild_permissions.administrator:
             if type.lower() == "r":
                 await channel.set_permissions(role, read_messages=True, send_messages=False)
@@ -1004,6 +1016,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def addcategoryperms(self, ctx, role: discord.Role, category_name: str, type: str = "r"):
+        """Set read (R) or send (S) permissions for a role in a category."""
         if ctx.author.guild_permissions.administrator:
             category = discord.utils.get(ctx.guild.categories, name=category_name)
             if category:
@@ -1029,6 +1042,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     async def endgame(self, ctx):
+        """Unlock all channels for post-game access (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have enough perms to use this command.")
         guild_data = load_guild_data(ctx.guild.id)
@@ -1083,6 +1097,7 @@ class Utility(commands.Cog):
 
     @commands.command(name="skipnight")
     async def skipnight(self, ctx, min_votes: int):
+        """Start a vote to skip the night phase."""
 
         guild_data = load_guild_data(ctx.guild.id)
 

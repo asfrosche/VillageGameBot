@@ -16,6 +16,7 @@ class Infos(commands.Cog):
 
     @commands.command()
     async def info(self, ctx, type: str = None, channel: discord.TextChannel = None, *, info_or_number: str = None):
+        """Show, add, remove, edit, or reset channel infos (admin only)."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:

@@ -634,6 +634,7 @@ class Presets(commands.Cog):
     @commands.command(name="ospreset")
     @commands.has_permissions(administrator=True)
     async def ospreset(self, ctx: commands.Context):
+        """View, reorder, or remove all presets (admin only)."""
         guild_id = _guild_key(ctx)
         presets = self._load_presets(guild_id)
 
@@ -868,6 +869,7 @@ class Presets(commands.Cog):
     @commands.command(name="ospresetsort")
     @commands.has_permissions(administrator=True)
     async def ospresetsort(self, ctx: commands.Context):
+        """Reorder the display order of preset categories (admin only)."""
         guild_id = _guild_key(ctx)
         category_order = self._get_category_order(guild_id)
         selected_index = 0  # index of currently selected category in the dropdown

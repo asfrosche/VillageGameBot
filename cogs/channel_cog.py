@@ -664,16 +664,19 @@ class ChannelMap(commands.Cog):
 
     @commands.command(name="channels")
     async def cmd_channels(self, ctx):
+        """Show a visual map of all PC channels."""
         await ctx.send("⏳ Generating channel maps...")
         await self._build_and_send(ctx, "both")
 
     @commands.command(name="publicmap")
     async def cmd_publicmap(self, ctx):
+        """Show a map of only public channels."""
         await ctx.send("⏳ Generating public channel map...")
         await self._build_and_send(ctx, "public")
 
     @commands.command(name="privatemap")
     async def cmd_privatemap(self, ctx):
+        """Show a map of only private channels."""
         await ctx.send("⏳ Generating private channel map...")
         await self._build_and_send(ctx, "private")
 

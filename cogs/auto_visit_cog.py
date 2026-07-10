@@ -308,6 +308,7 @@ class AutoVisit(commands.Cog):
 
     @commands.command(name="autovisits")
     async def autovisits(self, ctx: commands.Context, setting: str):
+        """Toggle the auto-visit system on or off."""
         if not self._is_admin_or_overseer(ctx):
             await ctx.send("You don't have permission to use this command.")
             return
@@ -336,6 +337,7 @@ class AutoVisit(commands.Cog):
         night_forced: int,
         night_stealth: int,
     ):
+        """Set the RC channel for auto-visit notifications."""
         if not self._is_admin_or_overseer(ctx):
             await ctx.send("You don't have permission to use this command.")
             return
@@ -365,6 +367,7 @@ class AutoVisit(commands.Cog):
 
     @commands.command(name="autorcadd")
     async def autorcadd(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Add a user to the auto-visit list."""
         if not self._is_admin_or_overseer(ctx):
             await ctx.send("You don't have permission to use this command.")
             return
@@ -377,6 +380,7 @@ class AutoVisit(commands.Cog):
 
     @commands.command(name="autorcreset")
     async def autorcreset(self, ctx: commands.Context, channel: discord.TextChannel):
+        """Reset all auto-visit configurations."""
         if not self._is_admin_or_overseer(ctx):
             await ctx.send("You don't have permission to use this command.")
             return
@@ -512,14 +516,17 @@ class AutoVisit(commands.Cog):
 
     @commands.command(name="autoknock")
     async def autoknock(self, ctx: commands.Context, *, house: str):
+        """Toggle auto-knock on or off."""
         await self._auto_visit_common(ctx, house.strip(), "normal")
 
     @commands.command(name="automove")
     async def automove(self, ctx: commands.Context, *, house: str):
+        """Toggle auto-move on or off."""
         await self._auto_visit_common(ctx, house.strip(), "forced")
 
     @commands.command(name="autostealth")
     async def autostealth(self, ctx: commands.Context, *, house: str):
+        """Toggle stealth mode for auto-visits (suppress join/leave messages)."""
         await self._auto_visit_common(ctx, house.strip(), "stealth")
 
 

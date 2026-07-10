@@ -691,6 +691,9 @@ async def startcog():
     from cogs.analytics_cog import AnalyticsCog
     await bot.add_cog(AnalyticsCog(bot))
 
+    from cogs.library_admin_cog import GameLibraryAdmin
+    await bot.add_cog(GameLibraryAdmin(bot))
+
 
 asyncio.run(startcog())
 

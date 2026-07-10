@@ -18,10 +18,6 @@ def register_analytics_hooks(bot: commands.Bot, service) -> None:
         logger.info("Analytics disabled — hooks not registered")
         return
 
-    original_on_error = None
-    if hasattr(bot, "on_error") and callable(bot.on_error):
-        original_on_error = bot.on_error
-
     @bot.before_invoke
     async def _analytics_before_invoke(ctx):
         ctx._analytics_start = time.monotonic()
@@ -45,11 +41,10 @@ def register_analytics_hooks(bot: commands.Bot, service) -> None:
         )
         asyncio.create_task(service.record_execution(event))
 
-    original_command_error = bot.dispatch if hasattr(bot, "dispatch") else None
-
     @bot.event
     async def on_command_error(ctx, error):
-        nonlocal original_on_error
+        if isinstance(error, (commands.UserInputError, commands.CommandNotFound)):
+            return
         start = getattr(ctx, "_analytics_start", None)
         duration = time.monotonic() - start if start else 0
         tb = "".join(
@@ -70,7 +65,8 @@ def register_analytics_hooks(bot: commands.Bot, service) -> None:
         )
         asyncio.create_task(service.record_failure(event))
 
-        if original_on_error:
-            await original_on_error(ctx, error)
+        # Note: intentionally NOT calling original_on_error here.
+        # discord.py's dispatch will still invoke main.py's on_command_error
+        # listener separately.
 
     logger.info("Analytics instrumentation hooks registered")

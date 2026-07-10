@@ -130,6 +130,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def addtokens(self, ctx, target: str, quantity: int = 2):
+        """Add tokens to a user's balance (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have permission to use this command.")
         guild_data, alive_role = await self._ensure_guild_config(ctx)
@@ -160,6 +161,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def removetokens(self, ctx, target: str, quantity: int = 2):
+        """Remove tokens from a user's balance (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have permission to use this command.")
         guild_data, alive_role = await self._ensure_guild_config(ctx)
@@ -205,6 +207,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def tokens(self, ctx, channel: discord.TextChannel = None):
+        """Check your current token balance."""
         guild_data, alive_role = await self._ensure_guild_config(ctx)
         if not guild_data:
             return
@@ -245,6 +248,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def intervene(self, ctx, nomination_channel: discord.TextChannel):
+        """Pay 1 token to speak in a nomination channel."""
         guild_data, alive_role = await self._ensure_guild_config(ctx)
         if not guild_data:
             return
@@ -277,6 +281,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def accuse(self, ctx, accused: discord.Member, channel_accuser: discord.TextChannel = None):
+        """Accuse a player (costs 2 tokens, creates a nomination channel)."""
         guild_data, alive_role = await self._ensure_guild_config(ctx)
         if not guild_data:
             return
@@ -354,6 +359,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def voten(self, ctx, nomination_channel: discord.TextChannel, vote: str):
+        """Vote guilty or not guilty in a nomination."""
         vote = vote.lower()
         if vote not in ("yes", "no"):
             return await ctx.send("Invalid vote. Use 'yes' or 'no'.")
@@ -394,6 +400,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def showvotesn(self, ctx, channel: discord.TextChannel = None):
+        """View all votes in a nomination (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have permission to use this command.")
 
@@ -428,6 +435,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def stopvotes(self, ctx, channel: discord.TextChannel = None):
+        """Stop a nomination and lock the channel (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have permission to use this command.")
 
@@ -449,6 +457,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def resumevotes(self, ctx, channel: discord.TextChannel = None):
+        """Resume a stopped nomination (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("You don't have permission to use this command.")
 
@@ -469,6 +478,7 @@ class Nominations(commands.Cog):
 
     @commands.command()
     async def clearvotes(self, ctx, guild_id: int = None):
+        """Clear all nomination votes (admin only)."""
         if not (ctx.author.guild_permissions.administrator or ctx.author.id == 450772749829537793):
             return await ctx.send("You don't have permission to use this command.")
 

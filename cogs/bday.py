@@ -206,6 +206,7 @@ class Birthday(commands.Cog):
     @commands.command(name="nextbirthdays")
     @commands.has_permissions(administrator=True)
     async def nextbirthdays(self, ctx):
+        """Show upcoming birthdays."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("No birthday data found.")
@@ -230,6 +231,7 @@ class Birthday(commands.Cog):
     @commands.command(name="birthdays")
     @commands.has_permissions(administrator=True)
     async def birthdays(self, ctx):
+        """List all registered birthdays."""
         guild_data = load_guild_data(ctx.guild.id)
         birthdays = guild_data.get("birthdays", {})
 
@@ -250,6 +252,7 @@ class Birthday(commands.Cog):
     # ======================================================
     @commands.command(name="helpbday")
     async def helpbday(self, ctx):
+        """Show help information for birthday commands."""
         embed = discord.Embed(
             title="🎂 Birthday Commands",
             color=0xffc0cb,

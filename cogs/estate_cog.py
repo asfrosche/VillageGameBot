@@ -76,6 +76,7 @@ class Estate(commands.Cog):
 
     @commands.command()
     async def estate(self, ctx, type: str = None, channel: discord.TextChannel = None):
+        """Initialize or update the estate map in a channel."""
         if not (ctx.author.guild_permissions.administrator or ctx.author.id == 321117543378976771):
             return await ctx.send("You don't have enough perms to use this command")
             

@@ -11,12 +11,14 @@ class DashboardConfig:
         port: int = 8712,
         password: str = "",
         analytics_db_path: str = "./data/analytics.db",
+        tunnel_enabled: bool = False,
     ):
         self.enabled = enabled
         self.host = host
         self.port = port
         self.password = password
         self.analytics_db_path = analytics_db_path
+        self.tunnel_enabled = tunnel_enabled
 
     @classmethod
     def from_env(cls) -> DashboardConfig:
@@ -26,4 +28,5 @@ class DashboardConfig:
             port=int(os.getenv("ANALYTICS_DASHBOARD_PORT", "8712")),
             password=os.getenv("ANALYTICS_DASHBOARD_PASSWORD", ""),
             analytics_db_path=os.getenv("ANALYTICS_DB_PATH", "./data/analytics.db"),
+            tunnel_enabled=os.getenv("ANALYTICS_DASHBOARD_TUNNEL", "false").lower() == "true",
         )

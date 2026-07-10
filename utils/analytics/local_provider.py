@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import traceback as tb_module
 
 from .db import AnalyticsDB
 from .models import CommandEvent, ErrorRecord

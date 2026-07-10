@@ -73,7 +73,8 @@ class TestNomination:
             id=5, nominator_id=1, nominee_id=2,
             accusation="He did it",
             defense="Not me",
-            votes={1: True, 2: False},
+            votes={1: "guilty", 2: "notguilty"},
+            conditions={1: ""},
             current_clock_index=3,
             closed=True,
             expires_at=100.0,
@@ -81,7 +82,8 @@ class TestNomination:
         assert n.id == 5
         assert n.accusation == "He did it"
         assert n.defense == "Not me"
-        assert n.votes[1] is True
+        assert n.votes[1] == "guilty"
+        assert n.conditions == {1: ""}
         assert n.finalized == set()
         assert n.current_clock_index == 3
         assert n.closed

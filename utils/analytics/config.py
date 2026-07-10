@@ -15,6 +15,7 @@ class AnalyticsConfig:
         dashboard_port: int = 8712,
         dashboard_url: str = "",
         dashboard_password: str = "",
+        dashboard_tunnel_enabled: bool = False,
         bot_version: str = "",
         git_commit: str = "",
     ):
@@ -27,6 +28,7 @@ class AnalyticsConfig:
         self.dashboard_port = dashboard_port
         self.dashboard_url = dashboard_url
         self.dashboard_password = dashboard_password
+        self.dashboard_tunnel_enabled = dashboard_tunnel_enabled
         self.bot_version = bot_version
         self.git_commit = git_commit
 
@@ -50,6 +52,7 @@ class AnalyticsConfig:
             dashboard_port=int(os.getenv("ANALYTICS_DASHBOARD_PORT", "8712")),
             dashboard_url=os.getenv("ANALYTICS_DASHBOARD_URL", ""),
             dashboard_password=os.getenv("ANALYTICS_DASHBOARD_PASSWORD", ""),
+            dashboard_tunnel_enabled=os.getenv("ANALYTICS_DASHBOARD_TUNNEL", "false").lower() == "true",
             bot_version=os.getenv("BOT_VERSION", ""),
             git_commit=git_commit,
         )

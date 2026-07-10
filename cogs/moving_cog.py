@@ -18,6 +18,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def add(self, ctx, channel_str: str, *args):
+        """Add a player to a house while keeping their current location."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -38,6 +39,7 @@ class Moving(commands.Cog):
 
     @commands.command(aliases=['renadd'])
     async def pcadd(self, ctx, new_channel: discord.TextChannel, *args):
+        """Add a player to a PC or renamed house."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -55,6 +57,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def addhere(self, ctx, *rolechats: discord.TextChannel):
+        """Add the player from each mentioned RC to this channel."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command.")
             return
@@ -117,6 +120,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def remove(self, ctx, channel_str: str, stealth: str = None):
+        """Remove a player from the current house."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -139,6 +143,7 @@ class Moving(commands.Cog):
 
     @commands.command(aliases=['renremove'])
     async def pcremove(self, ctx, new_channel: discord.TextChannel, stealth: str = None):
+        """Remove a player from a PC or renamed house."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -197,6 +202,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def move(self, ctx, channel_str: str, *args):
+        """Move a player to a house, leaving their current location."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -216,6 +222,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def renmove(self, ctx, new_channel: discord.TextChannel, *args):
+        """Move a player to a renamed house by name."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -295,6 +302,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def knock(self, ctx, channel_str: str):
+        """Knock on a house door to request entry."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -312,6 +320,7 @@ class Moving(commands.Cog):
 
     @commands.command()
     async def renknock(self, ctx, new_channel: discord.TextChannel):
+        """Knock on a renamed house by name."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -326,6 +335,7 @@ class Moving(commands.Cog):
 
     @commands.command(aliases=["pendingknocks", "showknocks", "knocks"])
     async def pendingknock(self, ctx):
+        """Check if any knocks are pending and show the oldest pending knock age."""
         pending, scanned = await self._get_pending_knocks(ctx)
 
         if not pending:

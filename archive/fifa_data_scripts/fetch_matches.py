@@ -55,8 +55,14 @@ def store_matches(matches):
             "date": date,
             "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
             "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
-            "home": {"name": home, "score": hs, "id": home_data.get("IdTeam")},
-            "away": {"name": away, "score": as_, "id": away_data.get("IdTeam")},
+            "home": {
+                "name": home, "score": hs, "id": home_data.get("IdTeam"),
+                "players": home_data.get("Players", []),
+            },
+            "away": {
+                "name": away, "score": as_, "id": away_data.get("IdTeam"),
+                "players": away_data.get("Players", []),
+            },
             "winner": m.get("Winner"),
             "status": status,
         }

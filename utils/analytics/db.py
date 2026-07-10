@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("analytics.db")
 
 from .models import (
     CommandEvent,
@@ -292,9 +295,15 @@ class AnalyticsDB:
         conn = self._get_conn()
         allowed_sort = {
             "total_execs", "cog_name", "command_name", "unique_users",
-            "last_used", "total_duration", "total_failures"
+            "last_used", "total_duration", "total_failures", "failure_rate",
+            "avg_time_ms"
         }
-        sort_col = sort if sort in allowed_sort else "total_execs"
+        if sort == "failure_rate":
+            sort_col = "CAST(total_failures AS REAL) / CAST(CASE WHEN total_execs = 0 THEN 1 ELSE total_execs END AS REAL)"
+        elif sort == "avg_time_ms":
+            sort_col = "CAST(total_duration AS REAL) / CAST(CASE WHEN total_execs = 0 THEN 1 ELSE total_execs END AS REAL)"
+        else:
+            sort_col = sort if sort in allowed_sort else "total_execs"
         direction = "DESC" if order == "desc" else "ASC"
 
         where = ""
@@ -321,11 +330,13 @@ class AnalyticsDB:
             p95 = recent_sorted[int(len(recent_sorted) * 0.95)] if recent_sorted else 0
             p99 = recent_sorted[int(len(recent_sorted) * 0.99)] if recent_sorted else 0
             avg = (row["total_duration"] / row["total_execs"]) if row["total_execs"] > 0 else 0
+            fail_pct = round((row["total_failures"] / row["total_execs"] * 100) if row["total_execs"] > 0 else 0, 2)
             items.append({
                 "command_name": row["command_name"],
                 "cog_name": row["cog_name"],
                 "total_execs": row["total_execs"],
                 "total_failures": row["total_failures"],
+                "failure_rate": fail_pct,
                 "unique_users": row["unique_users"],
                 "first_used": row["first_used"],
                 "last_used": row["last_used"],
@@ -556,3 +567,76 @@ class AnalyticsDB:
             "by_type": [{"type": r["exception_type"], "count": r["count"]} for r in by_type],
             "by_command": [{"command": r["command_name"], "count": r["count"]} for r in by_command],
         }
+
+    def get_detailed_error_summary(self) -> list[dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT command_name, exception_type, COUNT(*) as count FROM error_log GROUP BY command_name, exception_type ORDER BY count DESC LIMIT 25"
+        ).fetchall()
+        return [{"command": r["command_name"], "type": r["exception_type"], "count": r["count"]} for r in rows]
+
+    def get_most_failing_commands(self, limit: int = 10) -> list[dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            """SELECT command_name, cog_name, total_execs, total_failures,
+                      CAST(total_failures AS REAL) / CAST(CASE WHEN total_execs = 0 THEN 1 ELSE total_execs END AS REAL) * 100 as fail_pct
+               FROM command_stats
+               WHERE total_execs > 0 AND total_failures > 0
+               ORDER BY fail_pct DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "command_name": r["command_name"],
+                "cog_name": r["cog_name"],
+                "total_execs": r["total_execs"],
+                "total_failures": r["total_failures"],
+                "failure_rate": round(r["fail_pct"], 2),
+            }
+            for r in rows
+        ]
+
+    def get_recent_error_count(self, minutes: int = 60) -> int:
+        conn = self._get_conn()
+        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+        row = conn.execute(
+            "SELECT COUNT(*) as v FROM error_log WHERE timestamp >= ?", (since,)
+        ).fetchone()
+        return row["v"] or 0
+
+    def clear_errors(self) -> None:
+        conn = self._get_conn()
+
+        # Backup current errors before clearing
+        rows = conn.execute("SELECT * FROM error_log ORDER BY id").fetchall()
+        if rows:
+            ts = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+            backup_dir = Path(__file__).parent
+            backup_path = backup_dir / f"error_backup_{ts}.txt"
+            with open(backup_path, "w", encoding="utf-8") as f:
+                f.write(f"=== Error Backup - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+                f.write(f"Total errors: {len(rows)}\n\n")
+                for r in rows:
+                    f.write(f"--- Error #{r['id']} ---\n")
+                    f.write(f"  Timestamp:      {r['timestamp'] or '?'}\n")
+                    f.write(f"  Command:        {r['command_name'] or '?'}\n")
+                    f.write(f"  Cog:            {r['cog_name'] or '?'}\n")
+                    f.write(f"  Exception:      {r['exception_type'] or '?'}\n")
+                    f.write(f"  User ID:        {r['user_id'] or '?'}\n")
+                    f.write(f"  Guild ID:       {r['guild_id'] or '?'}\n")
+                    tb = r['traceback'] or ''
+                    if tb.strip():
+                        f.write(f"  Traceback:\n{tb}\n")
+                    f.write("\n")
+
+            # Keep the 50 most recent backups
+            backups = sorted(backup_dir.glob("error_backup_*.txt"))
+            for old in backups[:-50]:
+                old.unlink()
+
+        conn.execute("DELETE FROM error_log")
+        conn.execute("UPDATE command_stats SET total_failures = 0")
+        conn.execute("UPDATE daily_usage SET failures = 0")
+        conn.execute("UPDATE weekly_usage SET failures = 0")
+        conn.commit()

@@ -13,6 +13,7 @@ class Setup(commands.Cog):
     # Auto setup
     @commands.command()
     async def setup(self, ctx, num_channels: int):
+        """Set up roles, channels and categories for the server (admin only)."""
         if ctx.author.guild_permissions.administrator:
             confirm_view = View(timeout=30)
             confirmed = {"value": False}
@@ -196,6 +197,7 @@ class Setup(commands.Cog):
     # Setup roles
     @commands.command()
     async def roleset(self, ctx, role: str = None, *, new_role: str = None):
+        """Assign a role configuration key to a role."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -233,6 +235,7 @@ class Setup(commands.Cog):
     # Setup channels
     @commands.command()
     async def channelset(self, ctx, channel: str, new_channel: discord.TextChannel = None):
+        """Assign a channel configuration key to a channel."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -281,6 +284,7 @@ class Setup(commands.Cog):
     # Setup categories
     @commands.command()
     async def categoryset(self, ctx, category: str, *, new_category_name: str = None):
+        """Assign a category configuration key to a category."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -329,6 +333,7 @@ class Setup(commands.Cog):
     # Change house prefix
     @commands.command()
     async def houseprefix(self, ctx, *, prefix: str):
+        """Set the prefix used for house channel names."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -343,6 +348,7 @@ class Setup(commands.Cog):
     # Set knock duration
     @commands.command()
     async def knockduration(self, ctx, new_timeout: int):
+        """Set the timeout duration for knocks in seconds."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -356,6 +362,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def showwhispersender(self, ctx, value: str):
+        """Toggle whether the whisper sender is shown or hidden."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -369,6 +376,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def ajifempty(self, ctx, value: str):
+        """Toggle auto-join when a house is empty."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -382,6 +390,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def ajknockexpire(self, ctx, value: str):
+        """Toggle auto-join when a knock expires."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -395,6 +404,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def maxpinh(self, ctx, value: int):
+        """Set the maximum number of players allowed per house."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -405,6 +415,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def refuseresponse(self, ctx, value: int):
+        """Set the knock refuse behavior (1=see occupants, 2=anonymous, 3=hidden)."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
@@ -418,6 +429,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def deadcount(self, ctx, value: bool):
+        """Toggle whether dead players count for auto-join and max players."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
             return
@@ -431,6 +443,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def altcount(self, ctx, value: bool):
+        """Toggle whether alt players count for auto-join and max players."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
             return
@@ -444,6 +457,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def showdeadsonrefuse(self, ctx, value: bool):
+        """Toggle showing dead players on knock refuse."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
             return
@@ -457,6 +471,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def showaltsonrefuse(self, ctx, value: bool):
+        """Toggle showing alt players on knock refuse."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
             return
@@ -470,6 +485,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def candeadsinteract(self, ctx, value: bool):
+        """Toggle whether dead players can open or refuse knocks."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
             return
@@ -483,6 +499,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def canaltsinteract(self, ctx, value: bool):
+        """Toggle whether alt players can open or refuse knocks."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
             return
@@ -496,6 +513,7 @@ class Setup(commands.Cog):
 
     @commands.command()
     async def settings(self, ctx):
+        """View all current server configuration settings."""
         guild_data = load_guild_data(ctx.guild.id)
         
         embed = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
@@ -521,6 +539,7 @@ class Setup(commands.Cog):
     # Reset
     @commands.command()
     async def resetdb(self, ctx):
+        """Reset all server setup configuration back to defaults."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:

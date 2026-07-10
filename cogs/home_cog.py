@@ -13,6 +13,7 @@ class Home(commands.Cog):
 
     @commands.command()
     async def home(self, ctx, type: str = None, user: discord.Member = None, new_channel: discord.TextChannel = None):
+        """Bring a player home or manage home assignments (admin)."""
         if ctx.author.guild_permissions.administrator:
             if type is None:
                 await self.home_single(ctx)
@@ -413,6 +414,7 @@ class Home(commands.Cog):
 
     @commands.command()
     async def rolechat(self, ctx, type: str = None):
+        """Manage RoleChat assignments (admin)."""
         if ctx.author.guild_permissions.administrator:
             if type.lower() == 'initialize':
                 await self.rc_initialize(ctx)
@@ -468,6 +470,7 @@ class Home(commands.Cog):
 
     @commands.command()
     async def owner(self, ctx, house: discord.TextChannel = None):
+        """List all house owners."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded.")

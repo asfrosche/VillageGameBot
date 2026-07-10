@@ -962,6 +962,7 @@ class VgIntro(commands.Cog):
 
     @commands.command(name="vgintro", aliases=["vgi"])
     async def vgintro(self, ctx, page: str = None):
+        """Show the Village Games introduction (English)."""
         if page is not None and page.lower() == "list":
             view = MechanicsIndexView(ctx.author.id, MechanicsView(ctx.author.id))
             embed = get_index_embed()
@@ -985,6 +986,7 @@ class VgIntro(commands.Cog):
 
     @commands.command(name="vgintro_it", aliases=["vgii"])
     async def vgintro_it(self, ctx, page: str = None):
+        """Show the Village Games introduction (Italian)."""
         if page is not None and page.lower() == "list":
             it_view = MechanicsView(ctx.author.id, pages=MECHANIC_PAGES_IT,
                                     index_title="Indice Meccaniche",

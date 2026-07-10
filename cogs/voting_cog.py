@@ -12,6 +12,7 @@ class Voting(commands.Cog):
 
     @commands.command()
     async def vote(self, ctx, user: discord.Member, channel: discord.TextChannel = None):
+        """Cast or change your vote for a player."""
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
             alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
@@ -85,6 +86,7 @@ class Voting(commands.Cog):
     # Command to abstain
     @commands.command()
     async def abstain(self, ctx, channel: discord.TextChannel = None):
+        """Abstain from voting."""
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
             alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
@@ -150,6 +152,7 @@ class Voting(commands.Cog):
     # Command to manipulate a vote
     @commands.command()
     async def manipulate(self, ctx, old_user: discord.Member, new_user: discord.Member, channel: discord.TextChannel = None):
+        """Force another player's vote (requires manipulate power)."""
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data and ctx.author.guild_permissions.administrator:
             if channel is None:
@@ -195,6 +198,7 @@ class Voting(commands.Cog):
     # Command to remove a vote
     @commands.command()
     async def removevote(self, ctx, user: discord.Member, channel: discord.TextChannel = None):
+        """Remove a player's vote (admin only)."""
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data and ctx.author.guild_permissions.administrator:
             if channel is None:
@@ -231,6 +235,7 @@ class Voting(commands.Cog):
     
     @commands.command()
     async def voteinrc(self, ctx, value: bool):
+        """Toggle whether voting is allowed in RoleChat channels."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -245,6 +250,7 @@ class Voting(commands.Cog):
     # Command to see votes
     @commands.command(aliases=['v'])
     async def votelist(self, ctx, type: str = None):
+        """Show all current votes."""
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
             if guild_data["voteinrc"] is True:
@@ -291,6 +297,7 @@ class Voting(commands.Cog):
     # Command to reset votes
     @commands.command()
     async def resetvotes(self, ctx):
+        """Clear all votes."""
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -307,6 +314,7 @@ class Voting(commands.Cog):
 
     @commands.command(aliases=["vh"])
     async def votehistory(self, ctx, mode: str = None):
+        """Scan and display vote history with optional mode (grouped/range)."""
         if not ctx.message.reference:
             await ctx.send("Reply to a Day Start message to scan vote history from that point.")
             return

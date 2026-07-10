@@ -9,6 +9,7 @@ class SendRole(commands.Cog):
 
     @commands.command()
     async def settarget(self, ctx, channel_id: int):
+        """Set the target channel ID for sending roles (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command.")
             return
@@ -17,6 +18,7 @@ class SendRole(commands.Cog):
 
     @commands.command(aliases=["sr"])
     async def sendrole(self, ctx, *, player: str = None):
+        """Reply to a message to send its content to the target channel (admin only)."""
         if not ctx.message.reference or not isinstance(ctx.message.reference.resolved, discord.Message):
             await ctx.send("You must reply to the message you want to send.")
             return
