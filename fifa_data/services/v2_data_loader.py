@@ -113,11 +113,78 @@ def load_worldcup_data(worldcup_file: str | os.PathLike[str] | None = None) -> t
     return namespace.get("TEAM_METRICS", {}), namespace.get("GROUPS", {}), raw_rosters
 
 
+_KNOWN_LINEUPS: dict[str, Any] | None = None
+
+
+def _load_known_lineups() -> dict[str, Any]:
+    global _KNOWN_LINEUPS
+    if _KNOWN_LINEUPS is not None:
+        return _KNOWN_LINEUPS
+    path = HERE / "data" / "known_lineups.json"
+    if path.exists():
+        try:
+            _KNOWN_LINEUPS = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            _KNOWN_LINEUPS = {}
+    else:
+        _KNOWN_LINEUPS = {}
+    return _KNOWN_LINEUPS
+
+
+def _lineup_from_known(team: str) -> tuple[list[str], str | None]:
+    known = _load_known_lineups()
+    if not known:
+        return [], None
+
+    key = TEAM_TO_SQUAD_NAME.get(team, team)
+    team_data = known.get(key)
+    if not team_data:
+        return [], None
+
+    rounds_data = team_data.get("rounds", {})
+    if not rounds_data:
+        return [], None
+
+    latest = max(rounds_data.keys(), key=lambda r: int(r) if r.isdigit() else 0)
+    rd = rounds_data[latest]
+    names = [p["name"] for p in rd.get("starting_xi", [])]
+    formation = rd.get("formation_hint")
+    return names, formation
+
+
 def load_v2_squads(
     data_dir: str | os.PathLike[str] | None = None,
     matches_file: str | os.PathLike[str] | None = None,
     team_names: list[str] | None = None,
+    lineup_overrides: dict[str, LineupResult] | None = None,
 ) -> dict[str, Squad]:
+
+    from .lineup_service import LineupResult
+
+    def _apply_lineup_override(squad: Squad, override: LineupResult) -> Squad:
+        if not override.starting_xi:
+            return squad
+        name_to_player = {p.name: p for p in squad.players}
+        new_xi: list[Player] = []
+        for p in override.starting_xi:
+            match = name_to_player.get(p.name)
+            if match:
+                new_xi.append(match)
+            else:
+                new_xi.append(p)
+        if not new_xi:
+            return squad
+        formation = override.formation or squad.formation
+        new_xi = _dedupe_players(new_xi)[:11]
+        if len(new_xi) < 11:
+            extra = [p for p in squad.players if p not in new_xi]
+            new_xi.extend(extra[:11 - len(new_xi)])
+        return Squad(
+            country=squad.country,
+            players=squad.players,
+            formation=formation,
+            preferred_starting_xi=new_xi,
+        )
     base_dir = Path(data_dir) if data_dir else HERE
     matches_path = Path(matches_file) if matches_file else base_dir / "data" / "matches.json"
     players_raw = _load_json(base_dir / "data" / "players.json")
@@ -142,6 +209,8 @@ def load_v2_squads(
         players = [_apply_fc26_ratings(player) for player in players]
         lineup_names, formation = _lineup_from_completed_matches(team, matches_data)
         if not lineup_names:
+            lineup_names, formation = _lineup_from_known(team)
+        if not lineup_names:
             lineup_names, formation = _preferred_lineup_from_raw(team, raw_records, players)
         preferred_xi = _players_from_names(lineup_names, players)
         if len(preferred_xi) < 11:
@@ -149,12 +218,15 @@ def load_v2_squads(
         preferred_xi = _dedupe_players(preferred_xi)[:11]
         if not formation:
             formation = infer_formation(preferred_xi) if len(preferred_xi) == 11 else "4-3-3"
-        squads[team] = Squad(
+        squad = Squad(
             country=team,
             players=players,
             formation=formation,
             preferred_starting_xi=preferred_xi,
         )
+        if lineup_overrides and team in lineup_overrides:
+            squad = _apply_lineup_override(squad, lineup_overrides[team])
+        squads[team] = squad
     return squads
 
 
@@ -430,8 +502,30 @@ def _extract_lineup(side_data: dict[str, Any]) -> tuple[list[str], str | None]:
             for item in value:
                 if isinstance(item, dict):
                     name = item.get("name") or item.get("playerName") or item.get("displayName")
-                    if item.get("starter", True) or item.get("isStarter", True):
-                        parsed.append(str(name))
+                    if not name and "PlayerName" in item:
+                        pn = item["PlayerName"]
+                        if isinstance(pn, list) and pn:
+                            pn0 = pn[0]
+                            if isinstance(pn0, dict):
+                                name = pn0.get("Description")
+                            else:
+                                name = str(pn0)
+                        elif isinstance(pn, str):
+                            name = pn
+                    if not name:
+                        continue
+                    status = item.get("Status") or item.get("status")
+                    if status is not None:
+                        if isinstance(status, (int, float)):
+                            is_starter = status == 1
+                        else:
+                            is_starter = str(status).lower() in ("starter", "starting", "1")
+                        if not is_starter:
+                            continue
+                    elif "starter" in item or "isStarter" in item:
+                        if not item.get("starter", False) and not item.get("isStarter", False):
+                            continue
+                    parsed.append(str(name))
                 elif item:
                     parsed.append(str(item))
             if parsed:
