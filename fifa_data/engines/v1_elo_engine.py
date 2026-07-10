@@ -11,6 +11,7 @@ class V1EloMatchEngine(MatchEngine):
     def __init__(
         self,
         team_metrics: dict[str, dict[str, float]],
+        tournament_form: dict[str, float] | None = None,
         base_goals: float = 1.1,
         upset_factor_min: float = 0.4,
         upset_factor_max: float = 1.6,
@@ -21,6 +22,7 @@ class V1EloMatchEngine(MatchEngine):
         tiebreaker_delta_scale: float = 0.0005,
     ) -> None:
         self.team_metrics = team_metrics
+        self._tournament_form = tournament_form or {}
         self.base_goals = base_goals
         self.upset_factor_min = upset_factor_min
         self.upset_factor_max = upset_factor_max
@@ -34,7 +36,8 @@ class V1EloMatchEngine(MatchEngine):
         if team not in self.team_metrics:
             raise KeyError(f"Unknown team: {team}")
         metrics = self.team_metrics[team]
-        return (float(metrics.get("ELO", 1500)) + float(metrics.get("PELE", 1500))) / 2.0
+        base = (float(metrics.get("ELO", 1500)) + float(metrics.get("PELE", 1500))) / 2.0
+        return base + self._tournament_form.get(team, 0.0)
 
     def get_team_ratings(self, team: str) -> dict[str, float]:
         if team not in self.team_metrics:

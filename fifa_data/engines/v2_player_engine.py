@@ -24,6 +24,7 @@ class V2PlayerMatchEngine(MatchEngine):
         data_dir: str | Path | None = None,
         squads: dict[str, Squad] | None = None,
         formulas: dict[str, dict[str, float]] | None = None,
+        tournament_form: dict[str, float] | None = None,
         base_goals: float = 1.10,
         attack_weight_defense: float = 0.70,
         attack_weight_goalkeeper: float = 0.30,
@@ -36,6 +37,7 @@ class V2PlayerMatchEngine(MatchEngine):
         self.data_dir = Path(data_dir) if data_dir else None
         self.squads = squads if squads is not None else load_v2_squads(self.data_dir)
         self.formulas = formulas or DEFAULT_POSITION_FORMULAS
+        self._tournament_form = tournament_form or {}
         self.base_goals = base_goals
         self.attack_weight_defense = attack_weight_defense
         self.attack_weight_goalkeeper = attack_weight_goalkeeper
@@ -146,7 +148,10 @@ class V2PlayerMatchEngine(MatchEngine):
         )
         curve_value = attack_ratio ** 2.5
         curve_value = max(0.30, min(3.0, curve_value))
-        return self.base_goals * curve_value * midfield_modifier
+        xg = self.base_goals * curve_value * midfield_modifier
+        team = attacking.team
+        form_mult = 1.0 + self._tournament_form.get(team, 0.0) / 1500.0
+        return xg * form_mult
 
     def _format_starting_xi(self, strength: TeamStrength) -> list[str]:
         squad = self.squads[strength.team]

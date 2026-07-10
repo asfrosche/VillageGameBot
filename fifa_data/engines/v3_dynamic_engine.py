@@ -46,11 +46,13 @@ class V3DynamicEngine(MatchEngine):
         data_dir: str | Path | None = None,
         squads: dict[str, Squad] | None = None,
         team_metrics: dict[str, dict[str, float]] | None = None,
+        tournament_form: dict[str, float] | None = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir else None
         resolved = self.data_dir or HERE
         self.squads = squads if squads is not None else load_v2_squads(resolved)
         self.team_metrics = team_metrics or {}
+        self._tournament_form = tournament_form or {}
 
         cfg = _load_config()
         self.base_goals = cfg.get("base_goals", 1.10)
@@ -181,6 +183,12 @@ class V3DynamicEngine(MatchEngine):
             elo_mod = max(0.50, min(elo_mod, 3.0))
         else:
             elo_mod = 1.0
+
+        # Tournament form additive to elo (form already includes ELO/PELE base)
+        form_bonus = self._tournament_form.get(team, 0.0)
+        form_mod = 1.0 + form_bonus / 1500.0
+        elo_mod *= form_mod
+        elo_mod = max(0.50, min(elo_mod, 3.0))
 
         combined_mult = (1.0 + nat_mod) * dyn_mult * elo_mod
 

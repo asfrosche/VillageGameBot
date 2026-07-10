@@ -8,6 +8,7 @@ from ..engines.v4_tactical_engine import V4TacticalEngine
 from ..engines.v5_match_state_engine import V5MatchStateEngine
 from ._match_config import MATCHES_TEAM_MAP, update_elo_from_matches
 from .orchestrator import TournamentOrchestrator
+from .tournament_form_service import TournamentFormService
 
 HERE = Path(__file__).resolve().parents[1]
 
@@ -37,8 +38,8 @@ def reset_metrics():
     _load_worldcup_data()
 
 
-def _v1_engine():
-    return V1EloMatchEngine(TEAM_METRICS)
+def _v1_engine(tournament_form: dict[str, float] | None = None):
+    return V1EloMatchEngine(TEAM_METRICS, tournament_form=tournament_form or {})
 
 
 def sim_match(t1, t2, can_draw=True):
@@ -55,16 +56,20 @@ def run_simulation(model="v1", debug=False):
     normalized_model = (model or "v1").lower()
     # Update ELO/PELE from real match results for all models
     update_elo_from_matches(TEAM_METRICS)
+    # Compute Tournament Form once
+    tfs = TournamentFormService(TEAM_METRICS)
+    tfs.compute()
+    tournament_form = tfs.get_all_forms()
     if normalized_model == "v1":
-        engine = _v1_engine()
+        engine = _v1_engine(tournament_form)
     elif normalized_model == "v2":
-        engine = V2PlayerMatchEngine(data_dir=HERE)
+        engine = V2PlayerMatchEngine(data_dir=HERE, tournament_form=tournament_form)
     elif normalized_model == "v3":
-        engine = V3DynamicEngine(data_dir=HERE, team_metrics=TEAM_METRICS)
+        engine = V3DynamicEngine(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
     elif normalized_model == "v4":
-        engine = V4TacticalEngine(data_dir=HERE, team_metrics=TEAM_METRICS)
+        engine = V4TacticalEngine(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
     elif normalized_model == "v5":
-        engine = V5MatchStateEngine(data_dir=HERE, team_metrics=TEAM_METRICS)
+        engine = V5MatchStateEngine(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
     else:
         raise ValueError(f"Unknown simulation model: {model}")
 
@@ -94,6 +99,11 @@ def run_monte_carlo(model="v5", n=100, verbose=True):
 
     update_elo_from_matches(TEAM_METRICS)
 
+    # Compute Tournament Form once before the Monte Carlo loop
+    tfs = TournamentFormService(TEAM_METRICS)
+    tfs.compute()
+    tournament_form = tfs.get_all_forms()
+
     champion = defaultdict(int)
     final_four = defaultdict(int)
     quarter = defaultdict(int)
@@ -104,11 +114,11 @@ def run_monte_carlo(model="v5", n=100, verbose=True):
     for i in range(n):
         if model in ("v3", "v4", "v5"):
             engine_cls = {"v3": V3DynamicEngine, "v4": V4TacticalEngine, "v5": V5MatchStateEngine}[model]
-            engine = engine_cls(data_dir=HERE, team_metrics=TEAM_METRICS)
+            engine = engine_cls(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
         elif model == "v2":
-            engine = V2PlayerMatchEngine(data_dir=HERE)
+            engine = V2PlayerMatchEngine(data_dir=HERE, tournament_form=tournament_form)
         else:
-            engine = _v1_engine()
+            engine = _v1_engine(tournament_form)
 
         orch = TournamentOrchestrator(
             groups=GROUPS,
