@@ -1927,29 +1927,29 @@ class DraftCog(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command()
-    async def topplayers(self, ctx, limit: int = 10):
-        """Show top N drafted players by fantasy points."""
+    async def topplayers(self, ctx, country: str = None):
+        """Show top drafted players by fantasy points with position & country filters."""
         draft = self._get_draft(ctx.guild.id)
         if draft is None or not draft.get("started"):
             return await ctx.send("No active draft.")
 
-        if limit < 1 or limit > 25:
-            limit = 10
-
         await ctx.send("⏳ Fetching fantasy points...")
         await self.fantasy.fetch_data()
-        top = self.fantasy.get_top_drafted_players(draft, limit)
 
-        embed = discord.Embed(
-            title=f"🏆 Top {limit} Drafted Players",
-            color=0xff3fb9,
-        )
-        lines = []
-        for rank, r in enumerate(top, 1):
-            pts_str = f"{r['net_points']}pts" if r['match'] else "N/A"
-            lines.append(f"`#{rank}` **{r['name']}** — {pts_str} ({r['position']})")
-        embed.description = "\n".join(lines) if lines else "No players found."
-        await ctx.send(embed=embed)
+        view = _TopPlayersView(self.fantasy, draft, ctx.guild)
+        if country:
+            country_raw = country.strip()
+            known = sorted(set(
+                p.get("country", "") for p in self.fantasy._players or []
+                if p.get("squadId") and (self.fantasy.get_player_squad(p.get("squadId")) or {}).get("name")
+            ), key=len, reverse=True)
+            matched = next((c for c in known if country_raw.lower() in c.lower()), None)
+            if matched:
+                view.country = matched
+                view._refresh_data()
+        embed = view._build_embed()
+        msg = await ctx.send(embed=embed, view=view)
+        view._message = msg
 
     @commands.command()
     async def teamvalue(self, ctx, *, user: discord.User = None):
@@ -2811,14 +2811,14 @@ class DraftCog(commands.Cog):
         """Run tournament simulation: `.simulate [v1|v2|v3|v4|v5] [fast|animated|detailed] [debug]` or `.fsim ...`."""
         if args and args.strip().lower() in ("help", "?"):
             return await self.simulate_help(ctx)
-        if not ctx.author.guild_permissions.administrator:
-            return await ctx.send("Admin only.")
 
         tokens = args.split() if args and args.strip() else []
         if tokens and tokens[0].lower() == "detailed":
             return await self._simulate_detailed(ctx, tokens[1:])
         if tokens and tokens[0].lower() in ("how", "explain"):
             return await self.fsim_how(ctx)
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Admin only.")
 
         model, presentation, debug = self._parse_simulation_args(args)
         if model is None:
@@ -2863,8 +2863,14 @@ class DraftCog(commands.Cog):
                     "date": m.get("Date", "?"),
                     "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
                     "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
-                    "home": {"name": home, "score": hs, "id": home_data.get("IdTeam")},
-                    "away": {"name": away, "score": aas, "id": away_data.get("IdTeam")},
+                    "home": {
+                        "name": home, "score": hs, "id": home_data.get("IdTeam"),
+                        "players": home_data.get("Players", []),
+                    },
+                    "away": {
+                        "name": away, "score": aas, "id": away_data.get("IdTeam"),
+                        "players": away_data.get("Players", []),
+                    },
                     "winner": m.get("Winner"),
                     "status": status,
                 }
@@ -2966,8 +2972,14 @@ class DraftCog(commands.Cog):
                     "id": m.get("IdMatch"), "date": m.get("Date", "?"),
                     "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
                     "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
-                    "home": {"name": home, "score": m.get("HomeTeamScore"), "id": home_data.get("IdTeam")},
-                    "away": {"name": away, "score": m.get("AwayTeamScore"), "id": away_data.get("IdTeam")},
+                    "home": {
+                        "name": home, "score": m.get("HomeTeamScore"), "id": home_data.get("IdTeam"),
+                        "players": home_data.get("Players", []),
+                    },
+                    "away": {
+                        "name": away, "score": m.get("AwayTeamScore"), "id": away_data.get("IdTeam"),
+                        "players": away_data.get("Players", []),
+                    },
                     "winner": m.get("Winner"), "status": status,
                 }
                 (completed if status == 0 else upcoming).append(entry)
@@ -3843,9 +3855,15 @@ class DraftCog(commands.Cog):
         fifa_dir = os.path.dirname(os.path.dirname(__file__))
         report = SimulationReport(version=version, team_a=team_a, team_b=team_b, knockout=knockout, simulations=simulations)
 
+        # Compute Tournament Form once
+        from fifa_data.services.tournament_form_service import TournamentFormService
+        tfs = TournamentFormService(TEAM_METRICS)
+        tfs.compute()
+        tournament_form = tfs.get_all_forms()
+
         # === Pre-match analysis: capture engine state before any simulations ===
         if version == "v1":
-            engine = V1EloMatchEngine(TEAM_METRICS)
+            engine = V1EloMatchEngine(TEAM_METRICS, tournament_form=tournament_form)
             r_a = engine.get_team_ratings(team_a)
             r_b = engine.get_team_ratings(team_b)
             raw_delta = r_a["combined"] - r_b["combined"]
@@ -3858,7 +3876,7 @@ class DraftCog(commands.Cog):
             )
 
         elif version == "v2":
-            engine = V2PlayerMatchEngine(data_dir=fifa_dir)
+            engine = V2PlayerMatchEngine(data_dir=fifa_dir, tournament_form=tournament_form)
             sa = engine.get_team_strength(team_a)
             sb = engine.get_team_strength(team_b)
             report.v2 = V2ReportData(
@@ -3874,7 +3892,7 @@ class DraftCog(commands.Cog):
             )
 
         elif version == "v3":
-            engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+            engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
             sa = engine.get_team_strength(team_a, is_knockout=knockout)
             sb = engine.get_team_strength(team_b, is_knockout=knockout)
             da = engine.get_dynamic_state(team_a, is_knockout=knockout)
@@ -3913,7 +3931,7 @@ class DraftCog(commands.Cog):
             )
 
         elif version == "v4":
-            engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+            engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
             v3 = engine._v3
             sa = v3.get_team_strength(team_a, is_knockout=knockout)
             sb = v3.get_team_strength(team_b, is_knockout=knockout)
@@ -3973,7 +3991,7 @@ class DraftCog(commands.Cog):
             )
 
         else:  # v5
-            engine = V5MatchStateEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+            engine = V5MatchStateEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
             v4 = engine._v4
             v3 = v4._v3
             sa = v3.get_team_strength(team_a, is_knockout=knockout)
@@ -4303,6 +4321,478 @@ class DraftCog(commands.Cog):
 
         return model, presentation, debug
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # .xsim — Cross-version simulation (all 5 engines)
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    @commands.command()
+    async def xsim(self, ctx, *, args: str = None):
+        """Cross-version simulation: all 5 engines side-by-side.
+
+        Usage:
+          .xsim                          — Full tournament, all 5 engines
+          .xsim TeamA TeamB              — Head-to-head, all 5 engines
+          .xsim TeamA TeamB ko           — Knockout mode (no draws)
+          .xsim TeamA TeamB ko 1000      — Custom simulations (default 100)
+        """
+        if args and args.strip().lower() in ("help", "?", "xhelp"):
+            return await self._xsim_help(ctx)
+
+        tokens = args.split() if args and args.strip() else []
+
+        if len(tokens) >= 2:
+            MATCHES_TEAM_MAP = {
+                "USA": "United States", "Cabo Verde": "Cape Verde",
+                "Bosnia and Herzegovina": "Bosnia-Herzegovina",
+                "South Korea": "Korea Republic", "Czech Republic": "Czechia",
+                "Turkey": "Türkiye", "Iran": "IR Iran",
+            }
+            all_teams = set()
+            for group_teams in GROUPS.values():
+                all_teams.update(group_teams)
+
+            def normalize_team(name):
+                return name.strip().lower().replace("-", " ")
+
+            def resolve_team(raw):
+                raw_mapped = MATCHES_TEAM_MAP.get(raw.strip(), raw.strip())
+                q = normalize_team(raw_mapped)
+                for t in all_teams:
+                    if normalize_team(t) == q:
+                        return t
+                matches = difflib.get_close_matches(q, [normalize_team(t) for t in all_teams], n=1, cutoff=0.6)
+                if matches:
+                    for t in all_teams:
+                        if normalize_team(t) == matches[0]:
+                            return t
+                return None
+
+            team_a = resolve_team(tokens[0])
+            team_b = resolve_team(tokens[1])
+
+            if team_a and team_b:
+                remaining = tokens[2:]
+                knockout = any(t.lower() in ("ko", "knockout") for t in remaining)
+                sims = 100
+                for t in remaining:
+                    if t.lower() in ("ko", "knockout"):
+                        continue
+                    if t.isdigit() and int(t) > 0:
+                        sims = min(int(t), 10000)
+                return await self._xsim_headtohead(ctx, team_a, team_b, knockout, sims)
+
+        return await self._xsim_tournament(ctx)
+
+    async def _xsim_headtohead(self, ctx, team_a, team_b, knockout, simulations):
+        """Run head-to-head Monte Carlo across all 5 engines."""
+        VERSIONS = ["v1", "v2", "v3", "v4", "v5"]
+        VERSION_LABELS = {
+            "v1": "Historical ELO/PELE", "v2": "FC26 Player Intelligence",
+            "v3": "Dynamic Team State", "v4": "Tactical Intelligence",
+            "v5": "Match State Simulation",
+        }
+
+        flag_map = {}
+        for name, emoji, _ in COUNTRY_LIST:
+            flag_map[name] = emoji
+
+        flag_a = flag_map.get(team_a, "🏳️")
+        flag_b = flag_map.get(team_b, "🏳️")
+
+        status = await ctx.send(
+            f"⚔️ **X-Simulation: All 5 Engines**\n"
+            f"{flag_a} **{team_a}** vs {flag_b} **{team_b}**\n"
+            f"{'🏟️ Knockout' if knockout else '📊 Group stage'} | {simulations:,} sims each\n"
+            f"⏳ Running v1 v2 v3 v4 v5..."
+        )
+
+        loop = asyncio.get_event_loop()
+        reports = {}
+
+        for i, ver in enumerate(VERSIONS):
+            try:
+                report = await loop.run_in_executor(
+                    None, self._run_monte_carlo,
+                    ver, team_a, team_b, knockout, simulations,
+                )
+                report.flag_a = flag_a
+                report.flag_b = flag_b
+                reports[ver] = report
+            except Exception as e:
+                reports[ver] = None
+                logger.error(f"xsim {ver} error: {e}")
+
+            done = " ".join(
+                "✅" if reports.get(v) else "❌" if v in reports else v
+                for v in VERSIONS[:i + 1]
+            )
+            todo = " ".join(VERSIONS[i + 1:])
+            await status.edit(content=(
+                f"⚔️ **X-Simulation: All 5 Engines**\n"
+                f"{flag_a} **{team_a}** vs {flag_b} **{team_b}**\n"
+                f"{done}" + (f" {todo}" if todo else "")
+            ))
+
+        summary_embed, version_pages = self._xsim_h2h_pages(reports, team_a, team_b, flag_a, flag_b, knockout, simulations)
+        view = _XSimView(summary_embed, version_pages, ctx.author.id)
+        await status.edit(content=None, embed=summary_embed, view=view)
+        view.message = status
+
+    def _xsim_h2h_pages(self, reports, team_a, team_b, flag_a, flag_b, knockout, simulations):
+        """Build embed pages for head-to-head xsim output.
+
+        Returns (summary_embed, version_page_map).
+        """
+        VERSION_LABELS = {
+            "v1": "Historical ELO/PELE", "v2": "FC26 Player Intelligence",
+            "v3": "Dynamic Team State", "v4": "Tactical Intelligence",
+            "v5": "Match State Simulation",
+        }
+        VERSION_DESCRIPTIONS = {
+            "v1": "Classic ELO + PELE with goal-diff weighting",
+            "v2": "Per-player FC26 ratings, 7 role formulas",
+            "v3": "Chemistry, form, momentum, leadership modifiers",
+            "v4": "62 managers, 5 defensive styles, match context",
+            "v5": "Full phase-based 90-min sim with events",
+        }
+
+        # ── Summary page ──
+        summary = discord.Embed(title="X-Simulation: All 5 Engines Compared", color=0xff3fb9)
+        summary.set_author(name=f"{flag_a} {team_a} vs {flag_b} {team_b}")
+        summary.description = (
+            f"{'🏟️ Knockout' if knockout else '📊 Group stage'} | "
+            f"{simulations:,} simulations per engine\n"
+            "Select a version below to see its detailed breakdown."
+        )
+
+        for ver in ["v1", "v2", "v3", "v4", "v5"]:
+            r = reports.get(ver)
+            label = VERSION_LABELS[ver]
+            desc = VERSION_DESCRIPTIONS[ver]
+            if r is None:
+                summary.add_field(name=f"`{ver.upper()}` — {label}", value=f"└ {desc}\n└ ❌ Failed to run", inline=False)
+                continue
+            mc = r.mc
+            val = (
+                f"└ {desc}\n"
+                f"└ {flag_a} **{mc.win_prob_a:.1f}%**  ⚖️ Draw **{mc.draw_prob:.1f}%**  {flag_b} **{mc.win_prob_b:.1f}%**\n"
+                f"└ ⚽ xG **{mc.avg_xg_a:.3f}** – **{mc.avg_xg_b:.3f}**"
+            )
+            if mc.top_scores:
+                top = mc.top_scores[0]
+                val += f"  🏆 {top[0][0]}-{top[0][1]} ({top[1]/mc.total*100:.1f}%)"
+            summary.add_field(name=f"`{ver.upper()}` — {label}", value=val, inline=False)
+
+        # ── Per-version detailed pages ──
+        version_pages: dict[str, list[discord.Embed]] = {}
+        for ver in ["v1", "v2", "v3", "v4", "v5"]:
+            r = reports.get(ver)
+            if r is None:
+                continue
+            ver_pages = self._build_report_pages(r)
+            for ep in ver_pages:
+                ep.title = f"[{ver.upper()}] {ep.title}"
+            version_pages[ver] = ver_pages
+
+        summary.set_footer(text="📊 Summary · Use dropdown below for per-engine math")
+        return summary, version_pages
+
+    async def _xsim_tournament(self, ctx):
+        """Run full tournament simulation across all 5 engines."""
+        VERSIONS = ["v1", "v2", "v3", "v4", "v5"]
+
+        status = await ctx.send("🏆 **X-Simulation: Full Tournament — All 5 Engines**\n⏳ Fetching latest data...")
+
+        fifa_dir = os.path.dirname(os.path.dirname(__file__))
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {"idCompetition": "17", "idSeason": "285023", "count": 200}
+                async with session.get(
+                    "https://api.fifa.com/api/v3/calendar/matches",
+                    params=params, timeout=15,
+                ) as r:
+                    match_data = await r.json()
+                async with session.get(
+                    "https://play.fifa.com/json/fantasy/players.json",
+                    timeout=15,
+                ) as r:
+                    players = await r.json()
+                async with session.get(
+                    "https://play.fifa.com/json/fantasy/squads.json",
+                    timeout=15,
+                ) as r:
+                    squads_raw = await r.json()
+
+            os.makedirs(os.path.join(fifa_dir, "data"), exist_ok=True)
+            results_raw = match_data.get("Results", [])
+            completed, upcoming = [], []
+            for m in results_raw:
+                st = m.get("MatchStatus")
+                hd = m.get("Home") or {}
+                ad = m.get("Away") or {}
+                home = (hd.get("TeamName") or [{}])[0].get("Description", "?")
+                away = (ad.get("TeamName") or [{}])[0].get("Description", "?")
+                entry = {
+                    "id": m.get("IdMatch"), "date": m.get("Date", "?"),
+                    "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
+                    "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
+                    "home": {
+                        "name": home, "score": m.get("HomeTeamScore"), "id": hd.get("IdTeam"),
+                        "players": hd.get("Players", []),
+                    },
+                    "away": {
+                        "name": away, "score": m.get("AwayTeamScore"), "id": ad.get("IdTeam"),
+                        "players": ad.get("Players", []),
+                    },
+                    "winner": m.get("Winner"), "status": st,
+                }
+                (completed if st == 0 else upcoming).append(entry)
+            matches_out = {
+                "last_updated": datetime.utcnow().isoformat(),
+                "completed_count": len(completed), "upcoming_count": len(upcoming),
+                "competition": "FIFA World Cup 2026",
+                "completed": completed, "upcoming": upcoming,
+            }
+            for fn, data in [
+                ("matches.json", matches_out),
+                ("players.json", players),
+                ("squads.json", squads_raw),
+            ]:
+                with open(os.path.join(fifa_dir, "data", fn), "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+
+            await status.edit(content="🏆 **X-Simulation**\n✅ Data fetched. Running 5 engines...")
+        except Exception as e:
+            await status.edit(content=f"🏆 **X-Simulation**\n⚠️ Using cached data ({e})")
+
+        loop = asyncio.get_event_loop()
+        results = {}
+        debugs = {}
+
+        for i, ver in enumerate(VERSIONS):
+            try:
+                data = await loop.run_in_executor(None, run_simulation, ver, True)
+                results[ver] = data
+                debugs[ver] = data.get("debug", [])
+            except Exception as e:
+                results[ver] = None
+                debugs[ver] = []
+                logger.error(f"xsim tournament {ver} error: {e}")
+
+            done = " ".join(
+                "✅" if results.get(v) else "❌" if v in results else v
+                for v in VERSIONS[:i + 1]
+            )
+            todo = " ".join(VERSIONS[i + 1:])
+            await status.edit(content="🏆 **X-Simulation**\n" + done + (f" {todo}" if todo else ""))
+
+        summary_embed, version_pages = self._xsim_tournament_pages(results, debugs)
+        view = _XSimView(summary_embed, version_pages, ctx.author.id)
+        await status.edit(content=None, embed=summary_embed, view=view)
+        view.message = status
+
+    def _xsim_tournament_pages(self, results, debugs):
+        """Build embed pages for tournament xsim output.
+
+        Returns (summary_embed, version_page_map).
+        """
+        VERSION_LABELS = {
+            "v1": "Historical ELO/PELE", "v2": "FC26 Player Intelligence",
+            "v3": "Dynamic Team State", "v4": "Tactical Intelligence",
+            "v5": "Match State Simulation",
+        }
+        VERSION_DESCRIPTIONS = {
+            "v1": "Classic ELO + PELE with goal-diff weighting",
+            "v2": "Per-player FC26 ratings, 7 role formulas",
+            "v3": "Chemistry, form, momentum, leadership modifiers",
+            "v4": "62 managers, 5 defensive styles, match context",
+            "v5": "Full phase-based 90-min sim with events",
+        }
+
+        # ── Summary page ──
+        summary = discord.Embed(title="X-Simulation: Tournament — All 5 Engines", color=0xff3fb9)
+        summary.description = (
+            "Each engine ran a full 48-team World Cup simulation with live data.\n"
+            "Select a version below to see groups, knockout brackets & match math."
+        )
+
+        for ver in ["v1", "v2", "v3", "v4", "v5"]:
+            data = results.get(ver)
+            label = VERSION_LABELS[ver]
+            desc = VERSION_DESCRIPTIONS[ver]
+            if data is None:
+                summary.add_field(name=f"`{ver.upper()}` — {label}", value=f"└ {desc}\n└ ❌ Failed", inline=False)
+                continue
+
+            champ = data.get("champion", "TBD")
+            ko = data.get("knockout", [])
+            finalists = ""
+            if len(ko) >= 4 and ko[3]:
+                sf = [m for m in ko[3] if m]
+                if sf:
+                    finalists = " vs ".join(f"{m['home']}({m['home_goals']})–({m['away_goals']}){m['away']}" for m in sf)
+
+            gw = []
+            for gid in sorted(data.get("groups", {}).keys()):
+                tbl = data["groups"][gid].get("table", [])
+                if tbl:
+                    gw.append(f"{gid}:{tbl[0][1]}")
+
+            val = (
+                f"└ {desc}\n"
+                f"└ 🏆 **{champ}**  🥇 {', '.join(gw[:6])}\n"
+                f"└ ⚔️ {finalists}  ·  📊 {data['stats'].get('real_count', 0)} real matches"
+            )
+            summary.add_field(name=f"`{ver.upper()}` — {label}", value=val, inline=False)
+
+        # ── Per-version detail pages ──
+        version_pages: dict[str, list[discord.Embed]] = {}
+        for ver in ["v1", "v2", "v3", "v4", "v5"]:
+            data = results.get(ver)
+            if data is None:
+                continue
+
+            d = debugs.get(ver, [])
+            ver_pages: list[discord.Embed] = []
+
+            # Groups
+            g_embed = discord.Embed(title=f"[{ver.upper()}] Group Stage Results", color=0xff3fb9)
+            g_embed.set_author(name=VERSION_LABELS[ver])
+            group_lines = []
+            for gid in sorted(data["groups"].keys()):
+                table = data["groups"][gid]["table"]
+                lines = [f"**Group {gid}**", "` #  Team                PTS  GD  GF`"]
+                for rank, t, pts, gd, gf in table:
+                    medal = {1: "🥇", 2: "🥈", 3: "🥉", 4: "  "}.get(rank, "  ")
+                    lines.append(f"`{medal}{rank}.  {t:<18s} {pts:>2d}  {gd:+>3d}  {gf}`")
+                group_lines.append("\n".join(lines))
+            g_embed.description = "\n\n".join(group_lines[:6])
+            if len(group_lines) > 6:
+                g_embed.add_field(name="Groups G–L", value="\n\n".join(group_lines[6:])[:1024], inline=False)
+            ver_pages.append(g_embed)
+
+            # Knockout
+            ko_embed = discord.Embed(title=f"[{ver.upper()}] Knockout Stage", color=0xff3fb9)
+            ko_embed.set_author(name=VERSION_LABELS[ver])
+            ko_names = ["R32", "R16", "QF", "SF", "Final"]
+            ko_lines = []
+            for rnd_idx, (rd_name, rd_matches) in enumerate(zip(ko_names, data["knockout"])):
+                ko_lines.append(f"**{rd_name}**")
+                for m in rd_matches:
+                    if m:
+                        ko_lines.append(f"⚽ {m['home']} {m['home_goals']}–{m['away_goals']} {m['away']} → **{m['winner']}**")
+            tp3 = data.get("third_place")
+            if tp3:
+                ko_lines.append(f"🥉 {tp3['home']} {tp3['home_goals']}–{tp3['away_goals']} {tp3['away']} → **{tp3['winner']}**")
+            champ = data.get("champion", "TBD")
+            ko_lines.append(f"\n🏆🏆🏆 **{champ.upper()}** ARE CHAMPIONS! 🏆🏆🏆")
+            ko_embed.description = "\n".join(ko_lines)[:4096]
+            ver_pages.append(ko_embed)
+
+            # Math breakdown (from engine debug)
+            math_embed = discord.Embed(title=f"[{ver.upper()}] Sample Match Math Breakdown", color=0xff3fb9)
+            math_embed.set_author(name=VERSION_LABELS[ver])
+            if d:
+                parts = []
+                for item in d[:3]:
+                    safe = item.replace("```", "` ` `")
+                    parts.append(f"```{safe[:1500]}```")
+                math_embed.description = "\n\n".join(parts)[:4096]
+            else:
+                math_embed.description = "Run with debug=True for per-match math."
+            ver_pages.append(math_embed)
+
+            version_pages[ver] = ver_pages
+
+        summary.set_footer(text="📊 Summary · Use dropdown below for per-engine details")
+        return summary, version_pages
+
+    async def _xsim_help(self, ctx):
+        """Explain the .xsim command."""
+        embed = discord.Embed(title="X-Simulation: All 5 Engines at Once", color=0xff3fb9)
+        embed.set_author(name=".xsim — Cross-version simulation")
+        embed.description = (
+            "Runs **all 5 simulation engines** (V1–V5) on the same match or tournament "
+            "and compares the results side-by-side. See how each model's math differs."
+        )
+        embed.add_field(name="🌍 Full Tournament Mode", value=(
+            "**`.xsim`**\n"
+            "Runs the entire 48-team World Cup on all 5 engines. Shows champion, group winners, "
+            "semi-finals, and per-engine group tables + knockout brackets + match math."
+        ), inline=False)
+        embed.add_field(name="⚔️ Head-to-Head Mode", value=(
+            "**`.xsim <Team A> <Team B>`**\n"
+            "Monte Carlo analysis of a single matchup across all 5 engines. "
+            "Shows win%, xG, and common scorelines for each, plus full per-engine detailed breakdowns.\n\n"
+            "**Options:**\n"
+            "`.xsim France Spain ko` — knockout mode (no draws)\n"
+            "`.xsim France Spain ko 1000` — 1,000 sims per engine (default: 100)"
+        ), inline=False)
+        embed.add_field(name="🔍 What You'll See", value=(
+            "**Page 1:** Summary comparison — all 5 engines in one table\n"
+            "**Later pages:** Per-engine deep-dives — match prediction, "
+            "how the % is calculated, squad quality, dynamic state, tactics, match flow"
+        ), inline=False)
+        embed.set_footer(text=".xsim help | 5 engines | 1 command")
+        await ctx.send(embed=embed)
+
+    # ── .xlineup — Provider comparison ────────────────────────────────────────
+
+    @commands.command()
+    async def xlineup(self, ctx, *, team_name: str = None):
+        """Compare lineup providers for a given team.
+
+        Queries every available SquadProvider and shows formation, XI, bench size,
+        and validation status side-by-side.
+        """
+        if not team_name:
+            embed = discord.Embed(title=".xlineup <Team>", color=0x00bfff)
+            embed.description = "Compare lineup data from all available providers."
+            embed.add_field(name="Usage", value="`.xlineup France`", inline=False)
+            embed.add_field(name="What It Shows", value=(
+                "• Provider name\n"
+                "• Formation returned\n"
+                "• Starting XI (11 players)\n"
+                "• Bench size\n"
+                "• Validation pass/fail\n"
+                "• Response time"
+            ), inline=False)
+            return await ctx.send(embed=embed)
+
+        fifa_dir = os.path.dirname(os.path.dirname(__file__))
+        from fifa_data.services.lineup_service import LineupService
+
+        ls = LineupService()
+        msg = await ctx.send(f"🔍 Querying providers for **{team_name}**...")
+
+        results = await ls.compare_providers(team_name)
+
+        embed = discord.Embed(
+            title=f"📋 Lineup Provider Comparison — {team_name}",
+            color=0x00bfff,
+        )
+
+        for pr in results:
+            status = "✅" if pr.success else "❌"
+            embed.add_field(
+                name=f"{status} {pr.provider} ({pr.elapsed:.1f}s)",
+                value=(
+                    f"Formation: {pr.formation or 'N/A'}\n"
+                    f"Players: {pr.player_count}/11\n"
+                    f"Bench: {pr.bench_count}\n"
+                    f"Validation: {pr.validation}"
+                ),
+                inline=True,
+            )
+
+        if not results:
+            embed.description = "No providers returned data. (API keys may be missing.)"
+
+        embed.set_footer(text=".xlineup | Provider comparison")
+        await msg.edit(content="", embed=embed)
+
+        await ls.close()
+
     @staticmethod
     def _build_goal_events(h_goals, a_goals):
         all_events = []
@@ -4467,7 +4957,10 @@ class DraftCog(commands.Cog):
 
     def _gather_v3_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
         from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
-        engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+        from fifa_data.services.tournament_form_service import TournamentFormService
+        tfs = TournamentFormService(TEAM_METRICS)
+        tfs.compute()
+        engine = V3DynamicEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS, tournament_form=tfs.get_all_forms())
         results = []
         for t in top_teams:
             try:
@@ -4490,7 +4983,10 @@ class DraftCog(commands.Cog):
     def _gather_v4_insights(self, fifa_dir: str, top_teams: list[str]) -> list[dict]:
         from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
         from fifa_data.services.manager_service import get_manager
-        engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS)
+        from fifa_data.services.tournament_form_service import TournamentFormService
+        tfs = TournamentFormService(TEAM_METRICS)
+        tfs.compute()
+        engine = V4TacticalEngine(data_dir=fifa_dir, team_metrics=TEAM_METRICS, tournament_form=tfs.get_all_forms())
         results = []
         for t in top_teams:
             try:
@@ -4776,6 +5272,323 @@ class _ReportView(discord.ui.View):
                 item.disabled = True
             try:
                 await self.message.edit(view=self)
+            except Exception:
+                pass
+        self.stop()
+
+
+class _XSimView(discord.ui.View):
+    """View for cross-version simulation with version selector dropdown + page nav."""
+
+    def __init__(
+        self,
+        summary_embed: discord.Embed,
+        version_pages: dict[str, list[discord.Embed]],
+        author_id: int,
+    ) -> None:
+        super().__init__(timeout=120)
+        self.summary_embed = summary_embed
+        self.version_pages = version_pages  # {"v1": [embeds...], ...}
+        self.author_id = author_id
+        self.current_version: str | None = None  # None = summary
+        self.current_page = 0
+        self.message: discord.Message | None = None
+
+        # ── Version selector dropdown (row 0) ──
+        options = [
+            discord.SelectOption(
+                label="Summary", value="__summary__",
+                description="All 5 engines compared side-by-side", emoji="📊",
+            ),
+        ]
+        for ver in ("v1", "v2", "v3", "v4", "v5"):
+            pages = self.version_pages.get(ver)
+            if pages:
+                options.append(discord.SelectOption(
+                    label=ver.upper(), value=ver,
+                    description=f"{len(pages)} detail page{'s' if len(pages) > 1 else ''}",
+                ))
+        self.version_select = discord.ui.Select(
+            placeholder="Select a version breakdown…",
+            options=options, row=0,
+        )
+        self.version_select.callback = self._on_version_select
+        self.add_item(self.version_select)
+
+    # ── Helpers ──
+
+    def _current_list(self) -> list[discord.Embed]:
+        if self.current_version is None:
+            return [self.summary_embed]
+        return self.version_pages.get(self.current_version, [self.summary_embed])
+
+    def _update_buttons(self) -> None:
+        lst = self._current_list()
+        self._prev.disabled = self.current_page <= 0
+        self._next.disabled = self.current_page >= len(lst) - 1
+
+    def _update_footer(self) -> None:
+        lst = self._current_list()
+        total = len(lst)
+        if self.current_version is None:
+            new_footer = f"📊 Summary  ·  Select a version below for detailed breakdowns"
+        else:
+            label = self.current_version.upper()
+            new_footer = f"[{label}] Page {self.current_page + 1}/{total}  ·  Use ◀▶ to navigate"
+        self._current_list()[self.current_page].set_footer(text=new_footer)
+
+    async def _show(self, interaction: discord.Interaction) -> None:
+        self._update_buttons()
+        self._update_footer()
+        lst = self._current_list()
+        embed = lst[self.current_page]
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    # ── Callbacks ──
+
+    async def _on_version_select(self, interaction: discord.Interaction) -> None:
+        value = self.version_select.values[0]
+        if value == "__summary__":
+            self.current_version = None
+        else:
+            self.current_version = value
+        self.current_page = 0
+        # Update select placeholder to reflect choice
+        for opt in self.version_select.options:
+            if opt.value == value:
+                self.version_select.placeholder = f"Viewing: {opt.label}"
+                break
+        await self._show(interaction)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Only the command author can navigate.", ephemeral=True)
+            return False
+        return True
+
+    # ── Navigation row 1 ──
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=1)
+    async def _prev(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if self.current_page > 0:
+            self.current_page -= 1
+            await self._show(interaction)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=1)
+    async def _next(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        lst = self._current_list()
+        if self.current_page < len(lst) - 1:
+            self.current_page += 1
+            await self._show(interaction)
+
+    @discord.ui.button(label="✕", style=discord.ButtonStyle.danger, row=1)
+    async def _close(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await interaction.response.defer()
+        await interaction.message.delete()
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        if self.message:
+            for item in self.children:
+                item.disabled = True
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        self.stop()
+
+
+class _TopPlayersView(discord.ui.View):
+    PAGE_SIZE = 20
+
+    def __init__(self, fantasy, draft, guild):
+        super().__init__(timeout=120)
+        self.fantasy = fantasy
+        self.draft = draft
+        self.guild = guild
+        self.position = ""
+        self.country = ""
+        self.filter_mode = "all"
+        self.page = 0
+        self._rows: list[dict] = []
+        self._message: discord.Message | None = None
+        self._refresh_data()
+        self._update_buttons()
+
+    def _build_master(self) -> list[dict]:
+        master = self.fantasy.build_master_player_list(self.draft, guild=self.guild)
+        if self.filter_mode == "drafted":
+            master = [p for p in master if p["drafted"]]
+        elif self.filter_mode == "undrafted":
+            master = [p for p in master if not p["drafted"]]
+        if self.position:
+            master = [p for p in master if p["position"] == self.position]
+        if self.country:
+            master = [p for p in master if p.get("country", "") == self.country]
+        return master
+
+    def _refresh_data(self):
+        self._rows = self._build_master()
+        self.page = 0
+        self._update_country_options()
+
+    def _total_pages(self) -> int:
+        return max(1, (len(self._rows) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+
+    def _build_embed(self):
+        mode_label = {"all": "All Players", "drafted": "Drafted", "undrafted": "Undrafted"}[self.filter_mode]
+        total = len(self._rows)
+        start = self.page * self.PAGE_SIZE
+        page_rows = self._rows[start:start + self.PAGE_SIZE]
+
+        title = "🏆 Top Players"
+        if self.country:
+            first = page_rows[0] if page_rows else {}
+            flag = first.get("flag", "")
+            title += f" — {flag} {self.country}"
+        title += f" — {mode_label}"
+
+        embed = discord.Embed(title=title, color=0xff3fb9)
+        lines = []
+        for rank, r in enumerate(page_rows, start + 1):
+            pts_str = f"{r['net_points']} pts"
+            flag = r.get("flag", "")
+            pos = r.get("position", "")
+            owner = ""
+            if r.get("owner_name"):
+                owner = f" • {r['owner_name']}"
+            pos_tag = f" {pos}" if not self.position and pos else ""
+            flag_tag = f"{flag}" if flag else ""
+            lines.append(f"#{rank} • **{pts_str}** • {flag_tag}**{r['name']}**{pos_tag}{owner}")
+        embed.description = "\n".join(lines) if lines else "No players found."
+        footer = f"Page {self.page + 1}/{self._total_pages()}  •  {total} players"
+        if self.country:
+            countries = set(p.get("country", "") for p in self._rows)
+            if len(countries) == 1:
+                footer += f"  •  {flag} {self.country}"
+        embed.set_footer(text=footer)
+        return embed
+
+    def _update_buttons(self):
+        total = self._total_pages()
+        self._prev.disabled = self.page == 0
+        self._next.disabled = self.page >= total - 1
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            lbl = child.label
+            if lbl == "All":
+                active = self.position == "" and self.filter_mode == "all" and self.country == ""
+                child.style = discord.ButtonStyle.primary if active else discord.ButtonStyle.secondary
+            elif lbl in ("GK", "DEF", "MID", "FWD"):
+                child.style = discord.ButtonStyle.primary if lbl == self.position else discord.ButtonStyle.secondary
+            elif lbl == "Drafted":
+                child.style = discord.ButtonStyle.primary if self.filter_mode == "drafted" else discord.ButtonStyle.secondary
+            elif lbl == "Undrafted":
+                child.style = discord.ButtonStyle.primary if self.filter_mode == "undrafted" else discord.ButtonStyle.secondary
+
+    async def _refresh(self, interaction: discord.Interaction):
+        self._refresh_data()
+        self._update_buttons()
+        embed = self._build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    # ── Row 0: All / GK / DEF / MID / FWD ──
+
+    @discord.ui.button(label="All", style=discord.ButtonStyle.secondary, row=0)
+    async def _all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = ""
+        self.country = ""
+        self.filter_mode = "all"
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="GK", style=discord.ButtonStyle.secondary, row=0)
+    async def _pos_gk(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = "GK" if self.position != "GK" else ""
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="DEF", style=discord.ButtonStyle.secondary, row=0)
+    async def _pos_def(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = "DEF" if self.position != "DEF" else ""
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="MID", style=discord.ButtonStyle.secondary, row=0)
+    async def _pos_mid(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = "MID" if self.position != "MID" else ""
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="FWD", style=discord.ButtonStyle.secondary, row=0)
+    async def _pos_fwd(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.position = "FWD" if self.position != "FWD" else ""
+        await self._refresh(interaction)
+
+    # ── Row 1: Drafted / Undrafted / ◀ / ▶ ──
+
+    @discord.ui.button(label="Drafted", style=discord.ButtonStyle.secondary, row=1)
+    async def _drafted(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.filter_mode = "all" if self.filter_mode == "drafted" else "drafted"
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Undrafted", style=discord.ButtonStyle.secondary, row=1)
+    async def _undrafted(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.filter_mode = "all" if self.filter_mode == "undrafted" else "undrafted"
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=1)
+    async def _prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page <= 0:
+            return await interaction.response.defer()
+        self.page -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self._build_embed(), view=self)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=1)
+    async def _next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page >= self._total_pages() - 1:
+            return await interaction.response.defer()
+        self.page += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self._build_embed(), view=self)
+
+    # ── Row 2: Country Select ──
+
+    @discord.ui.select(
+        placeholder="Filter by country...",
+        row=2,
+        options=[
+            discord.SelectOption(label="All Countries", value="", default=True),
+        ],
+    )
+    async def _country_select(
+        self, interaction: discord.Interaction, select: discord.ui.Select,
+    ):
+        self.country = select.values[0]
+        await self._refresh(interaction)
+
+    def _update_country_options(self):
+        countries = sorted(set(
+            (p.get("country", ""), p.get("flag", "")) for p in self._rows if p.get("country")
+        ), key=lambda x: x[0])
+
+        options = [discord.SelectOption(label="All Countries", value="", default=self.country == "")]
+        for name, flag in countries:
+            label = f"{flag} {name}" if flag else name
+            options.append(discord.SelectOption(
+                label=label, value=name, default=name == self.country,
+            ))
+        for item in self.children:
+            if isinstance(item, discord.ui.Select):
+                try:
+                    item.options = options[:25]
+                except ValueError:
+                    item.options = options[:25]
+
+    async def on_timeout(self):
+        if self._message:
+            for child in self.children:
+                child.disabled = True
+            try:
+                await self._message.edit(view=self)
             except Exception:
                 pass
         self.stop()

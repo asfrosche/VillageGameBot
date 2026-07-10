@@ -33,7 +33,37 @@ async def _fetch_json(session: aiohttp.ClientSession, url: str) -> list | dict:
 
 FIFA_POSITION_MAP = {
     "1": "GK", "2": "DEF", "3": "MID", "4": "FWD",
+    "GK": "GK", "DEF": "DEF", "MID": "MID", "FWD": "FWD",
 }
+
+COUNTRY_FLAGS = {
+    "Algeria": "DZ", "Argentina": "AR", "Australia": "AU", "Austria": "AT",
+    "Belgium": "BE", "Bosnia and Herzegovina": "BA", "Brazil": "BR",
+    "Canada": "CA", "Cabo Verde": "CV", "Cape Verde": "CV", "Colombia": "CO",
+    "Congo DR": "CD", "Croatia": "HR", "Curaçao": "CW", "Czechia": "CZ",
+    "Côte d'Ivoire": "CI", "Ecuador": "EC", "Egypt": "EG",
+    "England": "EN", "France": "FR", "Germany": "DE", "Ghana": "GH",
+    "Haiti": "HT", "IR Iran": "IR", "Iraq": "IQ", "Japan": "JP",
+    "Jordan": "JO", "Korea Republic": "KR", "Mexico": "MX",
+    "Morocco": "MA", "Netherlands": "NL", "New Zealand": "NZ",
+    "Norway": "NO", "Panama": "PA", "Paraguay": "PY", "Portugal": "PT",
+    "Qatar": "QA", "Saudi Arabia": "SA", "Scotland": "SC",
+    "Senegal": "SN", "South Africa": "ZA", "Spain": "ES", "Sweden": "SE",
+    "Switzerland": "CH", "Tunisia": "TN", "Türkiye": "TR",
+    "USA": "US", "United States": "US", "Uruguay": "UY", "Uzbekistan": "UZ",
+    "Bosnia-Herzegovina": "BA", "Cape Verde": "CV",
+}
+
+SUB_FLAGS = {
+    "EN": "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F",
+    "SC": "\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F",
+}
+
+
+def _flag_emoji(code: str) -> str:
+    if code in SUB_FLAGS:
+        return SUB_FLAGS[code]
+    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in code.upper())
 
 ALIASES = {
     "kyllian mbappe": "Kylian Mbappé",
@@ -309,10 +339,148 @@ class FantasyService:
         standings = sorted(teams.values(), key=lambda x: x["net_points"], reverse=True)
         return standings
 
-    def get_top_drafted_players(self, draft_data, limit=10):
+    def get_top_drafted_players(self, draft_data, guild=None, limit=10, position=None):
         all_players = []
-        for team in draft_data["teams"].values():
-            all_players.extend(team["players"])
+        owner_map = {}
+        for uid_str, team in draft_data["teams"].items():
+            uid = int(uid_str)
+            name = None
+            if guild:
+                member = guild.get_member(uid)
+                if member:
+                    name = member.display_name
+            if not name:
+                name = f"<@{uid}>"
+            for p in team["players"]:
+                if position and p.get("position") != position:
+                    continue
+                all_players.append(p)
+                owner_map[p.get("name", "")] = (uid, name)
         resolved = self.resolve_players(all_players)
+        for r in resolved:
+            owner = owner_map.get(r.get("name", ""), (None, None))
+            r["owner_id"] = owner[0]
+            r["owner_name"] = owner[1]
         resolved.sort(key=lambda x: x["net_points"], reverse=True)
         return resolved[:limit]
+
+    def get_top_undrafted_players(self, draft_data, guild=None, limit=10, position=None):
+        if self._players is None:
+            return []
+        all_draft_players = []
+        for team in draft_data["teams"].values():
+            all_draft_players.extend(team["players"])
+        resolved_drafted = self.resolve_players(all_draft_players)
+        drafted_api_ids = set()
+        for r in resolved_drafted:
+            m = r.get("match")
+            if m:
+                drafted_api_ids.add(m.get("id"))
+        candidates = []
+        for p in self._players:
+            pos = FIFA_POSITION_MAP.get(p.get("position", ""), "")
+            if position and pos != position:
+                continue
+            if p.get("id") in drafted_api_ids:
+                continue
+            raw = f"{p.get('firstName', '')} {p.get('lastName', '')}".strip()
+            name = _alias_resolve(raw)
+            total, last, round_pts = self.get_player_points(p)
+            candidates.append({
+                "name": name,
+                "position": pos,
+                "net_points": total,
+                "total_points": total,
+                "match": p,
+                "owner_id": None,
+                "owner_name": None,
+            })
+        candidates.sort(key=lambda x: x["net_points"], reverse=True)
+        return candidates[:limit]
+
+    def build_master_player_list(self, draft_data, guild=None):
+        """Build a single canonical list of all players with draft status.
+
+        Each dict: name, position, net_points, drafted, owner_id, owner_name.
+        Sorted by net_points descending.  No duplicates — each API player
+        appears at most once, enriched with draft info when drafted.
+        """
+        if self._players is None:
+            return []
+
+        all_draft_players = []
+        owner_map = {}
+        for uid_str, team in draft_data["teams"].items():
+            uid = int(uid_str)
+            oname = guild.get_member(uid).display_name if guild and guild.get_member(uid) else f"<@{uid}>"
+            for p in team["players"]:
+                all_draft_players.append(p)
+                owner_map[p.get("name", "")] = (uid, oname)
+
+        resolved = self.resolve_players(all_draft_players)
+
+        api_id_to_owner = {}
+        unresolvable = []
+        for r in resolved:
+            m = r.get("match")
+            owner = owner_map.get(r.get("name", ""), (None, None))
+            if m:
+                api_id_to_owner[m.get("id")] = (owner[0], owner[1])
+            else:
+                unresolvable.append(r)
+
+        master = []
+        for p in self._players:
+            api_id = p.get("id")
+            pos_raw = p.get("position", "")
+            pos = FIFA_POSITION_MAP.get(pos_raw, "")
+            total, last, rp = self.get_player_points(p)
+            raw = f"{p.get('firstName', '')} {p.get('lastName', '')}".strip()
+            name = _alias_resolve(raw)
+
+            country_name = ""
+            flag = ""
+            sq = self.get_player_squad(p.get("squadId"))
+            if sq:
+                country_name = sq.get("name", "")
+                code = COUNTRY_FLAGS.get(country_name)
+                if code:
+                    flag = _flag_emoji(code)
+
+            owner_info = api_id_to_owner.pop(api_id, None)
+            if owner_info:
+                master.append({
+                    "name": name,
+                    "position": pos,
+                    "net_points": total - self.get_scouting_bonus(p)[0],
+                    "drafted": True,
+                    "owner_id": owner_info[0],
+                    "owner_name": owner_info[1],
+                    "country": country_name,
+                    "flag": flag,
+                })
+            else:
+                master.append({
+                    "name": name,
+                    "position": pos,
+                    "net_points": total - self.get_scouting_bonus(p)[0],
+                    "drafted": False,
+                    "owner_id": None,
+                    "owner_name": None,
+                    "country": country_name,
+                    "flag": flag,
+                })
+
+        for r in unresolvable:
+            owner = owner_map.get(r.get("name", ""), (None, None))
+            master.append({
+                "name": r.get("name", ""),
+                "position": r.get("position", ""),
+                "net_points": r.get("net_points", 0),
+                "drafted": True,
+                "owner_id": owner[0],
+                "owner_name": owner[1],
+            })
+
+        master.sort(key=lambda x: x["net_points"], reverse=True)
+        return master

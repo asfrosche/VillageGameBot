@@ -626,6 +626,7 @@ class TestCommandRegistration:
             "scoutingboard", "pause", "resume", "enddraft",
             "matches", "trending", "differentials", "refreshpoints",
             "simulate_help", "simulate", "montecarlo", "fsim_how",
+            "xsim", "xlineup",
         }
         missing = expected - cmd_names
         extra = cmd_names - expected
