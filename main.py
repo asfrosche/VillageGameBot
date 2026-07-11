@@ -46,12 +46,14 @@ from cogs.setup_cog import Setup
 from cogs.tracker_cog import MessageTracker
 from cogs.utility_cog import Utility
 from cogs.vg_intro import VgIntro
+from cogs.status_cog import Status
 from cogs.voting_cog import Voting
 from config import PREFIX, TOKEN
 from utils.embeds import error_embed, info_embed, plain_embed
 from cogs.estate_cog import Estate
 from cogs.item_drop_cog import ItemDrop
 from cogs.channel_cog import ChannelMap
+from cogs.surveillance_cog import Surveillance
 import sys as _sys
 _main_dir = os.path.dirname(os.path.abspath(__file__))
 _fifa_dir = os.path.join(_main_dir, "fifa_data")
@@ -677,7 +679,9 @@ async def startcog():
     await bot.add_cog(Estate(bot))
     await bot.add_cog(ItemDrop(bot))
     await bot.add_cog(ChannelMap(bot))
+    await bot.add_cog(Surveillance(bot))
     await bot.add_cog(VgIntro(bot))
+    await bot.add_cog(Status(bot))
     await bot.add_cog(DraftCog(bot))
     await bot.add_cog(BracketCog(bot))
     await bot.add_cog(BOTCRoleCog(bot))

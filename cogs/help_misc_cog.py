@@ -43,6 +43,16 @@ COMMAND_INDEX = [
     (".pcadd #PC", "Add player to PC/renamed house", "Moving", ["pc", "add", "private"]),
     (".pcremove #PC", "Remove from PC/renamed house", "Moving", ["pc", "remove", "private"]),
     (".addhere #RC", "Add RC's player to this channel", "Moving", ["rc", "add", "channel"]),
+    (".follow @player [stealth]", "Make players in this RC follow @target", "Surveillance", ["follow", "track", "stalk", "move"]),
+    (".unfollow @player", "Stop following @player", "Surveillance", ["unfollow", "stop", "track"]),
+    (".followlist", "Show all active follow pairs", "Surveillance", ["follow", "list", "pairs"]),
+    (".unfollowall", "Clear all follow pairs in this server", "Surveillance", ["unfollow", "clear", "all"]),
+    (".track @player", "Watch a player's location live", "Surveillance", ["track", "watch", "location"]),
+    (".untrack", "Stop watching the tracked player", "Surveillance", ["untrack", "stop", "watch"]),
+    (".stalk @player", "Silently watch a player's house", "Surveillance", ["stalk", "peek", "read", "watch"]),
+    (".unstalk @player", "Stop stalking a specific player", "Surveillance", ["unstalk", "stop", "read"]),
+    (".unstalkall", "Stop stalking all players", "Surveillance", ["unstalk", "clear", "all"]),
+    (".stalklist", "Show all active stalk relationships", "Surveillance", ["stalk", "list", "peek"]),
     (".home", "Bring the player home", "Home", ["home", "return", "location"]),
     (".home return", "Bring all players home", "Home", ["home", "all", "return"]),
     (".owner", "List house owners", "Home", ["owner", "house", "list"]),
@@ -335,6 +345,9 @@ COMMAND_INDEX = [
     (".missingidsit", "Games with missing player IDs (IT)", "Library & Stats", ["missing", "ids", "italian", "admin"]),
     (".badnamesit", "List bad/unnamed players (IT)", "Library & Stats", ["bad", "names", "italian", "admin"]),
     (".removebadnameit <name>", "Remove a bad name (IT)", "Library & Stats", ["remove", "bad", "name", "italian", "admin"]),
+    ("/status", "Open Status Manager for this channel (admin)", "Status", ["status", "moderator", "track", "protection", "roleblock"]),
+    (".status clear", "Clear all statuses for this channel (admin)", "Status", ["status", "clear", "remove", "admin"]),
+    (".statuslist", "Show all channels with active statuses (admin)", "Status", ["status", "list", "overview", "moderator"]),
 ]
 
 
@@ -1107,6 +1120,7 @@ class Other(commands.Cog):
                 "games": self.help_games,
                 "birthdays": self.help_birthdays,
                 "calendar": self.help_calendar,
+                "status": self.help_status,
             }
             if category in extra_categories:
                 self._in_help2 = True
@@ -1123,6 +1137,7 @@ class Other(commands.Cog):
         embed.add_field(name="⚔️ - Games (Aux, Senet, Soldiers)", value="19 Commands\n`.help2 games`", inline=True)
         embed.add_field(name="🎂 - Birthdays", value="6 Commands\n`.help2 birthdays`", inline=True)
         embed.add_field(name="📅 - Calendar & Intro", value="4 Commands\n`.help2 calendar`", inline=True)
+        embed.add_field(name="🛡 - Status", value="3 Commands\n`.help2 status`", inline=True)
         embed.set_footer(text="Village Game • Use `.help2 {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embed, self.help2)
 
@@ -1208,7 +1223,9 @@ class Other(commands.Cog):
                 "calendar": self.help_calendar,
                 "draft": self.help_draft,
                 "botc": self.help_botc,
+                "surveillance": self.help_surveillance,
                 "analytics": self.help_analytics,
+                "status": self.help_status,
             }
             if category in categories:
                 await categories[category](ctx)
@@ -1229,6 +1246,7 @@ class Other(commands.Cog):
                     discord.SelectOption(label="⚔️ - Games (Aux, Senet, Soldiers)", value="games", description="Get all 'Games' commands"),
                     discord.SelectOption(label="🎂 - Birthdays", value="birthdays", description="Get all 'Birthday' commands"),
                     discord.SelectOption(label="📅 - Calendar & Intro", value="calendar", description="Get all 'Calendar & Intro' commands"),
+                    discord.SelectOption(label="🛡 - Status", value="status", description="Get all 'Status' commands"),
                 ]
                 route_fn = lambda cat: self.help2(ctx, category=cat)
             else:
@@ -1246,6 +1264,7 @@ class Other(commands.Cog):
                     discord.SelectOption(label="⚙️ - Utility", value="utility", description="Get all 'Utility' commands"),
                     discord.SelectOption(label="👽 - Other", value="other", description="Get all 'Other' commands"),
                     discord.SelectOption(label="🐦 - BOTC", value="botc", description="Get all 'Blood on the Clocktower' commands"),
+                    discord.SelectOption(label="🛡 - Status", value="status", description="Get all 'Status' commands"),
                 ]
                 route_fn = lambda cat: self.help(ctx, category=cat)
         else:
@@ -1284,6 +1303,7 @@ class Other(commands.Cog):
         embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
         embedh.add_field(name="🏆 - Draft", value="20 Commands\n`.help draft`", inline=True)
         embedh.add_field(name="🐦 - Blood on the Clocktower", value="All Commands\n`.help botc`", inline=True)
+        embedh.add_field(name="🛡 - Status", value="3 Commands\n`.help status`", inline=True)
         embedh.set_footer(text="Village Game • Use `.help {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
@@ -1929,6 +1949,64 @@ class Other(commands.Cog):
         ), inline=False)
         embed.set_footer(text="Restricted to bot developers")
         await ctx.send(embed=embed)
+
+    async def help_surveillance(self, ctx):
+        embed = discord.Embed(
+            title="🔍 Surveillance commands",
+            description="Follow, Track, and Stalk players. All commands must be used in a **RoleChat** channel.",
+            color=0xff3fb9,
+        )
+        embed.add_field(name="Follow — Move with them", value=(
+            "**`.follow @player`** ─ Follow a player (you move where they move)\n"
+            "**`.follow @player stealth`** ─ Follow silently (no join/leave messages)\n"
+            "**`.unfollow @player`** ─ Stop following a player\n"
+            "**`.followlist`** ─ Show all follow pairs\n"
+            "**`.unfollowall`** ─ Clear all follow pairs"
+        ), inline=False)
+        embed.add_field(name="Track — Watch their location", value=(
+            "**`.track @player`** ─ Create a live-updating embed showing their location\n"
+            "**`.untrack`** ─ Stop tracking"
+        ), inline=False)
+        embed.add_field(name="Stalk — Read access to their house", value=(
+            "**`.stalk @player`** ─ Silently read their house channel\n"
+            "**`.unstalk @player`** ─ Stop stalking a player\n"
+            "**`.unstalkall`** ─ Stop stalking all players\n"
+            "**`.stalklist`** ─ Show all stalk relationships"
+        ), inline=False)
+        embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
+        await self.send_help_page(ctx, embed, self.help_surveillance)
+
+    async def help_status(self, ctx):
+        embed = discord.Embed(
+            title="🛡 Status commands",
+            description="Track moderator statuses on Role Channels (Protection, Roleblock, Immunities, etc.).\nAll status commands are **admin only**.",
+            color=0xff3fb9,
+        )
+        embed.add_field(name="Commands", value=(
+            "**`/status`** ─ Open the interactive Status Manager for the current channel (ephemeral)\n"
+            "**`.status clear`** ─ Clear all statuses for the current channel\n"
+            "**`.statuslist`** ─ Show all channels that have active statuses"
+        ), inline=False)
+        embed.add_field(name="Built-in Statuses", value=(
+            "🛡 **Protection** ─ Channel is protected\n"
+            "⛔ **Roleblock** ─ Channel is roleblocked\n"
+            "👣 **Visit Block** ─ Visits to this channel are blocked\n"
+            "✨ **Immunity** ─ Immunity active\n"
+            "🎯 **Untargetable** ─ Channel cannot be targeted"
+        ), inline=False)
+        embed.add_field(name="Custom Statuses", value=(
+            "You can also add **free-text custom statuses** via the Status Manager modal.\n"
+            "Each status (built-in or custom) shows when it was added and who added it.\n"
+            "Clear individual statuses or all at once with the buttons."
+        ), inline=False)
+        embed.add_field(name="Integration", value=(
+            "The bot automatically warns moderators when:\n"
+            "• **`.dead`** is used on a channel with Protection\n"
+            "• **`.move`**, **`.renmove`**, **`.knock`**, or **`.renknock`** is used on a channel with Visit Block\n\n"
+            "All status changes are logged to the actions log channel."
+        ), inline=False)
+        embed.set_footer(text="Village Game • Admin only")
+        await self.send_help_page(ctx, embed, self.help_status)
 
 
 class NarrationColorView(discord.ui.View):

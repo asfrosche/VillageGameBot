@@ -4,8 +4,15 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from discord.ext import commands
 from cogs.data_utils import load_guild_data
+from cogs.surveillance_cog import after_movement_update
 from utils.bot_db import get_role_dashboard
 from utils.embeds import info_embed, warning_embed, error_embed
+from cogs.status_cog import (
+    check_move_warning,
+    check_knock_warning,
+    StatusWarningConfirmView,
+    check_channel_warning,
+)
 
 
 class Moving(commands.Cog):
@@ -108,15 +115,12 @@ class Moving(commands.Cog):
                     embed.set_footer(text="Village Game")
                     if log_channel:
                         await log_channel.send(embed=embed)
+                    await after_movement_update(ctx, member)
                 elif sponsor_role in member.roles:
                     await new_channel.set_permissions(member, read_messages=True, send_messages=not read_only)
             await ctx.send('Done')
         else:
             await ctx.send("Guild data not loaded.")
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Remove commands
-    # ──────────────────────────────────────────────────────────────────────────
 
     @commands.command()
     async def remove(self, ctx, channel_str: str, stealth: str = None):
@@ -186,12 +190,19 @@ class Moving(commands.Cog):
                         )
                         embed.add_field(name='Removed From:', value=f"{new_channel.mention} `[{new_channel.name}]`", inline=False)
                         embed.set_footer(text="Village Game")
-                        if log_channel:
-                            await log_channel.send(embed=embed)
+                    if log_channel:
+                        await log_channel.send(embed=embed)
                 elif sponsor_role in member.roles:
                     ow = new_channel.overwrites_for(member)
                     if ow != discord.PermissionOverwrite():
                         await new_channel.set_permissions(member, overwrite=None)
+            # Delegate follower removal to Surveillance cog
+            surv_cog = ctx.bot.get_cog("Surveillance")
+            if surv_cog:
+                await surv_cog._remove_followers_from_house(
+                    ctx.guild, guild_data, members, new_channel, is_stealth=is_stealth
+                )
+            await after_movement_update(ctx, None)
             await ctx.send('Done')
         else:
             await ctx.send("Guild data not loaded.")
@@ -212,6 +223,20 @@ class Moving(commands.Cog):
                 if new_channel is not None:
                     stealth = 'stealth' in args
                     read_only = 'read' in args
+                    # ── Status warning ──
+                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
+                    if _hw:
+                        _we = warning_embed(
+                            title="⚠ This player currently has:",
+                            description=_wt,
+                        )
+                        _wv = StatusWarningConfirmView(ctx.author.id)
+                        _wm = await ctx.send(embed=_we, view=_wv)
+                        _wv.message = _wm
+                        await _wv.wait()
+                        if not _wv.confirmed:
+                            return
+                    # ── End status warning ──
                     await self.process_move(ctx, new_channel, is_stealth=stealth, read_only=read_only)
                 else:
                     await ctx.send("Channel not found")
@@ -229,6 +254,20 @@ class Moving(commands.Cog):
                 if new_channel is not None:
                     stealth = 'stealth' in args
                     read_only = 'read' in args
+                    # ── Status warning ──
+                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
+                    if _hw:
+                        _we = warning_embed(
+                            title="⚠ This player currently has:",
+                            description=_wt,
+                        )
+                        _wv = StatusWarningConfirmView(ctx.author.id)
+                        _wm = await ctx.send(embed=_we, view=_wv)
+                        _wv.message = _wm
+                        await _wv.wait()
+                        if not _wv.confirmed:
+                            return
+                    # ── End status warning ──
                     await self.process_move(ctx, new_channel, is_stealth=stealth, read_only=read_only)
                 else:
                     await ctx.send("Channel not found")
@@ -286,6 +325,7 @@ class Moving(commands.Cog):
                     embed.set_footer(text="Village Game")
                     if log_channel:
                         await log_channel.send(embed=embed)
+                    await after_movement_update(ctx, member)
                 elif sponsor_role in member.roles:
                     for ch in category.channels:
                         permissions = ch.permissions_for(member)
@@ -310,6 +350,20 @@ class Moving(commands.Cog):
                 channel_name = f'{guild_data["house_prefix"]}{channel_str}'
                 new_channel = discord.utils.get(category.channels, name=channel_name)
                 if new_channel is not None:
+                    # ── Status warning ──
+                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_knock_warning)
+                    if _hw:
+                        _we = warning_embed(
+                            title="⚠ This player currently has:",
+                            description=_wt,
+                        )
+                        _wv = StatusWarningConfirmView(ctx.author.id)
+                        _wm = await ctx.send(embed=_we, view=_wv)
+                        _wv.message = _wm
+                        await _wv.wait()
+                        if not _wv.confirmed:
+                            return
+                    # ── End status warning ──
                     await self.process_knock(ctx, new_channel, guild_data)
                 else:
                     await ctx.send("Channel not found")
@@ -325,6 +379,20 @@ class Moving(commands.Cog):
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
                 if new_channel is not None:
+                    # ── Status warning ──
+                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_knock_warning)
+                    if _hw:
+                        _we = warning_embed(
+                            title="⚠ This player currently has:",
+                            description=_wt,
+                        )
+                        _wv = StatusWarningConfirmView(ctx.author.id)
+                        _wm = await ctx.send(embed=_we, view=_wv)
+                        _wv.message = _wm
+                        await _wv.wait()
+                        if not _wv.confirmed:
+                            return
+                    # ── End status warning ──
                     await self.process_knock(ctx, new_channel, guild_data)
                 else:
                     await ctx.send("Channel not found")
@@ -473,6 +541,7 @@ class Moving(commands.Cog):
                         embed.set_footer(text="Village Game")
                         if log_channel:
                             await log_channel.send(embed=embed)
+                        await after_movement_update(ctx, member)
                         await ctx.send("The house is empty. Auto Joining...")
                     elif sponsor_role in member.roles:
                         for ch in category.channels:
@@ -558,6 +627,7 @@ class Moving(commands.Cog):
                     )
                     if log_channel:
                         await log_channel.send(embed=embed_move)
+                    await after_movement_update(ctx, member)
                 elif sponsor_role in member.roles:
                     for ch in category.channels:
                         permissions = ch.permissions_for(member)
@@ -758,6 +828,7 @@ class Moving(commands.Cog):
                                 embed_move.set_footer(text="Village Game")
                                 if log_channel:
                                     await log_channel.send(embed=embed_move)
+                                await after_movement_update(ctx, member)
                                 await ctx.send(f"{timeout_duration_hours} hours went by from the knock in {new_channel.mention}. Auto Joining...")
                 else:
                     # Notify overseer/roles that the knock expired, no auto-join
