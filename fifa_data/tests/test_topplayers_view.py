@@ -60,10 +60,9 @@ class TestTopPlayersView:
 
     # ── Default state ──
 
-    def test_default_filter_is_all(self):
+    def test_default_sort_mode(self):
         view = self._view([])
-        assert view.filter_mode == "all"
-        assert view.position == ""
+        assert view.sort_mode == "overall_desc"
 
     def test_no_players(self):
         view = self._view([])
@@ -73,21 +72,12 @@ class TestTopPlayersView:
 
     def test_embed_title_default(self):
         view = self._view([])
-        assert "All Players" in view._build_embed().title
+        assert view._build_embed().title == "🏆 Top Players — Overall (DESC)"
 
-    def test_embed_title_drafted(self):
-        rows = [_make_player("P1", "GK", 10, drafted=True)]
-        view = self._view(rows)
-        view.filter_mode = "drafted"
-        view._refresh_data()
-        assert "Drafted" in view._build_embed().title
-
-    def test_embed_title_undrafted(self):
-        rows = [_make_player("P1", "GK", 10, drafted=False)]
-        view = self._view(rows)
-        view.filter_mode = "undrafted"
-        view._refresh_data()
-        assert "Undrafted" in view._build_embed().title
+    def test_embed_title_includes_sort_mode(self):
+        view = self._view([])
+        view.sort_mode = "position"
+        assert view._build_embed().title == "🏆 Top Players — Position"
 
     # ── Embed format ──
 
@@ -108,57 +98,11 @@ class TestTopPlayersView:
         assert "22 pts" in desc
         assert "**Free**" in desc
 
-    def test_position_tag_shown_in_all_mode(self):
+    def test_position_tag_always_shown(self):
         rows = [_make_player("Neymar", "FWD", 15, drafted=True)]
         view = self._view(rows)
         desc = view._build_embed().description
         assert "FWD" in desc
-
-    def test_position_tag_hidden_when_filter_active(self):
-        rows = [_make_player("Neymar", "FWD", 15, drafted=True)]
-        view = self._view(rows)
-        view.position = "FWD"
-        view._refresh_data()
-        desc = view._build_embed().description
-        assert "FWD" not in desc or "Neymar" not in desc
-
-    # ── Button styles ──
-
-    def test_all_button_is_primary_by_default(self):
-        view = self._view([])
-        for child in view.children:
-            if child.label == "All":
-                assert child.style == discord.ButtonStyle.primary
-                break
-        else:
-            pytest.fail("All button not found")
-
-    def test_position_button_style_toggle(self):
-        view = self._view([])
-        gk_btn = next(c for c in view.children if c.label == "GK")
-        assert gk_btn.style == discord.ButtonStyle.secondary
-        view.position = "GK"
-        view._update_buttons()
-        assert gk_btn.style == discord.ButtonStyle.primary
-        view.position = ""
-        view._update_buttons()
-        assert gk_btn.style == discord.ButtonStyle.secondary
-
-    def test_drafted_button_style(self):
-        view = self._view([])
-        btn = next(c for c in view.children if c.label == "Drafted")
-        assert btn.style == discord.ButtonStyle.secondary
-        view.filter_mode = "drafted"
-        view._update_buttons()
-        assert btn.style == discord.ButtonStyle.primary
-
-    def test_undrafted_button_style(self):
-        view = self._view([])
-        btn = next(c for c in view.children if c.label == "Undrafted")
-        assert btn.style == discord.ButtonStyle.secondary
-        view.filter_mode = "undrafted"
-        view._update_buttons()
-        assert btn.style == discord.ButtonStyle.primary
 
     # ── Owner display ──
 
@@ -223,114 +167,141 @@ class TestTopPlayersView:
         assert view._prev.disabled is True
         assert view._next.disabled is True
 
-    # ── Filter / toggle logic ──
+    # ── Sort: Total ASC ──
 
-    def test_set_position_toggle_on_and_off(self):
-        view = self._view([])
-        view.position = ""
-        view.position = "DEF" if view.position != "DEF" else ""
-        assert view.position == "DEF"
-        view.position = "DEF" if view.position != "DEF" else ""
-        assert view.position == ""
+    def test_total_asc_sorts_ascending(self):
+        rows = [
+            _make_player("High", "FWD", 30),
+            _make_player("Low", "GK", 5),
+            _make_player("Mid", "MID", 15),
+        ]
+        view = self._view(rows)
+        view.sort_mode = "total_asc"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert names == ["Low", "Mid", "High"]
 
-    def test_filter_mode_toggle_drafted(self):
-        view = self._view([])
-        assert view.filter_mode == "all"
-        view.filter_mode = "all" if view.filter_mode == "drafted" else "drafted"
-        assert view.filter_mode == "drafted"
-        view.filter_mode = "all" if view.filter_mode == "drafted" else "drafted"
-        assert view.filter_mode == "all"
+    # ── Sort: Overall DESC (default) ──
 
-    def test_filter_mode_toggle_undrafted(self):
-        view = self._view([])
-        view.filter_mode = "all" if view.filter_mode == "undrafted" else "undrafted"
-        assert view.filter_mode == "undrafted"
-        view.filter_mode = "all" if view.filter_mode == "undrafted" else "undrafted"
-        assert view.filter_mode == "all"
+    def test_overall_desc_sorts_descending(self):
+        rows = [
+            _make_player("High", "FWD", 30),
+            _make_player("Low", "GK", 5),
+            _make_player("Mid", "MID", 15),
+        ]
+        view = self._view(rows)
+        names = [r["name"] for r in view._rows]
+        assert names == ["High", "Mid", "Low"]
 
-    def test_drafted_view_filters_correctly(self):
+    def test_overall_desc_mixed_drafted_undrafted(self):
+        rows = [
+            _make_player("U1", "FWD", 50, drafted=False),
+            _make_player("D1", "GK", 10, drafted=True),
+            _make_player("D2", "MID", 30, drafted=True),
+            _make_player("U2", "DEF", 40, drafted=False),
+        ]
+        view = self._view(rows)
+        view.sort_mode = "overall_desc"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert names == ["U1", "U2", "D2", "D1"]
+
+    # ── Sort: Points Drafted ──
+
+    def test_points_drafted_sorts_drafted_first(self):
+        rows = [
+            _make_player("U1", "FWD", 50, drafted=False),
+            _make_player("D1", "GK", 10, drafted=True),
+            _make_player("D2", "MID", 30, drafted=True),
+            _make_player("U2", "DEF", 40, drafted=False),
+        ]
+        view = self._view(rows)
+        view.sort_mode = "points_drafted"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert names == ["D2", "D1", "U1", "U2"]
+
+    def test_points_drafted_desc_within_groups(self):
         rows = [
             _make_player("D1", "GK", 10, drafted=True),
-            _make_player("U1", "MID", 20, drafted=False),
-            _make_player("D2", "DEF", 30, drafted=True),
+            _make_player("D2", "MID", 30, drafted=True),
+            _make_player("D3", "DEF", 20, drafted=True),
         ]
         view = self._view(rows)
-        view.filter_mode = "drafted"
+        view.sort_mode = "points_drafted"
         view._refresh_data()
         names = [r["name"] for r in view._rows]
-        assert names == ["D1", "D2"]
-        assert "U1" not in names
+        assert names == ["D2", "D3", "D1"]
 
-    def test_undrafted_view_filters_correctly(self):
+    # ── Sort: Points Undrafted ──
+
+    def test_points_undrafted_sorts_undrafted_first(self):
         rows = [
             _make_player("D1", "GK", 10, drafted=True),
-            _make_player("U1", "MID", 20, drafted=False),
-            _make_player("D2", "DEF", 30, drafted=True),
+            _make_player("U1", "FWD", 50, drafted=False),
+            _make_player("D2", "MID", 30, drafted=True),
+            _make_player("U2", "DEF", 40, drafted=False),
         ]
         view = self._view(rows)
-        view.filter_mode = "undrafted"
+        view.sort_mode = "points_undrafted"
         view._refresh_data()
         names = [r["name"] for r in view._rows]
-        assert names == ["U1"]
-        assert "D1" not in names
-        assert "D2" not in names
+        assert names == ["U1", "U2", "D2", "D1"]
 
-    def test_position_filter_filters_correctly(self):
+    def test_points_undrafted_desc_within_groups(self):
         rows = [
-            _make_player("G1", "GK", 10, drafted=True),
-            _make_player("D1", "DEF", 20, drafted=True),
-            _make_player("M1", "MID", 30, drafted=True),
+            _make_player("U1", "GK", 10, drafted=False),
+            _make_player("U2", "MID", 30, drafted=False),
+            _make_player("U3", "DEF", 20, drafted=False),
         ]
         view = self._view(rows)
-        view.position = "DEF"
+        view.sort_mode = "points_undrafted"
         view._refresh_data()
         names = [r["name"] for r in view._rows]
-        assert names == ["D1"]
-        assert "G1" not in names
-        assert "M1" not in names
+        assert names == ["U2", "U3", "U1"]
 
-    def test_all_view_shows_everyone(self):
-        rows = [
-            _make_player("D1", "GK", 10, drafted=True),
-            _make_player("U1", "MID", 20, drafted=False),
-            _make_player("D2", "DEF", 30, drafted=True),
-        ]
-        view = self._view(rows)
-        view.filter_mode = "all"
-        view._refresh_data()
-        names = [r["name"] for r in view._rows]
-        assert sorted(names) == ["D1", "D2", "U1"]
+    # ── Sort: Position ──
 
-    def test_position_and_drafted_combine(self):
+    def test_position_sort_order(self):
         rows = [
-            _make_player("DGK", "GK", 10, drafted=True),
-            _make_player("DMID", "MID", 20, drafted=True),
-            _make_player("UGK", "GK", 5, drafted=False),
+            _make_player("GK1", "GK", 30),
+            _make_player("FWD1", "FWD", 10),
+            _make_player("MID1", "MID", 20),
+            _make_player("DEF1", "DEF", 15),
         ]
         view = self._view(rows)
-        view.filter_mode = "drafted"
-        view.position = "GK"
+        view.sort_mode = "position"
         view._refresh_data()
-        names = [r["name"] for r in view._rows]
-        assert names == ["DGK"]
-        assert "DMID" not in names
-        assert "UGK" not in names
+        positions = [r["position"] for r in view._rows]
+        assert positions == ["FWD", "MID", "DEF", "GK"]
 
-    def test_undrafted_gk_returns_gks(self):
+    def test_position_sort_desc_within_group(self):
         rows = [
-            _make_player("DGK", "GK", 10, drafted=True),
-            _make_player("UGK1", "GK", 5, drafted=False),
-            _make_player("UGK2", "GK", 3, drafted=False),
-            _make_player("DMID", "MID", 20, drafted=True),
+            _make_player("FWD1", "FWD", 10),
+            _make_player("FWD2", "FWD", 30),
+            _make_player("FWD3", "FWD", 20),
         ]
         view = self._view(rows)
-        view.filter_mode = "undrafted"
-        view.position = "GK"
+        view.sort_mode = "position"
         view._refresh_data()
         names = [r["name"] for r in view._rows]
-        assert names == ["UGK1", "UGK2"]
-        assert "DGK" not in names
-        assert "DMID" not in names
+        assert names == ["FWD2", "FWD3", "FWD1"]
+
+    def test_position_sort_mixed(self):
+        rows = [
+            _make_player("GK1", "GK", 50),
+            _make_player("FWD1", "FWD", 10),
+            _make_player("MID1", "MID", 40),
+            _make_player("DEF1", "DEF", 30),
+            _make_player("FWD2", "FWD", 20),
+        ]
+        view = self._view(rows)
+        view.sort_mode = "position"
+        view._refresh_data()
+        positions = [r["position"] for r in view._rows]
+        assert positions == ["FWD", "FWD", "MID", "DEF", "GK"]
+
+    # ── Build master list ──
 
     def test_build_master_called_once(self):
         self.fantasy.build_master_player_list.return_value = []
@@ -344,81 +315,68 @@ class TestTopPlayersView:
             self.draft, guild=self.guild
         )
 
-    def test_buttons_exist(self):
+    # ── UI elements ──
+
+    def test_selects_exist(self):
         view = self._view([])
-        labels = {c.label for c in view.children if isinstance(c, discord.ui.Button)}
-        assert labels >= {"All", "GK", "DEF", "MID", "FWD", "Drafted", "Undrafted", "◀", "▶"}
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        assert len(selects) == 2
 
+    def test_sort_select_exists(self):
+        view = self._view([])
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        sort_select = selects[0]
+        labels = [o.label for o in sort_select.options]
+        assert "Overall (DESC)" in labels
+        assert "Total (ASC)" in labels
+        assert "Drafted Points" in labels
+        assert "Undrafted Points" in labels
+        assert "Position" in labels
 
-    # ── FIFA_POSITION_MAP ──────────────────────────────────────
+    def test_sort_select_default(self):
+        view = self._view([])
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        defaults = [o for o in selects[0].options if o.default]
+        assert len(defaults) == 1
+        assert defaults[0].value == "overall_desc"
 
-    def test_position_map_handles_numeric(self):
-        assert FIFA_POSITION_MAP["1"] == "GK"
-        assert FIFA_POSITION_MAP["2"] == "DEF"
-        assert FIFA_POSITION_MAP["3"] == "MID"
-        assert FIFA_POSITION_MAP["4"] == "FWD"
+    def test_pos_filter_select_exists(self):
+        view = self._view([])
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        pos_select = selects[1]
+        labels = [o.label for o in pos_select.options]
+        assert "All Positions" in labels
+        assert "FWD" in labels
+        assert "MID" in labels
+        assert "DEF" in labels
+        assert "GK" in labels
 
-    def test_position_map_handles_string(self):
-        assert FIFA_POSITION_MAP["GK"] == "GK"
-        assert FIFA_POSITION_MAP["DEF"] == "DEF"
-        assert FIFA_POSITION_MAP["MID"] == "MID"
-        assert FIFA_POSITION_MAP["FWD"] == "FWD"
+    def test_pos_filter_default(self):
+        view = self._view([])
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        defaults = [o for o in selects[1].options if o.default]
+        assert len(defaults) == 1
+        assert defaults[0].value == ""
 
-    # ── Country filter ─────────────────────────────────────────
+    def test_pagination_buttons_exist(self):
+        view = self._view([])
+        buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
+        labels = {b.label for b in buttons}
+        assert labels == {"◀", "▶"}
 
-    def test_country_filter_filters_correctly(self):
-        rows = [
-            _make_player("Messi", "FWD", 25, country="Argentina", flag="🇦🇷"),
-            _make_player("Mbappé", "FWD", 30, country="France", flag="🇫🇷"),
-            _make_player("Martínez", "GK", 18, country="Argentina", flag="🇦🇷"),
-        ]
-        view = self._view(rows)
-        view.country = "Argentina"
-        view._refresh_data()
-        names = [r["name"] for r in view._rows]
-        assert "Messi" in names
-        assert "Martínez" in names
-        assert "Mbappé" not in names
+    def test_no_filter_buttons(self):
+        view = self._view([])
+        buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
+        labels = {b.label for b in buttons}
+        assert "All" not in labels
+        assert "GK" not in labels
+        assert "DEF" not in labels
+        assert "MID" not in labels
+        assert "FWD" not in labels
+        assert "Drafted" not in labels
+        assert "Undrafted" not in labels
 
-    def test_country_filter_empty_country_shows_all(self):
-        rows = [
-            _make_player("A", "FWD", 10, country="Arg", flag="🇦🇷"),
-            _make_player("B", "FWD", 20, country="Fra", flag="🇫🇷"),
-        ]
-        view = self._view(rows)
-        view.country = ""
-        view._refresh_data()
-        assert len(view._rows) == 2
-
-    def test_country_filter_combined_with_position(self):
-        rows = [
-            _make_player("Messi", "FWD", 25, country="Argentina", flag="🇦🇷"),
-            _make_player("Martínez", "GK", 18, country="Argentina", flag="🇦🇷"),
-            _make_player("Mbappé", "FWD", 30, country="France", flag="🇫🇷"),
-        ]
-        view = self._view(rows)
-        view.country = "Argentina"
-        view.position = "FWD"
-        view._refresh_data()
-        names = [r["name"] for r in view._rows]
-        assert names == ["Messi"]
-        assert "Martínez" not in names
-        assert "Mbappé" not in names
-
-    def test_country_filter_combined_with_drafted(self):
-        rows = [
-            _make_player("Messi", "FWD", 25, drafted=True, country="Argentina", flag="🇦🇷"),
-            _make_player("Martínez", "GK", 18, drafted=False, country="Argentina", flag="🇦🇷"),
-        ]
-        view = self._view(rows)
-        view.country = "Argentina"
-        view.filter_mode = "drafted"
-        view._refresh_data()
-        names = [r["name"] for r in view._rows]
-        assert names == ["Messi"]
-        assert "Martínez" not in names
-
-    # ── Flag display in embed ──────────────────────────────────
+    # ── Flag display in embed ──
 
     def test_flag_shown_in_embed_when_present(self):
         rows = [_make_player("Messi", "FWD", 25, country="Argentina", flag="🇦🇷")]
@@ -432,19 +390,23 @@ class TestTopPlayersView:
         view = self._view(rows)
         desc = view._build_embed().description
         assert "NoFlag" in desc
-        # flag_tag is empty, no stray chars
         assert "**NoFlag**" in desc
 
-    def test_flag_in_title_when_country_filter_active(self):
-        rows = [_make_player("Messi", "FWD", 25, country="Argentina", flag="🇦🇷")]
-        view = self._view(rows)
-        view.country = "Argentina"
-        view._refresh_data()
-        title = view._build_embed().title
-        assert "🇦🇷" in title
-        assert "Argentina" in title
+    # ── FIFA_POSITION_MAP ──
 
-    # ── COUNTRY_FLAGS mapping ──────────────────────────────────
+    def test_position_map_handles_numeric(self):
+        assert FIFA_POSITION_MAP["1"] == "GK"
+        assert FIFA_POSITION_MAP["2"] == "DEF"
+        assert FIFA_POSITION_MAP["3"] == "MID"
+        assert FIFA_POSITION_MAP["4"] == "FWD"
+
+    def test_position_map_handles_string(self):
+        assert FIFA_POSITION_MAP["GK"] == "GK"
+        assert FIFA_POSITION_MAP["DEF"] == "DEF"
+        assert FIFA_POSITION_MAP["MID"] == "MID"
+        assert FIFA_POSITION_MAP["FWD"] == "FWD"
+
+    # ── COUNTRY_FLAGS mapping ──
 
     def test_country_flags_has_key_coverage(self):
         majors = {"USA": "US", "France": "FR", "Brazil": "BR", "England": "EN",
@@ -463,51 +425,135 @@ class TestTopPlayersView:
         code = _flag_emoji("EN")
         assert "🏴󠁧󠁢󠁥󠁮󠁧󠁿" in code
 
-    # ── All button resets everything ────────────────────────────
+    # ── Country filter via command argument ──
 
-    def test_all_resets_position_country_and_mode(self):
+    def test_country_filter_via_master_all(self):
         rows = [
-            _make_player("A", "GK", 10, drafted=True, country="Arg"),
-            _make_player("B", "FWD", 20, drafted=False, country="Fra"),
+            _make_player("Messi", "FWD", 25, country="Argentina", flag="🇦🇷"),
+            _make_player("Mbappé", "FWD", 30, country="France", flag="🇫🇷"),
+            _make_player("Martínez", "GK", 18, country="Argentina", flag="🇦🇷"),
+        ]
+        view = self._view(rows)
+        view._master_all = [p for p in view._master_all if p.get("country", "") == "Argentina"]
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert "Messi" in names
+        assert "Martínez" in names
+        assert "Mbappé" not in names
+
+    # ── Sort select updates default on change ──
+
+    def test_sort_select_updates_default(self):
+        view = self._view([])
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        view.sort_mode = "position"
+        for opt in selects[0].options:
+            opt.default = opt.value == view.sort_mode
+        defaults = [o for o in selects[0].options if o.default]
+        assert len(defaults) == 1
+        assert defaults[0].value == "position"
+
+    # ── Position filter ──
+
+    def test_position_filter_fwd(self):
+        rows = [
+            _make_player("F1", "FWD", 30),
+            _make_player("M1", "MID", 20),
+            _make_player("D1", "DEF", 10),
+        ]
+        view = self._view(rows)
+        view.position = "FWD"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert names == ["F1"]
+
+    def test_position_filter_mid(self):
+        rows = [
+            _make_player("F1", "FWD", 30),
+            _make_player("M1", "MID", 20),
+            _make_player("M2", "MID", 10),
+        ]
+        view = self._view(rows)
+        view.position = "MID"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert sorted(names) == ["M1", "M2"]
+
+    def test_position_filter_def(self):
+        rows = [
+            _make_player("F1", "FWD", 30),
+            _make_player("D1", "DEF", 20),
+            _make_player("G1", "GK", 10),
         ]
         view = self._view(rows)
         view.position = "DEF"
-        view.country = "France"
-        view.filter_mode = "drafted"
-        # simulate what _all callback does
-        view.position = ""
-        view.country = ""
-        view.filter_mode = "all"
         view._refresh_data()
-        assert view.position == ""
-        assert view.country == ""
-        assert view.filter_mode == "all"
-        assert len(view._rows) == 2  # all players visible
+        names = [r["name"] for r in view._rows]
+        assert names == ["D1"]
 
-    # ── Country select dropdown ───────────────────────
-    # ── Buttons presence (including country select) ───
-
-    def test_buttons_and_select_exist(self):
-        view = self._view([])
-        buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
-        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
-        b_labels = {b.label for b in buttons}
-        assert b_labels >= {"All", "GK", "DEF", "MID", "FWD", "Drafted", "Undrafted", "◀", "▶"}
-        assert len(selects) >= 1, "Expected at least one Select (country filter)"
-
-    def test_country_select_has_all_countries_default(self):
+    def test_position_filter_gk(self):
         rows = [
-            _make_player("A", "FWD", 10, country="Arg", flag="🇦🇷"),
-            _make_player("B", "GK", 8, country="Fra", flag="🇫🇷"),
+            _make_player("F1", "FWD", 30),
+            _make_player("G1", "GK", 20),
+            _make_player("G2", "GK", 10),
         ]
         view = self._view(rows)
-        select = next(c for c in view.children if isinstance(c, discord.ui.Select))
-        labels = [o.label for o in select.options]
-        assert "All Countries" in labels
-        assert any("Arg" in l for l in labels)
-        assert any("Fra" in l for l in labels)
+        view.position = "GK"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert sorted(names) == ["G1", "G2"]
 
-    # ── topplayers command argument ───────────────────
+    def test_position_filter_with_sort(self):
+        rows = [
+            _make_player("F1", "FWD", 10),
+            _make_player("F2", "FWD", 30),
+            _make_player("F3", "FWD", 20),
+        ]
+        view = self._view(rows)
+        view.position = "FWD"
+        view.sort_mode = "total_asc"
+        view._refresh_data()
+        names = [r["name"] for r in view._rows]
+        assert names == ["F1", "F3", "F2"]
+
+    def test_position_filter_empty_when_all(self):
+        rows = [
+            _make_player("F1", "FWD", 30),
+            _make_player("M1", "MID", 20),
+        ]
+        view = self._view(rows)
+        assert view.position == ""
+        names = [r["name"] for r in view._rows]
+        assert len(names) == 2
+
+    def test_position_filter_title(self):
+        rows = [_make_player("F1", "FWD", 30)]
+        view = self._view(rows)
+        view.position = "FWD"
+        view._refresh_data()
+        title = view._build_embed().title
+        assert "FWD" in title
+        assert "🏆 Top Players — FWD" in title
+
+    def test_position_tag_hidden_when_filter_active(self):
+        rows = [_make_player("F1", "FWD", 30)]
+        view = self._view(rows)
+        view.position = "FWD"
+        view._refresh_data()
+        desc = view._build_embed().description
+        assert "FWD" not in desc or "**F1**" in desc
+
+    def test_pos_filter_updates_default(self):
+        view = self._view([])
+        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        view.position = "DEF"
+        for opt in selects[1].options:
+            opt.default = opt.value == view.position
+        defaults = [o for o in selects[1].options if o.default]
+        assert len(defaults) == 1
+        assert defaults[0].value == "DEF"
+
+    # ── make_player defaults ──
 
     def test_make_player_defaults(self):
         p = _make_player("N", "MID", 5)

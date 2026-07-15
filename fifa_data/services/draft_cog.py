@@ -1928,13 +1928,16 @@ class DraftCog(commands.Cog):
 
     @commands.command()
     async def topplayers(self, ctx, country: str = None):
-        """Show top drafted players by fantasy points with position & country filters."""
+        """Show top players with sort options (drafted points, undrafted points, total ASC, position)."""
         draft = self._get_draft(ctx.guild.id)
         if draft is None or not draft.get("started"):
             return await ctx.send("No active draft.")
 
-        await ctx.send("⏳ Fetching fantasy points...")
-        await self.fantasy.fetch_data()
+        loading = await ctx.send("⏳ Fetching fantasy points...")
+        try:
+            await self.fantasy.fetch_data()
+        except Exception as e:
+            return await loading.edit(content=f"❌ Failed to fetch data: {e}")
 
         view = _TopPlayersView(self.fantasy, draft, ctx.guild)
         if country:
@@ -1945,7 +1948,7 @@ class DraftCog(commands.Cog):
             ), key=len, reverse=True)
             matched = next((c for c in known if country_raw.lower() in c.lower()), None)
             if matched:
-                view.country = matched
+                view._master_all = [p for p in view._master_all if p.get("country", "") == matched]
                 view._refresh_data()
         embed = view._build_embed()
         msg = await ctx.send(embed=embed, view=view)
@@ -5400,53 +5403,65 @@ class _XSimView(discord.ui.View):
 
 class _TopPlayersView(discord.ui.View):
     PAGE_SIZE = 20
+    _POS_ORDER = {"FWD": 0, "MID": 1, "DEF": 2, "GK": 3}
+    _SORT_LABELS = {
+        "overall_desc": "Overall (DESC)",
+        "total_asc": "Total (ASC)",
+        "points_drafted": "Drafted Points",
+        "points_undrafted": "Undrafted Points",
+        "position": "Position",
+    }
 
     def __init__(self, fantasy, draft, guild):
         super().__init__(timeout=120)
         self.fantasy = fantasy
         self.draft = draft
         self.guild = guild
+        self.sort_mode = "overall_desc"
         self.position = ""
-        self.country = ""
-        self.filter_mode = "all"
         self.page = 0
         self._rows: list[dict] = []
+        self._master_all: list[dict] = fantasy.build_master_player_list(draft, guild=guild)
         self._message: discord.Message | None = None
         self._refresh_data()
         self._update_buttons()
 
-    def _build_master(self) -> list[dict]:
-        master = self.fantasy.build_master_player_list(self.draft, guild=self.guild)
-        if self.filter_mode == "drafted":
-            master = [p for p in master if p["drafted"]]
-        elif self.filter_mode == "undrafted":
-            master = [p for p in master if not p["drafted"]]
+    def _build_filtered(self) -> list[dict]:
         if self.position:
-            master = [p for p in master if p["position"] == self.position]
-        if self.country:
-            master = [p for p in master if p.get("country", "") == self.country]
-        return master
+            return [p for p in self._master_all if p["position"] == self.position]
+        return list(self._master_all)
+
+    def _sort_rows(self, rows: list[dict]) -> list[dict]:
+        if self.sort_mode == "points_drafted":
+            drafted = sorted([p for p in rows if p["drafted"]], key=lambda x: x["net_points"], reverse=True)
+            undrafted = sorted([p for p in rows if not p["drafted"]], key=lambda x: x["net_points"], reverse=True)
+            return drafted + undrafted
+        elif self.sort_mode == "points_undrafted":
+            undrafted = sorted([p for p in rows if not p["drafted"]], key=lambda x: x["net_points"], reverse=True)
+            drafted = sorted([p for p in rows if p["drafted"]], key=lambda x: x["net_points"], reverse=True)
+            return undrafted + drafted
+        elif self.sort_mode == "position":
+            return sorted(rows, key=lambda x: (self._POS_ORDER.get(x["position"], 99), -x["net_points"]))
+        elif self.sort_mode == "total_asc":
+            return sorted(rows, key=lambda x: x["net_points"])
+        else:
+            return sorted(rows, key=lambda x: x["net_points"], reverse=True)
 
     def _refresh_data(self):
-        self._rows = self._build_master()
+        self._rows = self._sort_rows(self._build_filtered())
         self.page = 0
-        self._update_country_options()
 
     def _total_pages(self) -> int:
         return max(1, (len(self._rows) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
 
     def _build_embed(self):
-        mode_label = {"all": "All Players", "drafted": "Drafted", "undrafted": "Undrafted"}[self.filter_mode]
         total = len(self._rows)
         start = self.page * self.PAGE_SIZE
         page_rows = self._rows[start:start + self.PAGE_SIZE]
 
-        title = "🏆 Top Players"
-        if self.country:
-            first = page_rows[0] if page_rows else {}
-            flag = first.get("flag", "")
-            title += f" — {flag} {self.country}"
-        title += f" — {mode_label}"
+        label = self._SORT_LABELS.get(self.sort_mode, "Overall (DESC)")
+        pos_label = f" — {self.position}" if self.position else ""
+        title = f"🏆 Top Players{pos_label} — {label}"
 
         embed = discord.Embed(title=title, color=0xff3fb9)
         lines = []
@@ -5457,15 +5472,11 @@ class _TopPlayersView(discord.ui.View):
             owner = ""
             if r.get("owner_name"):
                 owner = f" • {r['owner_name']}"
-            pos_tag = f" {pos}" if not self.position and pos else ""
+            pos_tag = f" {pos}" if pos and not self.position else ""
             flag_tag = f"{flag}" if flag else ""
             lines.append(f"#{rank} • **{pts_str}** • {flag_tag}**{r['name']}**{pos_tag}{owner}")
         embed.description = "\n".join(lines) if lines else "No players found."
         footer = f"Page {self.page + 1}/{self._total_pages()}  •  {total} players"
-        if self.country:
-            countries = set(p.get("country", "") for p in self._rows)
-            if len(countries) == 1:
-                footer += f"  •  {flag} {self.country}"
         embed.set_footer(text=footer)
         return embed
 
@@ -5473,19 +5484,6 @@ class _TopPlayersView(discord.ui.View):
         total = self._total_pages()
         self._prev.disabled = self.page == 0
         self._next.disabled = self.page >= total - 1
-        for child in self.children:
-            if not isinstance(child, discord.ui.Button):
-                continue
-            lbl = child.label
-            if lbl == "All":
-                active = self.position == "" and self.filter_mode == "all" and self.country == ""
-                child.style = discord.ButtonStyle.primary if active else discord.ButtonStyle.secondary
-            elif lbl in ("GK", "DEF", "MID", "FWD"):
-                child.style = discord.ButtonStyle.primary if lbl == self.position else discord.ButtonStyle.secondary
-            elif lbl == "Drafted":
-                child.style = discord.ButtonStyle.primary if self.filter_mode == "drafted" else discord.ButtonStyle.secondary
-            elif lbl == "Undrafted":
-                child.style = discord.ButtonStyle.primary if self.filter_mode == "undrafted" else discord.ButtonStyle.secondary
 
     async def _refresh(self, interaction: discord.Interaction):
         self._refresh_data()
@@ -5493,48 +5491,47 @@ class _TopPlayersView(discord.ui.View):
         embed = self._build_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    # ── Row 0: All / GK / DEF / MID / FWD ──
+    # ── Sort Select ──
 
-    @discord.ui.button(label="All", style=discord.ButtonStyle.secondary, row=0)
-    async def _all(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = ""
-        self.country = ""
-        self.filter_mode = "all"
+    @discord.ui.select(
+        placeholder="Sort by...",
+        row=0,
+        options=[
+            discord.SelectOption(label="Overall (DESC)", value="overall_desc", default=True, description="All players, highest points first"),
+            discord.SelectOption(label="Total (ASC)", value="total_asc", description="Ascending total points"),
+            discord.SelectOption(label="Drafted Points", value="points_drafted", description="Drafted players first"),
+            discord.SelectOption(label="Undrafted Points", value="points_undrafted", description="Undrafted players first"),
+            discord.SelectOption(label="Position", value="position", description="FWD > MID > DEF > GK"),
+        ],
+    )
+    async def _sort_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.sort_mode = select.values[0]
+        for opt in select.options:
+            opt.default = opt.value == self.sort_mode
         await self._refresh(interaction)
 
-    @discord.ui.button(label="GK", style=discord.ButtonStyle.secondary, row=0)
-    async def _pos_gk(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = "GK" if self.position != "GK" else ""
+    # ── Position Filter Select ──
+
+    @discord.ui.select(
+        placeholder="Filter position...",
+        row=1,
+        options=[
+            discord.SelectOption(label="All Positions", value="", default=True),
+            discord.SelectOption(label="FWD", value="FWD"),
+            discord.SelectOption(label="MID", value="MID"),
+            discord.SelectOption(label="DEF", value="DEF"),
+            discord.SelectOption(label="GK", value="GK"),
+        ],
+    )
+    async def _pos_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.position = select.values[0]
+        for opt in select.options:
+            opt.default = opt.value == self.position
         await self._refresh(interaction)
 
-    @discord.ui.button(label="DEF", style=discord.ButtonStyle.secondary, row=0)
-    async def _pos_def(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = "DEF" if self.position != "DEF" else ""
-        await self._refresh(interaction)
+    # ── Pagination ──
 
-    @discord.ui.button(label="MID", style=discord.ButtonStyle.secondary, row=0)
-    async def _pos_mid(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = "MID" if self.position != "MID" else ""
-        await self._refresh(interaction)
-
-    @discord.ui.button(label="FWD", style=discord.ButtonStyle.secondary, row=0)
-    async def _pos_fwd(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.position = "FWD" if self.position != "FWD" else ""
-        await self._refresh(interaction)
-
-    # ── Row 1: Drafted / Undrafted / ◀ / ▶ ──
-
-    @discord.ui.button(label="Drafted", style=discord.ButtonStyle.secondary, row=1)
-    async def _drafted(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.filter_mode = "all" if self.filter_mode == "drafted" else "drafted"
-        await self._refresh(interaction)
-
-    @discord.ui.button(label="Undrafted", style=discord.ButtonStyle.secondary, row=1)
-    async def _undrafted(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.filter_mode = "all" if self.filter_mode == "undrafted" else "undrafted"
-        await self._refresh(interaction)
-
-    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=2)
     async def _prev(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.page <= 0:
             return await interaction.response.defer()
@@ -5542,46 +5539,13 @@ class _TopPlayersView(discord.ui.View):
         self._update_buttons()
         await interaction.response.edit_message(embed=self._build_embed(), view=self)
 
-    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=2)
     async def _next(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.page >= self._total_pages() - 1:
             return await interaction.response.defer()
         self.page += 1
         self._update_buttons()
         await interaction.response.edit_message(embed=self._build_embed(), view=self)
-
-    # ── Row 2: Country Select ──
-
-    @discord.ui.select(
-        placeholder="Filter by country...",
-        row=2,
-        options=[
-            discord.SelectOption(label="All Countries", value="", default=True),
-        ],
-    )
-    async def _country_select(
-        self, interaction: discord.Interaction, select: discord.ui.Select,
-    ):
-        self.country = select.values[0]
-        await self._refresh(interaction)
-
-    def _update_country_options(self):
-        countries = sorted(set(
-            (p.get("country", ""), p.get("flag", "")) for p in self._rows if p.get("country")
-        ), key=lambda x: x[0])
-
-        options = [discord.SelectOption(label="All Countries", value="", default=self.country == "")]
-        for name, flag in countries:
-            label = f"{flag} {name}" if flag else name
-            options.append(discord.SelectOption(
-                label=label, value=name, default=name == self.country,
-            ))
-        for item in self.children:
-            if isinstance(item, discord.ui.Select):
-                try:
-                    item.options = options[:25]
-                except ValueError:
-                    item.options = options[:25]
 
     async def on_timeout(self):
         if self._message:
