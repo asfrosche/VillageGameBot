@@ -54,7 +54,9 @@ COMMAND_INDEX = [
     (".unstalkall", "Stop stalking all players", "Surveillance", ["unstalk", "clear", "all"]),
     (".stalklist", "Show all active stalk relationships", "Surveillance", ["stalk", "list", "peek"]),
     (".home", "Bring the player home", "Home", ["home", "return", "location"]),
+    (".home stealth", "Bring the player home silently (no join/leave messages)", "Home", ["home", "stealth", "silent", "admin"]),
     (".home return", "Bring all players home", "Home", ["home", "all", "return"]),
+    (".leaveonlyhomes", "Remove all players in this RC from houses (not PCs)", "Home", ["leave", "houses", "remove", "rc"]),
     (".owner", "List house owners", "Home", ["owner", "house", "list"]),
     (".home initialize", "Assign RC + house to alive players", "Home", ["home", "init", "assign", "admin"]),
     (".home setup", "Move sponsors to their player's house", "Home", ["home", "sponsor", "admin"]),
@@ -345,7 +347,7 @@ COMMAND_INDEX = [
     (".missingidsit", "Games with missing player IDs (IT)", "Library & Stats", ["missing", "ids", "italian", "admin"]),
     (".badnamesit", "List bad/unnamed players (IT)", "Library & Stats", ["bad", "names", "italian", "admin"]),
     (".removebadnameit <name>", "Remove a bad name (IT)", "Library & Stats", ["remove", "bad", "name", "italian", "admin"]),
-    ("/status", "Open Status Manager for this channel (admin)", "Status", ["status", "moderator", "track", "protection", "roleblock"]),
+    ("/status", "Open Status Manager for this channel (admin)", "Status", ["status", "moderator", "track", "protection", "roleblock", "stealth", "immunity", "untargetable"]),
     (".status clear", "Clear all statuses for this channel (admin)", "Status", ["status", "clear", "remove", "admin"]),
     (".statuslist", "Show all channels with active statuses (admin)", "Status", ["status", "list", "overview", "moderator"]),
 ]
@@ -1366,10 +1368,12 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedm, self.help_moving)
 
     async def help_home(self, ctx):
-        embedh = discord.Embed(title="🏡 - Home commands", description="12 commands", color=0xff3fb9)
+        embedh = discord.Embed(title="🏡 - Home commands", description="13 commands", color=0xff3fb9)
         embedh.add_field(name="Player Commands", value=(
             "**`.home`** ─ Bring the player home\n"
+            "**`.home stealth`** ─ Bring the player home silently (no join/leave messages)\n"
             "**`.home return`** ─ Bring all players home\n"
+            "**`.leaveonlyhomes`** ─ Remove all players in this RC from houses (not PCs)\n"
             "**`.owner`** ─ List house owners"
         ), inline=False)
         embedh.add_field(name="Admin Commands", value=(
@@ -1990,7 +1994,8 @@ class Other(commands.Cog):
         embed.add_field(name="Built-in Statuses", value=(
             "🛡 **Protection** ─ Channel is protected\n"
             "⛔ **Roleblock** ─ Channel is roleblocked\n"
-            "👣 **Visit Block** ─ Visits to this channel are blocked\n"
+            "👣 **Visit Block** ─ Warning on movement (must confirm)\n"
+            "🌑 **Stealth** ─ Warning on movement (skipped with `stealth` arg)\n"
             "✨ **Immunity** ─ Immunity active\n"
             "🎯 **Untargetable** ─ Channel cannot be targeted"
         ), inline=False)
@@ -2000,9 +2005,12 @@ class Other(commands.Cog):
             "Clear individual statuses or all at once with the buttons."
         ), inline=False)
         embed.add_field(name="Integration", value=(
-            "The bot automatically warns moderators when:\n"
-            "• **`.dead`** is used on a channel with Protection\n"
-            "• **`.move`**, **`.renmove`**, **`.knock`**, or **`.renknock`** is used on a channel with Visit Block\n\n"
+            "The bot shows a **warning (Confirm/Cancel)** when:\n"
+            "• **`.move`**, **`.renmove`**, **`.knock`**, **`.renknock`**, **`.home`** on a visitblocked channel\n"
+            "• **`.move`**, **`.renmove`**, **`.knock`**, **`.renknock`**, **`.home`** on a channel with Stealth status\n\n"
+            "**Visit Block** — admin must confirm to proceed (no bypass)\n"
+            "**Stealth** — **`.move stealth`**, **`.renmove stealth`**, or **`.home stealth`** skip the warning\n"
+            "• **`.dead`** is used on a channel with Protection\n\n"
             "All status changes are logged to the actions log channel."
         ), inline=False)
         embed.set_footer(text="Village Game • Admin only")

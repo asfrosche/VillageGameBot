@@ -71,6 +71,9 @@ base_variables = {
     "tracked_message_counts": {},
     "narration_color": 0xdc143c,
     "narration_log_channel_name": "✍️│commentary",
+    "player_follows": {},
+    "player_stalks": {},
+    "channel_statuses": {},
 }
 
 def load_guild_data(guild_id):

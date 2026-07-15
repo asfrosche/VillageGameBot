@@ -6,6 +6,13 @@ from datetime import datetime
 from discord.ext import commands
 from discord.ui import Button, View
 from cogs.data_utils import load_guild_data, save_guild_data
+from cogs.status_cog import (
+    check_move_warning,
+    check_visitblock_warning,
+    StatusWarningConfirmView,
+    check_channel_warning,
+)
+from utils.embeds import warning_embed
 
 class Home(commands.Cog):
     def __init__(self, bot):
@@ -17,6 +24,8 @@ class Home(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             if type is None:
                 await self.home_single(ctx)
+            elif type.lower() == 'stealth':
+                await self.home_single(ctx, is_stealth=True)
             elif type.lower() == 'initialize':
                 if user is None:
                     if new_channel is None:
@@ -66,10 +75,32 @@ class Home(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
-    async def home_single(self, ctx):
+    async def home_single(self, ctx, is_stealth=False):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
+                # ── Visitblock warning ──
+                _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
+                if _vb_hit:
+                    _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
+                    _vb_view = StatusWarningConfirmView(ctx.author.id)
+                    _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
+                    _vb_view.message = _vb_msg
+                    await _vb_view.wait()
+                    if not _vb_view.confirmed:
+                        return
+                # ── Stealth warning (bypassable) ──
+                if not is_stealth:
+                    _st_text, _st_hit = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
+                    if _st_hit:
+                        _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
+                        _st_view = StatusWarningConfirmView(ctx.author.id)
+                        _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
+                        _st_view.message = _st_msg
+                        await _st_view.wait()
+                        if not _st_view.confirmed:
+                            return
+                # ── End status warning ──
                 alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
                 sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
                 alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
@@ -78,19 +109,24 @@ class Home(commands.Cog):
                 if not category:
                     await ctx.send("Houses category not found")
                     return
+                no_home = []
                 for member in members:
                     if alive_role in member.roles or alt_role in member.roles:
                         for channel in category.channels:
                             permissions = channel.permissions_for(member)
                             if permissions.send_messages:
                                 await channel.set_permissions(member, overwrite=None)
-                                await channel.send(f'{member.mention} Leaves')
+                                if not is_stealth:
+                                    await channel.send(f'{member.mention} Leaves')
                         home_id = guild_data["member_homes"].get(str(member.id))
                         if home_id:
                             home_channel = discord.utils.get(category.channels, id=int(home_id))
                             if home_channel:
                                 await home_channel.set_permissions(member, read_messages=True, send_messages=True)
-                                await home_channel.send(f'{member.mention} Joins')
+                                if not is_stealth:
+                                    await home_channel.send(f'{member.mention} Joins')
+                        else:
+                            no_home.append(member.mention)
                     elif sponsor_role in member.roles:
                         for channel in category.channels:
                             permissions = channel.permissions_for(member)
@@ -101,7 +137,14 @@ class Home(commands.Cog):
                             home_channel = discord.utils.get(category.channels, id=int(home_id))
                             if home_channel:
                                 await home_channel.set_permissions(member, read_messages=True, send_messages=True)
+                        else:
+                            no_home.append(member.mention)
                 await ctx.send('Done')
+                if no_home:
+                    await ctx.send(
+                        f"⚠ No home set for: {', '.join(no_home)}\n"
+                        f"Use `.home set @player #house` to assign a home."
+                    )
             else:
                 await ctx.send("Guild data not loaded.")
         else:
@@ -497,3 +540,39 @@ class Home(commands.Cog):
         else:
             embed.add_field(name='Players:', value="No owners found in this house.", inline=False)
         await ctx.send(embed=embed)
+
+    @commands.command()
+    async def leaveonlyhomes(self, ctx):
+        """Remove all players in this RC from all houses (not PCs). Use in an RC."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
+        if not rc_category or ctx.channel.category_id != rc_category.id:
+            await ctx.send("This command can only be used in a RoleChat.")
+            return
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        dead_role = discord.utils.get(ctx.guild.roles, name=guild_data["dead_role_name"])
+        alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+        if not houses_category:
+            await ctx.send("Houses category not found.")
+            return
+        members = ctx.channel.members
+        count = 0
+        for member in members:
+            if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
+                for channel in houses_category.channels:
+                    permissions = channel.permissions_for(member)
+                    if permissions.send_messages:
+                        await channel.set_permissions(member, overwrite=None)
+                        await channel.send(f'{member.mention} Leaves')
+                count += 1
+        if count:
+            await ctx.send(f'Done — removed {count} player(s) from all houses.')
+        else:
+            await ctx.send('No players found in this RC.')

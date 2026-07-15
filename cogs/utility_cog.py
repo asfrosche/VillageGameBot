@@ -7,7 +7,13 @@ import re
 from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from discord.ui import View, Button
+from utils.embeds import warning_embed
 from cogs.data_utils import load_guild_data, save_guild_data, add_player
+from cogs.status_cog import (
+    check_dead_warning,
+    StatusWarningConfirmView,
+    check_channel_warning,
+)
 
 class SkipNightView(discord.ui.View):
 
@@ -289,6 +295,16 @@ class Utility(commands.Cog):
             if permissions.send_messages:
                 await channel.set_permissions(member, overwrite=None)
                 await channel.send(f"{member.mention} Leaves")
+
+    async def _cleanup_follows_on_death(self, guild_id, guild_data, member_id):
+        """Remove all follow pairs where member_id is the target (on death)."""
+        follows = guild_data.get("player_follows", {})
+        removed = [k for k, v in follows.items() if v["target"] == str(member_id)]
+        for k in removed:
+            del follows[k]
+        if removed:
+            guild_data["player_follows"] = follows
+            save_guild_data(guild_id, guild_data)
 
     @commands.command(aliases=['purge'])
     async def broom(self, ctx, from_id: int = None, to_id: int = None):
@@ -701,6 +717,20 @@ class Utility(commands.Cog):
                 dead_category = discord.utils.get(ctx.guild.categories, name=guild_data["dead_rc_category_name"])
                 channel = ctx.channel
                 members = channel.members
+                # ── Status warning ──
+                _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_dead_warning)
+                if _hw:
+                    _embed = warning_embed(
+                        title="⚠ This player currently has:",
+                        description=_wt,
+                    )
+                    _warn_view = StatusWarningConfirmView(ctx.author.id)
+                    _msg = await ctx.send(embed=_embed, view=_warn_view)
+                    _warn_view.message = _msg
+                    await _warn_view.wait()
+                    if not _warn_view.confirmed:
+                        return
+                # ── End status warning ──
                 old_house = None
                 await ctx.channel.edit(category=dead_category)
                 for member in members:
@@ -770,6 +800,10 @@ class Utility(commands.Cog):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
+                # Clean up follow pairs where dead member was the target
+                for member in members:
+                    if alive_role in member.roles or sponsor_role in member.roles:
+                        await self._cleanup_follows_on_death(ctx.guild.id, guild_data, member.id)
                 save_guild_data(ctx.guild.id, guild_data)
                 await ctx.send('Done')
                 estate_cog = self.bot.get_cog('Estate')
@@ -862,6 +896,10 @@ class Utility(commands.Cog):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
+                # Clean up follow pairs where dead member was the target
+                for member in members:
+                    if alive_role in member.roles or sponsor_role in member.roles:
+                        await self._cleanup_follows_on_death(ctx.guild.id, guild_data, member.id)
                 save_guild_data(ctx.guild.id, guild_data)
                 await ctx.send('Done')
                 estate_cog = self.bot.get_cog('Estate')
@@ -947,6 +985,12 @@ class Utility(commands.Cog):
             await sponsor_member.remove_roles(sponsor_role)
             await sponsor_member.add_roles(dead_role)
             await ctx.send(f"{sponsor_member.display_name} is now {dead_role.mention}.")
+
+        # Clean up follow pairs where dead member was the target
+        if alive_member:
+            await self._cleanup_follows_on_death(ctx.guild.id, guild_data, target_member.id)
+        elif sponsor_member:
+            await self._cleanup_follows_on_death(ctx.guild.id, guild_data, target_member.id)
 
         team = None
         role = None

@@ -10,6 +10,7 @@ from utils.embeds import info_embed, warning_embed, error_embed
 from cogs.status_cog import (
     check_move_warning,
     check_knock_warning,
+    check_visitblock_warning,
     StatusWarningConfirmView,
     check_channel_warning,
 )
@@ -223,19 +224,27 @@ class Moving(commands.Cog):
                 if new_channel is not None:
                     stealth = 'stealth' in args
                     read_only = 'read' in args
-                    # ── Status warning ──
-                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
-                    if _hw:
-                        _we = warning_embed(
-                            title="⚠ This player currently has:",
-                            description=_wt,
-                        )
-                        _wv = StatusWarningConfirmView(ctx.author.id)
-                        _wm = await ctx.send(embed=_we, view=_wv)
-                        _wv.message = _wm
-                        await _wv.wait()
-                        if not _wv.confirmed:
+                    # ── Visitblock warning ──
+                    _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
+                    if _vb_hit:
+                        _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
+                        _vb_view = StatusWarningConfirmView(ctx.author.id)
+                        _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
+                        _vb_view.message = _vb_msg
+                        await _vb_view.wait()
+                        if not _vb_view.confirmed:
                             return
+                    # ── Stealth warning (bypassable) ──
+                    if not stealth:
+                        _st_text, _st_hit = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
+                        if _st_hit:
+                            _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
+                            _st_view = StatusWarningConfirmView(ctx.author.id)
+                            _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
+                            _st_view.message = _st_msg
+                            await _st_view.wait()
+                            if not _st_view.confirmed:
+                                return
                     # ── End status warning ──
                     await self.process_move(ctx, new_channel, is_stealth=stealth, read_only=read_only)
                 else:
@@ -254,19 +263,27 @@ class Moving(commands.Cog):
                 if new_channel is not None:
                     stealth = 'stealth' in args
                     read_only = 'read' in args
-                    # ── Status warning ──
-                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
-                    if _hw:
-                        _we = warning_embed(
-                            title="⚠ This player currently has:",
-                            description=_wt,
-                        )
-                        _wv = StatusWarningConfirmView(ctx.author.id)
-                        _wm = await ctx.send(embed=_we, view=_wv)
-                        _wv.message = _wm
-                        await _wv.wait()
-                        if not _wv.confirmed:
+                    # ── Visitblock warning ──
+                    _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
+                    if _vb_hit:
+                        _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
+                        _vb_view = StatusWarningConfirmView(ctx.author.id)
+                        _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
+                        _vb_view.message = _vb_msg
+                        await _vb_view.wait()
+                        if not _vb_view.confirmed:
                             return
+                    # ── Stealth warning (bypassable) ──
+                    if not stealth:
+                        _st_text, _st_hit = check_channel_warning(guild_data, ctx.channel.id, check_move_warning)
+                        if _st_hit:
+                            _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
+                            _st_view = StatusWarningConfirmView(ctx.author.id)
+                            _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
+                            _st_view.message = _st_msg
+                            await _st_view.wait()
+                            if not _st_view.confirmed:
+                                return
                     # ── End status warning ──
                     await self.process_move(ctx, new_channel, is_stealth=stealth, read_only=read_only)
                 else:
@@ -346,24 +363,31 @@ class Moving(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
+                # ── Visitblock warning ──
+                _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
+                if _vb_hit:
+                    _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
+                    _vb_view = StatusWarningConfirmView(ctx.author.id)
+                    _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
+                    _vb_view.message = _vb_msg
+                    await _vb_view.wait()
+                    if not _vb_view.confirmed:
+                        return
+                # ── Stealth warning ──
+                _st_text, _st_hit = check_channel_warning(guild_data, ctx.channel.id, check_knock_warning)
+                if _st_hit:
+                    _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
+                    _st_view = StatusWarningConfirmView(ctx.author.id)
+                    _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
+                    _st_view.message = _st_msg
+                    await _st_view.wait()
+                    if not _st_view.confirmed:
+                        return
+                # ── End status warning ──
                 category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
                 channel_name = f'{guild_data["house_prefix"]}{channel_str}'
                 new_channel = discord.utils.get(category.channels, name=channel_name)
                 if new_channel is not None:
-                    # ── Status warning ──
-                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_knock_warning)
-                    if _hw:
-                        _we = warning_embed(
-                            title="⚠ This player currently has:",
-                            description=_wt,
-                        )
-                        _wv = StatusWarningConfirmView(ctx.author.id)
-                        _wm = await ctx.send(embed=_we, view=_wv)
-                        _wv.message = _wm
-                        await _wv.wait()
-                        if not _wv.confirmed:
-                            return
-                    # ── End status warning ──
                     await self.process_knock(ctx, new_channel, guild_data)
                 else:
                     await ctx.send("Channel not found")
@@ -378,21 +402,28 @@ class Moving(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
+                # ── Visitblock warning ──
+                _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
+                if _vb_hit:
+                    _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
+                    _vb_view = StatusWarningConfirmView(ctx.author.id)
+                    _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
+                    _vb_view.message = _vb_msg
+                    await _vb_view.wait()
+                    if not _vb_view.confirmed:
+                        return
+                # ── Stealth warning ──
+                _st_text, _st_hit = check_channel_warning(guild_data, ctx.channel.id, check_knock_warning)
+                if _st_hit:
+                    _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
+                    _st_view = StatusWarningConfirmView(ctx.author.id)
+                    _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
+                    _st_view.message = _st_msg
+                    await _st_view.wait()
+                    if not _st_view.confirmed:
+                        return
+                # ── End status warning ──
                 if new_channel is not None:
-                    # ── Status warning ──
-                    _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_knock_warning)
-                    if _hw:
-                        _we = warning_embed(
-                            title="⚠ This player currently has:",
-                            description=_wt,
-                        )
-                        _wv = StatusWarningConfirmView(ctx.author.id)
-                        _wm = await ctx.send(embed=_we, view=_wv)
-                        _wv.message = _wm
-                        await _wv.wait()
-                        if not _wv.confirmed:
-                            return
-                    # ── End status warning ──
                     await self.process_knock(ctx, new_channel, guild_data)
                 else:
                     await ctx.send("Channel not found")

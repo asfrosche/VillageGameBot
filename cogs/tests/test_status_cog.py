@@ -21,6 +21,8 @@ from cogs.status_cog import (
     check_dead_warning,
     check_move_warning,
     check_knock_warning,
+    check_visitblock,
+    check_visitblock_warning,
     check_channel_warning,
     StatusManagerView,
     StatusWarningConfirmView,
@@ -244,7 +246,7 @@ class TestBuildStatusDescription:
         gd = _gd({"1": {"protection": {"timestamp": 1700000000, "moderator": 42}}})
         d = build_status_description(gd, 1)
         assert "🛡 Protection" in d
-        assert "<t:1700000000:R>" in d
+        assert "<t:1700000000:t>" in d
 
     def test_multiple_builtins(self):
         gd = _gd({"1": {"protection": {"timestamp": 100, "moderator": 1},
@@ -285,9 +287,13 @@ class TestCheckMoveWarning:
     def test_empty(self):
         assert check_move_warning(_gd(), 1) is None
 
-    def test_visitblock(self):
-        w = check_move_warning(_gd({"1": {"visitblock": {"timestamp": 1700000000, "moderator": 1}}}), 1)
-        assert "👣 Visit Block" in w
+    def test_stealth(self):
+        w = check_move_warning(_gd({"1": {"stealth": {"timestamp": 1700000000, "moderator": 1}}}), 1)
+        assert "🌑 Stealth" in w
+
+    def test_visitblock_ignored(self):
+        gd = _gd({"1": {"visitblock": {"timestamp": 100, "moderator": 1}}})
+        assert check_move_warning(gd, 1) is None
 
     def test_other_ignored(self):
         gd = _gd({"1": {"protection": {"timestamp": 100, "moderator": 1}}})
@@ -296,11 +302,41 @@ class TestCheckMoveWarning:
 
 class TestCheckKnockWarning:
     def test_delegates(self):
-        gd = _gd({"1": {"visitblock": {"timestamp": 500, "moderator": 1}}})
+        gd = _gd({"1": {"stealth": {"timestamp": 500, "moderator": 1}}})
         assert check_knock_warning(gd, 1) == check_move_warning(gd, 1)
 
     def test_none(self):
         assert check_knock_warning(_gd(), 1) is None
+
+
+class TestCheckVisitblock:
+    def test_true_when_blocked(self):
+        gd = _gd({"1": {"visitblock": {"timestamp": 100, "moderator": 1}}})
+        assert check_visitblock(gd, 1) is True
+
+    def test_false_when_empty(self):
+        assert check_visitblock(_gd(), 1) is False
+
+    def test_false_for_other_status(self):
+        gd = _gd({"1": {"protection": {"timestamp": 100, "moderator": 1}}})
+        assert check_visitblock(gd, 1) is False
+
+
+class TestCheckVisitblockWarning:
+    def test_empty(self):
+        assert check_visitblock_warning(_gd(), 1) is None
+
+    def test_visitblock(self):
+        w = check_visitblock_warning(_gd({"1": {"visitblock": {"timestamp": 1700000000, "moderator": 1}}}), 1)
+        assert "👣 Visit Block" in w
+
+    def test_stealth_ignored(self):
+        gd = _gd({"1": {"stealth": {"timestamp": 100, "moderator": 1}}})
+        assert check_visitblock_warning(gd, 1) is None
+
+    def test_other_ignored(self):
+        gd = _gd({"1": {"protection": {"timestamp": 100, "moderator": 1}}})
+        assert check_visitblock_warning(gd, 1) is None
 
 
 class TestCheckChannelWarning:
@@ -343,11 +379,11 @@ class TestStatusManagerView:
     def test_toggle_buttons_all_inactive(self):
         v = _make_view(StatusManagerView, 100, "alice-rc", 42)
         v._toggle_buttons(_gd())
-        for child in v.children[:5]:
+        for child in v.children[:6]:
             assert child.style == discord.ButtonStyle.secondary
 
     def test_button_count(self):
-        assert len(_make_view(StatusManagerView, 100, "x", 1).children) == 8
+        assert len(_make_view(StatusManagerView, 100, "x", 1).children) == 9
 
     def test_toggle_adds(self):
         gd = _gd()

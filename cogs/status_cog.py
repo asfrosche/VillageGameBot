@@ -15,6 +15,7 @@ BUILTIN_STATUSES = {
     "visitblock":        ("👣", "Visit Block"),
     "immunity":          ("✨", "Immunity"),
     "untargetable":      ("🎯", "Untargetable"),
+    "stealth":           ("🌑", "Stealth"),
 }
 
 
@@ -73,10 +74,10 @@ def build_status_description(guild_data, channel_id):
     for key, (emoji, label) in BUILTIN_STATUSES.items():
         if key in entry:
             ts = entry[key]["timestamp"]
-            lines.append(f"{emoji} {label}\nAdded <t:{ts}:R>")
+            lines.append(f"{emoji} {label}\nAdded <t:{ts}:t>")
     for c in entry.get("custom", []):
         ts = c["timestamp"]
-        lines.append(f"📝 {c['text']}\nAdded <t:{ts}:R>")
+        lines.append(f"📝 {c['text']}\nAdded <t:{ts}:t>")
     return "\n\n".join(lines) if lines else "No active statuses."
 
 
@@ -84,20 +85,32 @@ def check_dead_warning(guild_data, channel_id):
     entry = _channel_entry(guild_data, channel_id)
     if "protection" in entry:
         ts = entry["protection"]["timestamp"]
-        return f"🛡 Protection\nAdded <t:{ts}:R>"
+        return f"🛡 Protection\nAdded <t:{ts}:t>"
     return None
 
 
 def check_move_warning(guild_data, channel_id):
     entry = _channel_entry(guild_data, channel_id)
-    if "visitblock" in entry:
-        ts = entry["visitblock"]["timestamp"]
-        return f"👣 Visit Block\nAdded <t:{ts}:R>"
+    if "stealth" in entry:
+        ts = entry["stealth"]["timestamp"]
+        return f"🌑 Stealth\nAdded <t:{ts}:t>"
     return None
 
 
 def check_knock_warning(guild_data, channel_id):
     return check_move_warning(guild_data, channel_id)
+
+
+def check_visitblock(guild_data, channel_id):
+    return has_status(guild_data, channel_id, "visitblock")
+
+
+def check_visitblock_warning(guild_data, channel_id):
+    entry = _channel_entry(guild_data, channel_id)
+    if "visitblock" in entry:
+        ts = entry["visitblock"]["timestamp"]
+        return f"👣 Visit Block\nAdded <t:{ts}:t>"
+    return None
 
 
 # ── Logging helper ────────────────────────────────────────────────────────────
@@ -265,6 +278,10 @@ class StatusManagerView(View):
     async def btn_untargetable(self, interaction, button):
         await self._toggle(interaction, "untargetable")
 
+    @discord.ui.button(label="Stealth", style=discord.ButtonStyle.secondary, emoji="🌑", row=1)
+    async def btn_stealth(self, interaction, button):
+        await self._toggle(interaction, "stealth")
+
     @discord.ui.button(label="Custom Status", style=discord.ButtonStyle.primary, emoji="📝", row=1)
     async def btn_custom(self, interaction, button):
         await interaction.response.send_modal(CustomStatusModal(self))
@@ -383,10 +400,10 @@ def _build_statuslist_content(guild_data, guild):
         for key, (emoji, label) in BUILTIN_STATUSES.items():
             if key in statuses:
                 ts = statuses[key]["timestamp"]
-                block_lines.append(f"{emoji} {label}\nAdded <t:{ts}:R>")
+                block_lines.append(f"{emoji} {label}\nAdded <t:{ts}:t>")
         for c in statuses.get("custom", []):
             ts = c["timestamp"]
-            block_lines.append(f"📝 {c['text']}\nAdded <t:{ts}:R>")
+            block_lines.append(f"📝 {c['text']}\nAdded <t:{ts}:t>")
         blocks.append((ch_id_str, ch_mention, "\n".join(block_lines)))
     if not blocks:
         return None
