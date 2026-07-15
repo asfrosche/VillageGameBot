@@ -30,7 +30,7 @@ class DynamicState:
             + self.continuity.value
             + self.leadership.value
         )
-        return max(0.90, min(1.10, 1.0 + total))
+        return max(0.80, min(1.20, 1.0 + total))
 
     def components(self) -> list[ComponentScore]:
         return [self.chemistry, self.experience, self.form, self.momentum, self.continuity, self.leadership]

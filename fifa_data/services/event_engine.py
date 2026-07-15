@@ -47,14 +47,13 @@ class EventEngine:
         total_attack_events_a = self._estimate_attacks(xg_a, match_state.team_a_players, match_state.momentum_a)
         total_attack_events_b = self._estimate_attacks(xg_b, match_state.team_b_players, match_state.momentum_b)
 
-        goal_stalemate_mod = self._goal_stalemate_mod(squad_a, squad_b)
         events.extend(self._distribute_attacks(
             match_state, squad_a, total_attack_events_a, match_state.team_a,
-            squad_b, phase_min_start, minutes_in_phase, goal_stalemate_mod,
+            squad_b, phase_min_start, minutes_in_phase,
         ))
         events.extend(self._distribute_attacks(
             match_state, squad_b, total_attack_events_b, match_state.team_b,
-            squad_a, phase_min_start, minutes_in_phase, goal_stalemate_mod,
+            squad_a, phase_min_start, minutes_in_phase,
         ))
 
         self._record_phase_stats(
@@ -77,14 +76,7 @@ class EventEngine:
     ) -> int:
         if phase_xg <= 0:
             return max(2, int(abs(momentum) / 15))
-        base_attacks = max(5, int(phase_xg * 35))
-        momentum_mod = 1.0 + (momentum / 100.0) * 0.15
-        energy_avg = sum(
-            ps.energy for ps in player_states.values()
-            if not ps.was_substituted and not ps.red_card
-        ) / max(len([ps for ps in player_states.values() if not ps.was_substituted and not ps.red_card]), 1)
-        energy_mod = 0.85 + (energy_avg / 100.0) * 0.15
-        return max(2, int(base_attacks * momentum_mod * energy_mod))
+        return max(2, int(phase_xg * 25))
 
     def _distribute_attacks(
         self,
@@ -95,18 +87,37 @@ class EventEngine:
         opposing_squad: Squad,
         phase_start: int,
         minutes: int,
-        goal_stalemate_mod: float = 1.0,
     ) -> list[MatchEvent]:
         events: list[MatchEvent] = []
         if total_attacks <= 0:
             return events
 
-        shot_ratio = 0.35 + random.random() * 0.15
-        shot_count = max(1, int(total_attacks * shot_ratio))
-        sot_ratio = 0.45 + random.random() * 0.15
-        sot_count = max(1, int(shot_count * sot_ratio))
+        from ..models.team_strength import role_for_player
+        attacker_finishing = 50.0
+        att_candidates = [p for p in squad.current_starting_xi if role_for_player(p) in ("ST", "WINGER", "CM")]
+        if att_candidates:
+            attacker_finishing = sum(p.attributes.get("finishing", 50.0) for p in att_candidates) / len(att_candidates)
+        defender_defending = 50.0
+        def_candidates = [p for p in opposing_squad.current_starting_xi if role_for_player(p) in ("CB", "FB", "DM")]
+        if def_candidates:
+            defender_defending = sum(p.attributes.get("defending", 50.0) for p in def_candidates) / len(def_candidates)
+        total_q = attacker_finishing + defender_defending
+        qual_ratio = attacker_finishing / total_q if total_q > 0 else 0.5
+        shot_ratio = 0.25 + qual_ratio * 0.25
+        raw_shot = total_attacks * shot_ratio
+        shot_count = int(raw_shot) + (1 if random.random() < raw_shot - int(raw_shot) else 0)
+        shot_count = max(1, shot_count)
+
+        opp_gk = next((p for p in opposing_squad.current_starting_xi if role_for_player(p) == "GK"), None)
+        gk_reflexes = opp_gk.attributes.get("reflexes", 50.0) if opp_gk else 50.0
+        gk_total = attacker_finishing + gk_reflexes
+        gk_qual_ratio = attacker_finishing / gk_total if gk_total > 0 else 0.5
+        sot_ratio = 0.35 + gk_qual_ratio * 0.25
+        raw_sot = shot_count * sot_ratio
+        sot_count = int(raw_sot) + (1 if random.random() < raw_sot - int(raw_sot) else 0)
+        sot_count = max(1, sot_count)
         bc_roll = random.random()
-        big_chance_count = 2 if bc_roll < 0.08 else (1 if bc_roll < 0.45 else 0)
+        big_chance_count = 2 if bc_roll < 0.05 else (1 if bc_roll < 0.20 else 0)
 
         shot_indices = set(random.sample(range(total_attacks), min(shot_count, total_attacks)))
         sot_indices = set(random.sample(list(shot_indices), min(sot_count, len(shot_indices))))
@@ -128,6 +139,9 @@ class EventEngine:
                 if taker is None:
                     taker = self._select_event_player(squad, "CM")
 
+                finishing = taker.attributes.get("finishing", 50.0) if taker else 50.0
+                composure = taker.attributes.get("composure", 50.0) if taker else 50.0
+
                 if is_big_chance:
                     bc_xg = round(random.uniform(0.15, 0.40), 3)
                     events.append(MatchEvent(
@@ -138,16 +152,12 @@ class EventEngine:
                         xg=bc_xg,
                     ))
                     shot_xg = bc_xg
-                    finishing = taker.attributes.get("finishing", 50.0) if taker else 50.0
-                    composure = taker.attributes.get("composure", 50.0) if taker else 50.0
-                    goal_prob = 0.16 + (finishing - 50.0) / 200.0 + (composure - 50.0) / 350.0
-                    goal_prob = min(0.40, max(0.08, goal_prob)) * gk_mod * goal_stalemate_mod
+                    goal_prob = 0.15 + (finishing - 50.0) / 250.0 + (composure - 50.0) / 400.0
+                    goal_prob = min(0.40, max(0.05, goal_prob)) * gk_mod
                 else:
                     shot_xg = round(random.uniform(0.02, 0.15), 3)
-                    finishing = taker.attributes.get("finishing", 50.0) if taker else 50.0
-                    composure = taker.attributes.get("composure", 50.0) if taker else 50.0
-                    goal_prob = 0.07 + (finishing - 50.0) / 300.0 + (composure - 50.0) / 450.0
-                    goal_prob = min(0.22, max(0.03, goal_prob)) * gk_mod * goal_stalemate_mod
+                    goal_prob = 0.10 + (finishing - 50.0) * 0.0012 + (composure - 50.0) * 0.0008
+                    goal_prob = min(0.22, max(0.04, goal_prob)) * gk_mod
 
                 events.append(MatchEvent(
                     minute=minute,

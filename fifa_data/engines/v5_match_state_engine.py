@@ -325,7 +325,7 @@ class V5MatchStateEngine(MatchEngine):
         phase_xg = base_lambda * (15.0 / 90.0)
 
         energy_avg = state.get_team_energy_avg(team)
-        energy_mod = 0.85 + (energy_avg / 100.0) * 0.15
+        energy_mod = 0.75 + (energy_avg / 100.0) * 0.25
 
         momentum_mod = self.momentum_service.get_momentum_multiplier(momentum)
 

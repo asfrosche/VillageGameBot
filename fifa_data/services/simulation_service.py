@@ -6,6 +6,7 @@ from ..engines.v2_player_engine import V2PlayerMatchEngine
 from ..engines.v3_dynamic_engine import V3DynamicEngine
 from ..engines.v4_tactical_engine import V4TacticalEngine
 from ..engines.v5_match_state_engine import V5MatchStateEngine
+from ..engines.v6_evaluation_engine import V6EvaluationEngine
 from ._match_config import MATCHES_TEAM_MAP, update_elo_from_matches
 from .orchestrator import TournamentOrchestrator
 from .tournament_form_service import TournamentFormService
@@ -70,6 +71,8 @@ def run_simulation(model="v1", debug=False):
         engine = V4TacticalEngine(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
     elif normalized_model == "v5":
         engine = V5MatchStateEngine(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
+    elif normalized_model == "v6":
+        engine = V6EvaluationEngine(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
     else:
         raise ValueError(f"Unknown simulation model: {model}")
 
@@ -112,8 +115,8 @@ def run_monte_carlo(model="v5", n=100, verbose=True):
 
     start = time.time()
     for i in range(n):
-        if model in ("v3", "v4", "v5"):
-            engine_cls = {"v3": V3DynamicEngine, "v4": V4TacticalEngine, "v5": V5MatchStateEngine}[model]
+        if model in ("v3", "v4", "v5", "v6"):
+            engine_cls = {"v3": V3DynamicEngine, "v4": V4TacticalEngine, "v5": V5MatchStateEngine, "v6": V6EvaluationEngine}[model]
             engine = engine_cls(data_dir=HERE, team_metrics=TEAM_METRICS, tournament_form=tournament_form)
         elif model == "v2":
             engine = V2PlayerMatchEngine(data_dir=HERE, tournament_form=tournament_form)

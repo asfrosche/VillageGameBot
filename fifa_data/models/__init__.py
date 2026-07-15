@@ -2,6 +2,7 @@ from .dynamic_state import ComponentScore, DynamicState
 from .match_event import EventType, MatchEvent
 from .match_state import MatchPhase, MatchState, PhaseStats, ScorelineState
 from .player import Availability, Player
+from .squad_data import SquadData
 from .player_match_state import PlayerMatchState
 from .squad import Squad
 from .substitution_event import SubstitutionEvent
@@ -23,7 +24,7 @@ from .tactical_vulnerability import (
 )
 
 __all__ = [
-    "Availability", "Player", "Squad", "TeamStrength", "role_rating",
+    "Availability", "Player", "SquadData", "Squad", "TeamStrength", "role_rating",
     "DynamicState", "ComponentScore",
     "TacticalAdjustment", "TacticalReport", "FormationProfile",
     "EventType", "MatchEvent", "MatchPhase", "MatchState", "PhaseStats",

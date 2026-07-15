@@ -149,7 +149,7 @@ def choose_game_plan(
     return "balanced"
 
 
-MAX_XG_ADJUSTMENT_PCT = 0.10
+MAX_XG_ADJUSTMENT_PCT = 0.15
 
 
 def compute_tactical_matchup(

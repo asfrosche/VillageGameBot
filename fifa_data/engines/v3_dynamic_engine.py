@@ -71,7 +71,7 @@ class V3DynamicEngine(MatchEngine):
         self.extra_time_lambda_scale = cfg.get("extra_time_lambda_scale", 0.30)
         self.tiebreaker_base_probability = cfg.get("tiebreaker_base_probability", 0.50)
         self.tiebreaker_delta_scale = cfg.get("tiebreaker_delta_scale", 0.0005)
-        self.elo_dampening = cfg.get("elo_dampening", 0.40)
+        self.elo_dampening = cfg.get("elo_dampening", 0.60)
 
         self.national_modifiers = _load_national_modifiers()
 
