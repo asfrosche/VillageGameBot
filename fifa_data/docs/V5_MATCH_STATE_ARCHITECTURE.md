@@ -1,8 +1,12 @@
-# V5 Match State Engine — Architectural Deep Dive
+# V5 Architecture: Match State Engine
 
 ## Overview
 
-V5 is the most advanced match simulation engine in the pipeline. It moves beyond static expected-goals and tactical-layer adjustments by simulating matches **phase-by-phase** with continuous live state tracking — fatigue, momentum, cards, substitutions, and manager reactions all update every 15 minutes of simulated match time. The goal is emergent, realistic match narratives instead of a single Poisson draw.
+V5 is the most advanced match simulation engine. It moves beyond static expected-goals by simulating matches **phase-by-phase** with continuous live state tracking — fatigue, momentum, cards, substitutions, and manager reactions all update every 15 minutes. The goal is emergent, realistic match narratives.
+
+```
+V4 Tactical Engine → Base xG → Phase-by-Phase Simulation → Live Events → Final Score
+```
 
 ---
 
@@ -10,240 +14,440 @@ V5 is the most advanced match simulation engine in the pipeline. It moves beyond
 
 ```
 MatchEngine (abstract base)
-├── V1EloMatchEngine        — team ELO/PELE only, no squad data
-├── V2PlayerMatchEngine     — player attribute ratings, roles, formations
-├── V3DynamicEngine         — 6 dynamic states (chemistry, form, momentum, etc.)
-│                              + star-weighted ratings + national modifiers + ELO
-├── V4TacticalEngine        — wraps V3; game plans, manager profiles,
-│                              tactical adjustments (12 factors), formation matchups
-└── V5MatchStateEngine      — wraps V4; phase-by-phase simulation with fatigue,
-                               live momentum, cards, subs, events, penalties
+├── V1EloMatchEngine        — team ELO/PELE only
+├── V2PlayerMatchEngine     — player attributes, roles, formations
+├── V3DynamicEngine         — 6 dynamic states + ELO + national modifiers
+├── V4TacticalEngine        — wraps V3; tactical adjustments (13 factors)
+└── V5MatchStateEngine      — wraps V4; phase-by-phase with fatigue, cards, subs
 ```
 
-Each engine is standalone — V4 internally holds a `V3DynamicEngine` instance; V5 internally holds a `V4TacticalEngine` instance (and accesses `self._v4._v3` for the underlying V3 services). No engine extends another; they compose.
+Each engine is standalone — V4 holds a `V3DynamicEngine`; V5 holds a `V4TacticalEngine` (accesses `self._v4._v3` for underlying V3 services).
 
 ---
 
-## V1 → V4: What Each Layer Contributes
-
-### V1 — Team-Level ELO/PELE (`v1_elo_engine.py`)
-
-- **Input**: `TEAM_METRICS` dict with `{team: {"ELO": float, "PELE": float}}`
-- **Mechanic**: `_rating()` averages ELO + PELE; `upset_factor` based on rating difference scales the Poisson lambda
-- **Limitation**: No squad data, no player attributes, no formations
-- **xG formula**: `base_goals * upset_factor` for favorite, `base_goals * max(0.20, 1.5 - 0.5 * upset_factor)` for underdog
-- **Extra time**: Poisson with scaled lambda; penalties by ELO differential
-
-### V2 — Player Attributes & Roles (`v2_player_engine.py`)
-
-- **Input**: Squad data with player attribute ratings, formation strings
-- **Mechanic**: `assign_roles()` maps players to 7 canonical roles (GK, CB, FB, DM, CM, ST, WINGER); `build_team_strength()` computes line ratings via weighted position formulas
-- **Key addition**: `TeamStrength` dataclass with `attack_rating`, `midfield_rating`, `defense_rating`, `goalkeeper_rating`
-- **xG formula**: `attack_ratio = attack / (w_def * defense + w_gk * gk)` → `curve_value = ratio^2.5 [0.30, 3.0]` → `base_goals * curve_value * midfield_modifier`
-- **Midfield control**: `1.0 + 0.25 * (star_m_a - star_m_d) / 100`
-
-### V3 — Dynamic State & Star Weighting (`v3_dynamic_engine.py`)
-
-- **Input**: Same as V2 + 6 dynamic service modifiers + national modifiers JSON + ELO/PELE
-- **Star weighting**: Key positions contribute more to line ratings (e.g., ST weight 0.40 vs WINGER 0.15 in attack line)
-- **Six dynamic states** (each produces a small percentage modifier, combined clamped to [0.90, 1.10]):
-
-| Service | Source | Modifier Basis |
-|---------|--------|----------------|
-| ChemistryService | `club_links.json` | Same-club player count & known partnerships |
-| ExperienceService | `player_experience.json` | Caps, WC experience, captains, knockout/ET/penalty exp |
-| FormService | Player fantasy stats | Form and totalPoints from FIFA data |
-| MomentumService | In-tournament results | Recent win rate, GD, clean sheets |
-| ContinuityService | Lineup tracking | Consistency of starting XI across matches |
-| LeadershipService | `player_experience.json` | Captains, veterans, WC veterans |
-
-- **ELO/PELE modifier**: `1.0 + 0.003 * (avg - 1500)` clamped to [0.50, 3.0] (affects all 4 line ratings)
-- **National modifier**: Country-specific buffs from JSON config
-- **Combined**: `(1.0 + nat_mod) * dyn_mult * elo_mod` applied to all star ratings
-- **Configurable curve**: `curve_factor` (default 3.0) instead of hardcoded 2.5
-- **Penalties influenced by**: Leadership, experience, national modifiers
-
-### V4 — Tactical Layer (`v4_tactical_engine.py`)
-
-- **Input**: V3 strengths + squad data + manager profiles + context (group/knockout)
-- **Wrapping**: `get_team_strength()` delegates to `self._v3.get_team_strength()` (ELO modifier already baked in)
-- **`compute_tactical_matchup()`** produces a `TacticalReport` with `final_xg_a/b`:
-  1. **Game plan selection**: `attacking`, `balanced`, `counter`, `low_block`, `high_press` chosen per team based on relative strength, context, and manager profile
-  2. **Tactical adjustments** (up to ±10% of base xG): high line vs pace, pressing vs weak buildup, possession vs low block creativity, set-piece mismatches, aerial dominance, formation matchup, game plan effects, player tactic compatibility, possession quality, defensive style interactions, tactical flexibility, match context effects, defensive stalemate
-- **Match context awareness**: `group`, `knockout`, `must_win`, `need_draw`, `gd_chase` modify game plans and adjustment weights
-- **Manager profiles**: `risk_tolerance`, `tactical_flexibility`, `pressing_preference`, `defensive_discipline` affect game plan selection and sub behavior
-
----
-
-## V5 — Phase-by-Phase Simulation
-
-### Architecture Diagram
+## V5 Architecture Diagram
 
 ```
 simulate_match(team1, team2, can_draw)
 │
-├─ 1. Initialize MatchState (MatchStateService)
+├─ 1. Initialize MatchState
 │     └─ Creates PlayerMatchState per player (100% energy)
 │
-├─ 2. Compute Base Strengths (V3Delegate)
-│     └─ get_team_strength() → TeamStrength (includes ELO modifier)
-│     └─ expected_goals() → base_lambda_a, base_lambda_b
+├─ 2. Compute Base Strengths
+│     └─ _v4._v3.get_team_strength() → TeamStrength
+│     └─ _v4._v3.expected_goals() → base_lambda_a, base_lambda_b
 │
-├─ 3. Compute Tactical Matchup (V4Delegate)
-│     └─ compute_tactical_matchup() → TacticalReport (final_xg_a, final_xg_b)
+├─ 3. Compute Tactical Matchup
+│     └─ compute_tactical_matchup() → TacticalReport
+│     └─ final_xg_a, final_xg_b (clamped to max_xg = 4.0)
 │
-├─ 4. Loop: 6 Regular Phases + 2 ET Phases
+├─ 4. Loop: 6 Regular Phases
 │     │
-│     ├─ Apply Fatigue (FatigueService)
+│     ├─ Apply Fatigue
 │     │   └─ Per-player energy loss based on stamina, age, work rate,
-│     │      physical, pace, match intensity, pressing, extra time
-│     │   └─ Substitutes get freshness_bonus()
+│     │      physical, pace, match intensity, pressing intensity
+│     │   └─ Extra time: 1.3× fatigue multiplier
 │     │
-│     ├─ Decay Momentum (MatchMomentumService)
-│     │   └─ 8-point decay per phase
+│     ├─ Decay Momentum
+│     │   └─ MomentumService.decay_momentum()
 │     │
-│     ├─ Compute Phase xG (_compute_phase_xg)
-│     │   └─ phase_xg = base_lambda * (15/90)
-│     │   └─ energy_mod = 0.85 + (energy_avg / 100) * 0.15
+│     ├─ Compute Phase xG
+│     │   └─ phase_xg = base_lambda × (15/90)
+│     │   └─ energy_mod = 0.75 + (energy_avg / 100) × 0.25
 │     │   └─ momentum_mod = get_momentum_multiplier(momentum)
 │     │   └─ score_mod = scoreline_xg_modifier()
-│     │   └─ red_mod = 1.0 - 0.25 * red_cards
-│     │   └─ Return max(0.01, phase_xg * all_modifiers)
+│     │   └─ red_mod = 1.0 - 0.25 × red_cards
+│     │   └─ Return max(0.01, phase_xg × all_modifiers)
 │     │
-│     ├─ Generate Events (EventEngine)
-│     │   └─ Estimate attack count from xG, momentum, energy
-│     │   └─ Distribute attacks across minutes in the phase
-│     │   └─ Determine shots, big chances, goals per attack
-│     │   └─ Goal probability uses finishing, composure, GK quality
-│     │   └─ Trigger cards via CardService
+│     ├─ Generate Events
+│     │   └─ EventEngine: shots, goals, cards, fouls
+│     │   └─ Momentum updates from events
 │     │
-│     ├─ Evaluate Subs (SubstitutionService)
-│     │   └─ Check fatigue (<30% urgent), yellow cards (defenders),
-│     │      match rating (<6.0), injury
-│     │   └─ Find best replacement by role + scoreline urgency
+│     ├─ Evaluate Substitutions
+│     │   └─ Fatigue <30% → urgent
+│     │   └─ Yellow-carded defenders → high priority
+│     │   └─ Match rating <6.0 → subbed
+│     │   └─ Finds best replacement by role + scoreline urgency
 │     │
-│     └─ Evaluate Manager Reactions (MatchStateService)
+│     └─ Evaluate Manager Reactions
 │         └─ May change game plan based on scoreline + minute + profile
 │
 ├─ 5. Extra Time (if knockout & tied)
-│     └─ 2 phases with 0.7x lambda scaling, 1.3x fatigue multiplier
+│     └─ 2 phases (ET_FIRST, ET_SECOND)
+│     └─ 0.7× lambda scaling, 1.3× fatigue multiplier
 │
-├─ 6. Penalty Shootout (PenaltyEngine)
-│     └─ Select top 5 takers (penalties + finishing + composure)
+├─ 6. Penalty Shootout (if still tied)
+│     └─ PenaltyEngine: top 5 takers by penalties+finishing+composure
 │     └─ Per-shot: taker vs goalkeeper attributes
 │     └─ Sudden death after 5 rounds
 │
 └─ 7. Record + Debug
-      └─ Update V3 continuity & momentum services
+      └─ Update V3 continuity & momentum
       └─ Generate match story, timeline, top performers
 ```
 
-### Key V5 Services
+---
+
+## Match Phases
+
+```python
+PHASE_ORDER = [
+    EARLY_FIRST_HALF,    # 0-15 min  (midpoint: 7.5)
+    MID_FIRST_HALF,      # 15-30 min (midpoint: 22.5)
+    LATE_FIRST_HALF,     # 30-45 min (midpoint: 37.5)
+    EARLY_SECOND_HALF,   # 45-60 min (midpoint: 52.5)
+    MID_SECOND_HALF,     # 60-75 min (midpoint: 67.5)
+    LATE_SECOND_HALF,    # 75-90 min (midpoint: 82.5)
+]
+
+EXTRA_TIME_PHASES = [
+    EXTRA_TIME_FIRST,    # 90-105 min (midpoint: 97.5)
+    EXTRA_TIME_SECOND,   # 105-120 min (midpoint: 112.5)
+]
+```
+
+---
+
+## Phase xG Calculation
+
+Each 15-minute phase, base xG is modulated by 4 factors:
+
+```python
+phase_xg = base_lambda × (15.0 / 90.0)  # Scale to 15-minute window
+
+# 1. Energy modifier
+energy_avg = mean(all starting XI energy)
+energy_mod = 0.75 + (energy_avg / 100.0) × 0.25
+# Range: 0.75 (0% energy) to 1.00 (100% energy)
+
+# 2. Momentum modifier
+momentum_mod = get_momentum_multiplier(momentum_value)
+# Maps momentum to 0.85–1.15x range
+
+# 3. Scoreline modifier
+score_mod = scoreline_xg_modifier(scoreline_state, minute)
+# See table below
+
+# 4. Red card modifier
+red_mod = 1.0 - 0.25 × red_card_count
+
+return max(0.01, phase_xg × energy_mod × momentum_mod × score_mod × red_mod)
+```
+
+### Scoreline Modifier
+
+| Scoreline | Minute | Attack Mod | Defense Mod | Risk Mod | Combined |
+|-----------|--------|------------|-------------|----------|----------|
+| winning | <75 | 0.95 | 1.05 | — | ~1.00 |
+| winning | ≥75 | 0.87 | 1.10 | — | ~0.99 |
+| trailing | <75 | 1.10 | 0.95 | 1.15 | ~1.08 |
+| trailing (2+) | <75 | 1.15 | 0.92 | 1.25 | ~1.13 |
+| trailing | ≥75 | 1.19 | 0.95 | 1.27 | ~1.15 |
+| trailing (2+) | ≥75 | 1.24 | 0.92 | 1.38 | ~1.20 |
+| level | any | 1.00 | 1.00 | — | 1.00 |
+
+When trailing by 2+ goals, teams attack more aggressively (risk mod increases). After 75 minutes, urgency amplifies.
+
+---
+
+## Key V5 Services
 
 | Service | File | What It Does |
 |---------|------|-------------|
-| **FatigueService** | `substitution_manager.py` | Computes energy loss per phase per player. Factors: stamina, age, work rate, physical, pace, match intensity, pressing intensity, extra time. Substitutes get `freshness_bonus()`. |
+| **FatigueService** | `substitution_manager.py` | Computes energy loss per phase per player. Factors: stamina, age, work rate, physical, pace, match intensity, pressing intensity, extra time. |
 | **CardService** | `card_service.py` | Per-event probability of foul, yellow, red. Inputs: aggression, composure, defending, energy level, current cards. |
-| **MatchMomentumService** | `match_momentum_service.py` | Real-time momentum tracker. Events trigger: goal +25, concede -20, big chance +5, red card -30, etc. Decays 8/phase. Provides momentum_multiplier() (maps momentum to 0.85-1.15x), pressing_modifier(), shot_quality_modifier(). |
-| **EventEngine** | `event_engine.py` | Generates phase events. Estimates attack count from xG, momentum, energy. Distributes over minutes. Determines shots/big chances/goals. Goal probability integrates finishing + composure vs GK reflexes + positioning. Triggers cards. |
-| **PenaltyEngine** | `penalty_engine.py` | Full 5-round + sudden death. Selects takers by penalties+finishing+composure. Each attempt: taker attributes vs GK penalty_save+reflexes+positioning. |
-| **SubstitutionService** | `substitution_manager.py` | Evaluates subs each phase. Fatigue <30% → urgent. Yellow-carded defenders → high priority. Match rating <6.0 → subbed. Finds best replacement by role compatibility + scoreline urgency. Manager profile influences. |
-| **GameScriptService** | `game_script_service.py` | Post-match: match story narrative, event timeline (most exciting moments), top performer identification by weighted score. |
-| **MatchStateService** | `match_state_service.py` | Initializes `MatchState` dataclass, advances phases, evaluates manager reactions (game plan changes based on scoreline/minute/manager profile), computes possession. |
+| **MatchMomentumService** | `match_momentum_service.py` | Real-time momentum tracker. Events trigger: goal +25, concede -20, big chance +5, red card -30. Decays per phase. Provides multiplier (0.85-1.15x). |
+| **EventEngine** | `event_engine.py` | Generates phase events from xG. Estimates attack count, distributes over minutes, determines shots/goals. Goal probability integrates finishing + composure vs GK. |
+| **PenaltyEngine** | `penalty_engine.py` | Full 5-round + sudden death. Selects takers by penalties+finishing+composure. Each attempt: taker vs GK attributes. |
+| **SubstitutionService** | `substitution_manager.py` | Evaluates subs each phase. Fatigue <30% urgent. Yellow-carded defenders high priority. Rating <6.0 subbed. Manager profile influences. |
+| **GameScriptService** | `game_script_service.py` | Post-match: match story narrative, event timeline, top performers by weighted score. |
+| **MatchStateService** | `match_state_service.py` | Initializes MatchState, advances phases, evaluates manager reactions, computes possession. |
 
-### `MatchState` Dataclass (Core V5 Data Structure)
+---
 
-```
+## MatchState Dataclass
+
+```python
 MatchState
 ├── team_a, team_b: str
 ├── scoreline: ScorelineState (goals, description)
-├── player_states: dict[int, PlayerMatchState]  ← per-player energy, morale, cards
-├── momentum: dict[str, int]                    ← per-team live momentum value
+├── player_states: dict[str, PlayerMatchState]  ← per-player energy, cards, rating
+├── momentum_a, momentum_b: float
 ├── current_phase: MatchPhase
 ├── minute: int
-├── game_plans: dict[str, str]
+├── game_plan_a, game_plan_b: str
+├── game_plan_history_a, game_plan_history_b: list[(minute, plan)]
 ├── events: list[MatchEvent]
 ├── substitutions: list[SubstitutionEvent]
-├── phase_stats: dict[MatchPhase, PhaseStats]
-├── red_card_count: dict[str, int]
-├── is_extra_time, is_penalties: bool
+├── phase_stats_a, phase_stats_b: dict[str, PhaseStats]
+├── red_card_count_a, red_card_count_b: int
+├── is_extra_time, is_penalty_shootout: bool
+├── team_a_players, team_b_players: dict[str, PlayerMatchState]
 └── possession: dict[str, float]
 ```
 
-### `PlayerMatchState` (Per-Player Live State)
+---
 
-```
+## PlayerMatchState (Per-Player Live State)
+
+```python
 PlayerMatchState
 ├── energy: float (100 → 0)
 ├── morale: float (affects performance 0.88-1.08x)
 ├── match_rating: float (1-10 scale)
-├── cards: int
+├── cards: int (0, 1=yellow, 2=red)
 ├── minutes_played: int
-├── goals, assists, fouls, shots, tackles, interceptions
+├── goals, assists, fouls, shots, tackles, interceptions: int
 ├── pressing_intensity: float
-├── apply_energy_effects() degrades attributes at energy thresholds
-└── morale_multiplier() returns 0.88-1.08x
-```
-
-### Phase-by-Phase xG Modulation
-
-Each 15-minute phase, base xG (`base_lambda * 15/90`) is modified by:
-
-| Modifier | Range | Source |
-|----------|-------|--------|
-| Energy | 0.85–1.00 | Team average energy level |
-| Momentum | 0.85–1.15 | Live momentum value mapped through multiplier |
-| Scoreline (winning) | 0.77–0.99 | Attack less, defend more (amplified after 75') |
-| Scoreline (trailing) | 1.08–1.30 | Attack more, take risks (amplified after 75') |
-| Red cards | 0.25 per card | Each red card reduces xG by 25% |
-
-### Event Engine Flow
-
-```
-generate_phase_events(phase_xg, momentum, energy, ...)
-│
-├─ expected_attacks = phase_xg * k (estimated attacks from xG)
-├─ actual_attacks ~ Poisson(expected_attacks)
-├─ For each attack:
-│   ├─ is_big_chance? → probability from momentum modifier
-│   ├─ is_shot? → yes for most attacks
-│   ├─ goal_probability → finishing + composure vs GK quality + stalemate
-│   ├─ If goal: momentum bonus +25, concede -20
-│   ├─ Triggers: CardService.check_foul() → check_yellow() → check_red()
-│   └─ Record: EventType, player, minute, xg, detail
-│
-└─ Return phase_diff (goals scored, momentum changes, card events)
+├── apply_energy_effects() → degrades attributes at energy thresholds
+└── morale_multiplier() → returns 0.88-1.08x
 ```
 
 ---
 
-## ELO/PELE Integration (All Engines V3-V5)
+## Phase Execution Detail
 
-All three advanced engines share the same ELO modifier path:
+For each phase in `PHASE_ORDER`:
 
-1. `update_elo_from_matches()` reads `matches.json` and updates `TEAM_METRICS` dict in-place
-2. `TEAM_METRICS` is passed to the engine constructor as `team_metrics`
-3. `V3DynamicEngine.get_team_strength()` computes:
-   ```
-   elo_avg = (TEAM_METRICS[team]["ELO"] + TEAM_METRICS[team]["PELE"]) / 2
-   elo_mod = 1.0 + 0.003 * (elo_avg - 1500)        # clamped [0.50, 3.0]
-   combined_mult = (1.0 + nat_mod) * dyn_mult * elo_mod
-   attack_rating = star_a * combined_mult            # same for midfield, defense, GK
-   ```
-4. V4 and V5 delegate `get_team_strength()` to V3 — same modifier
+1. **Apply Fatigue**
+   - `fatigue_service.apply_phase_fatigue()` updates each player's energy
+   - Extra time uses 1.3× fatigue multiplier
+   - Pressing intensity from game plan
 
-This means the ELO/PELE modifier is **identical across V3, V4, V5**. The difference in outcomes comes from V4's tactical adjustments (±10% xG) and V5's phase-based mechanics (fatigue, momentum, cards, subs, scoreline pressure).
+2. **Decay Momentum**
+   - `momentum_service.decay_momentum()` reduces momentum toward 0
+
+3. **Compute Phase xG**
+   - Base xG scaled to 15-minute window
+   - Modified by energy, momentum, scoreline, red cards
+
+4. **Generate Events**
+   - `event_engine.generate_phase_events()` creates match events
+   - Estimates attack count from xG, distributes over minutes
+   - Determines shots, big chances, goals per attack
+   - Goal probability: finishing + composure vs GK reflexes + positioning
+   - Triggers cards via `card_service`
+
+5. **Evaluate Substitutions**
+   - `substitution_service.evaluate_substitutions()` checks:
+     - Energy < 30% → urgent sub
+     - Yellow-carded defenders → high priority
+     - Match rating < 6.0 → tactical sub
+   - Finds best replacement by role compatibility + scoreline urgency
+   - Manager profile influences sub timing
+
+6. **Manager Reactions**
+   - `match_state_service.evaluate_manager_reaction()` may change game plan
+   - Based on scoreline, minute, manager risk tolerance
+   - Game plan change recorded in history + events
 
 ---
 
-## Summary: Determinacy vs Variance
+## Extra Time
+
+When knockout match is tied after 90 minutes:
+
+```python
+state.is_extra_time = True
+
+for phase in EXTRA_TIME_PHASES:
+    et_lambda1 = lambda1 × 0.30 × 0.7  # Reduced scoring
+    et_lambda2 = lambda2 × 0.30 × 0.7
+
+    # Same phase execution with 1.3× fatigue multiplier
+    _run_phase(state, ..., is_extra_time=True)
+
+    g1 = state.scoreline.goals_a
+    g2 = state.scoreline.goals_b
+```
+
+- Lambda scaled by 0.30 (ET scale) × 0.7 (additional dampening)
+- Fatigue multiplier 1.3× (players tire faster)
+- Same event generation, substitution, and momentum systems
+
+---
+
+## Penalty Shootout
+
+If still tied after extra time:
+
+```python
+state.is_penalty_shootout = True
+
+penalty_shootout_a, penalty_shootout_b, winner = \
+    penalty_engine.simulate_penalty_shootout(squad1, squad2, team1, team2)
+```
+
+### PenaltyEngine Flow
+
+1. **Select top 5 takers**: sorted by `penalties + finishing + composure`
+2. **Per-shot**: taker attributes vs goalkeeper `penalty_save + reflexes + positioning`
+3. **5 rounds**: alternating penalties
+4. **Sudden death**: if tied after 5 rounds, continues until one team leads after both have kicked
+
+---
+
+## Event Types
+
+```python
+class EventType(Enum):
+    GOAL = "goal"
+    SHOT = "shot"
+    BIG_CHANCE = "big_chance"
+    FOUL = "foul"
+    YELLOW_CARD = "yellow_card"
+    RED_CARD = "red_card"
+    SUBSTITUTION = "substitution"
+    TACTICAL_CHANGE = "tactical_change"
+    CORNER = "corner"
+    FREE_KICK = "free_kick"
+    OFFSIDE = "offside"
+    SAVE = "save"
+```
+
+Each event records: minute, team, player, type, xg (for shots), detail.
+
+---
+
+## Debug Output
+
+V5 produces comprehensive debug output:
+
+```
+============================================================
+V5 MATCH STATE SIMULATION
+============================================================
+Brazil vs Germany
+Final Score: 2 - 1
+
+============================================================
+MATCH FLOW
+============================================================
+Phase 1: Brazil attacks=4 shots=3 xG=0.42 | Germany attacks=3 shots=2 xG=0.31
+Phase 2: Brazil attacks=5 shots=4 xG=0.55 | Germany attacks=4 shots=3 xG=0.38
+...
+
+============================================================
+EVENT TIMELINE
+============================================================
+  12' ⚽ GOAL — Brazil — Vinicius Jr. (xG: 0.72)
+  23' 🟨 YELLOW — Germany — Rudiger (foul)
+  34' ⚽ GOAL — Germany — Musiala (xG: 0.45)
+  67' 🔄 SUB — Brazil — OFF: Paqueta, ON: Bruno Guimaraes
+  78' ⚽ GOAL — Brazil — Raphinha (xG: 0.38)
+  82' 🔄 SUB — Germany — OFF: Musiala, ON: Wirtz
+  88' 🟥 RED — Germany — Rudiger (second yellow)
+
+============================================================
+TOP PERFORMERS
+============================================================
+  Vinicius Jr. (Brazil): rating=8.2 goals=1 assists=0 shots=4 energy=72%
+  Raphinha (Brazil): rating=7.8 goals=1 assists=1 shots=3 energy=68%
+  Musiala (Germany): rating=7.5 goals=1 assists=0 shots=2 energy=65%
+
+============================================================
+MATCH STORY
+============================================================
+  Brazil took an early lead through Vinicius Jr...
+  Germany equalized before halftime...
+  Raphinha restored the lead in the second half...
+  Rudiger's red card sealed Germany's fate...
+
+============================================================
+V5 SUB-SYSTEM STATE
+============================================================
+Momentum: Brazil=15.2, Germany=-8.5
+Game Plans: Brazil=balanced, Germany=attacking
+Red Cards: Brazil=0, Germany=1
+Substitutions: 3
+Total Events: 24
+Avg Energy: Brazil=68.5%, Germany=61.2%
+```
+
+---
+
+## Files Reference
+
+| File | Purpose |
+|------|---------|
+| `engines/v5_match_state_engine.py` | V5 engine (471 lines) |
+| `engines/v4_tactical_engine.py` | Underlying V4 engine |
+| `models/match_state.py` | `MatchState`, `MatchPhase`, `ScorelineState`, `PHASE_ORDER`, `EXTRA_TIME_PHASES` |
+| `models/match_event.py` | `MatchEvent`, `EventType` |
+| `models/player_match_state.py` | `PlayerMatchState` (energy, cards, rating) |
+| `services/substitution_manager.py` | `FatigueService`, `SubstitutionService` |
+| `services/card_service.py` | `CardService` |
+| `services/match_momentum_service.py` | `MatchMomentumService` |
+| `services/event_engine.py` | `EventEngine` |
+| `services/penalty_engine.py` | `PenaltyEngine` |
+| `services/game_script_service.py` | `GameScriptService` (narrative, timeline, top performers) |
+| `services/match_state_service.py` | `MatchStateService` (init, manager reactions) |
+| `services/manager_service.py` | `get_manager()`, `manager_game_plan_modifier()` |
+| `services/tactical_analysis.py` | `compute_tactical_matchup()` |
+
+---
+
+## Usage
+
+```python
+from fifa_data import run_simulation
+
+# Run full tournament with V5
+result = run_simulation(model="v5")
+print(result["champion"])
+
+# Direct engine usage
+from fifa_data.engines.v5_match_state_engine import V5MatchStateEngine
+engine = V5MatchStateEngine(data_dir="fifa_data", team_metrics=TEAM_METRICS)
+
+# Basic match
+score = engine.simulate_match("Brazil", "Germany", can_draw=False)
+print(score)  # (2, 1)
+
+# Detailed match with events
+score, state, events = engine.simulate_match_detailed(
+    "Brazil", "Germany", can_draw=False, context="knockout"
+)
+print(f"Goals: {score}")
+print(f"Events: {len(events)}")
+for event in events:
+    print(f"  {event.minute}' {event.event_type.value} — {event.player_name}")
+
+# Debug output
+score, debug = engine.simulate_match_debug("Brazil", "Germany", can_draw=False)
+print(debug)
+```
+
+---
+
+## Monte Carlo
+
+```python
+from fifa_data import run_monte_carlo
+
+# Run 100 V5 simulations
+results = run_monte_carlo(model="v5", n=100)
+
+print("Champion probabilities:")
+for team, count in results["champion"][:5]:
+    print(f"  {team}: {count}%")
+
+print(f"\nCompleted {results['total']} sims in {results['elapsed']}s")
+print(f"Speed: {results['sims_per_sec']} sims/sec")
+```
+
+---
+
+## Design Philosophy
+
+V5 is the most **deterministic** at the team-strength level (ELO modifier is strongest here) but also has the most sources of **in-match variance**:
 
 | Engine | Base Determinacy | Extra Variance Sources |
 |--------|-----------------|----------------------|
-| V1 | ELO/PELE difference only | Upset factor curve, Poisson noise |
-| V2 | Player rating difference | Same + midfield modifier |
-| V3 | Dynamic states × star ratings × ELO | 6 dynamic services, Poisson noise |
-| V4 | V3 + tactical matchup | Game plan × 12 tactical factors |
-| V5 | V4 + phase mechanics | Fatigue, live momentum, cards, subs, events scoreline pressure, ET, penalties |
+| V1 | ELO/PELE difference only | Upset factor, Poisson noise |
+| V2 | Player rating difference | + midfield modifier |
+| V3 | Dynamic states × star ratings × ELO | + 6 dynamic services |
+| V4 | V3 + tactical matchup | + 13 tactical factors |
+| V5 | V4 + phase mechanics | + fatigue, live momentum, cards, subs, scoreline pressure, ET, penalties |
 
-V5 is the most deterministic at the team-strength level (ELO modifier is strongest here) but also has the most sources of in-match variance, producing the richest emergent narratives while keeping overall outcomes aligned with real-world team quality.
+V5 produces the **richest emergent narratives** while keeping overall outcomes aligned with real-world team quality.
