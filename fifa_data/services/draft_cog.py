@@ -13,6 +13,7 @@ from discord.ext import commands
 logger = logging.getLogger(__name__)
 
 from fifa_data.services.simulation_service import run_simulation, run_monte_carlo, TEAM_METRICS, GROUPS
+from fifa_data.engines.v6_evaluation_engine import run_v6
 from fifa_data.services.fantasy_service import FantasyService, FIFA_POSITION_MAP
 from fifa_data.services.match_analytics import (
     fetch_and_cache_data, ensure_fresh_data, get_match_analytics,
@@ -2928,7 +2929,7 @@ class DraftCog(commands.Cog):
         model = "v5"
         n = 50
         if tokens:
-            if tokens[0].lower() in ("v1", "v2", "v3", "v4", "v5"):
+            if tokens[0].lower() in ("v1", "v2", "v3", "v4", "v5", "v6"):
                 model = tokens[0].lower()
                 if len(tokens) > 1:
                     try:
@@ -3044,14 +3045,69 @@ class DraftCog(commands.Cog):
 
         await status_msg.edit(content="", embed=embed)
 
+    @commands.command(aliases=["eval", "v6eval"])
+    async def evaluate(self, ctx, *, args: str = None):
+        """Run V6 evaluation: `.evaluate` — runs V6 diagnostics on V5 predictions."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Admin only.")
+
+        status_msg = await ctx.send("📊 **V6 Evaluation & Diagnostics**\n⏳ Running evaluation pipeline...")
+
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(None, run_v6)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return await status_msg.edit(content=f"❌ V6 evaluation error: {e}")
+
+        acc = result.get("v5_poisson_winner_accuracy", 0)
+        total = result.get("total_matches", 0)
+        cal = result.get("calibration", {})
+        brier = cal.get("brier_score", 0)
+        biases = result.get("biases", [])
+        upset = result.get("upset_summary", {})
+        cats = upset.get("category_counts", {})
+
+        embed = discord.Embed(
+            title="📊 V6 Evaluation & Diagnostics",
+            description=f"Evaluated {total} matches | V5 Winner Accuracy: {acc:.1%}",
+            color=0x9c27b0,
+        )
+
+        embed.add_field(name="Calibration", value=(
+            f"Brier: {brier:.4f}\n"
+            f"Reliability: {cal.get('reliability', 0):.4f}\n"
+            f"Log Loss: {cal.get('log_loss', 0):.4f}"
+        ), inline=True)
+
+        ha = result.get("home_advantage", {})
+        embed.add_field(name="Results", value=(
+            f"Home: {ha.get('actual_home_win_pct', 0):.0f}%\n"
+            f"Draw: {ha.get('actual_draw_pct', 0):.0f}%\n"
+            f"Away: {ha.get('actual_away_win_pct', 0):.0f}%"
+        ), inline=True)
+
+        if cats:
+            cat_text = "\n".join(f"{k}: {v}" for k, v in sorted(cats.items(), key=lambda x: -x[1]))
+            embed.add_field(name="Upset Classification", value=cat_text, inline=True)
+
+        if biases:
+            bias_lines = [f"**{b['bias_name']}:** {b['description']}" for b in biases[:3]]
+            embed.add_field(name="Detected Biases", value="\n".join(bias_lines), inline=False)
+
+        embed.set_footer(text="Full report saved to v6_output/v6_report.md")
+        await status_msg.edit(content="", embed=embed)
+
     async def _simulate_detailed(self, ctx, tokens: list[str]) -> None:
-        VALID_VERSIONS = {"v1", "v2", "v3", "v4", "v5"}
+        VALID_VERSIONS = {"v1", "v2", "v3", "v4", "v5", "v6"}
         VERSION_LABELS = {
             "v1": "Historical ELO/PELE",
             "v2": "FC26 Player Intelligence",
             "v3": "Dynamic Team State",
             "v4": "Tactical Intelligence",
             "v5": "Match State Simulation",
+            "v6": "Evaluation & Diagnostics",
         }
         MATCHES_TEAM_MAP = {
             "USA": "United States",
@@ -4303,13 +4359,13 @@ class DraftCog(commands.Cog):
             return model, presentation, debug
 
         first = tokens[0].lower()
-        if first in {"v1", "v2", "v3", "v4", "v5"}:
+        if first in {"v1", "v2", "v3", "v4", "v5", "v6"}:
             model = first
             tokens = tokens[1:]
         elif first in {"animated", "fast", "debug"}:
             pass
         else:
-            return None, "Usage: `.simulate [v1|v2|v3|v4|v5] [fast|animated] [debug]`", False
+            return None, "Usage: `.simulate [v1|v2|v3|v4|v5|v6] [fast|animated] [debug]`", False
 
         for token in tokens:
             lowered = token.lower()
@@ -4320,7 +4376,7 @@ class DraftCog(commands.Cog):
             elif lowered == "debug":
                 debug = True
             else:
-                return None, "Usage: `.simulate [v1|v2|v3|v4|v5] [fast|animated] [debug]`", False
+                return None, "Usage: `.simulate [v1|v2|v3|v4|v5|v6] [fast|animated] [debug]`", False
 
         return model, presentation, debug
 
