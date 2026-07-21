@@ -33,12 +33,15 @@ COMMAND_INDEX = [
     (".showaltsonrefuse", "Show alts on knock refuse", "Setup", ["alt", "refuse", "show"]),
     (".candeadsinteract", "Deads can open/refuse", "Setup", ["dead", "interact", "open", "refuse"]),
     (".canaltsinteract", "Alts can open/refuse", "Setup", ["alt", "interact", "open", "refuse"]),
+    (".autopincorpse", "Auto pin corpse messages in houses", "Setup", ["corpse", "pin", "toggle", "dead"]),
+    (".settime <event>", "Set daily game time via dropdowns (dayend/lynchend/presetend)", "Setup", ["time", "daily", "schedule", "set"]),
+    (".times", "Show configured daily game times", "Setup", ["time", "daily", "schedule", "next"]),
     (".move <#>", "Move player to house (leaves current)", "Moving", ["move", "house", "relocate"]),
     (".renmove #House", "Move to renamed house", "Moving", ["move", "renamed", "house"]),
     (".add <#>", "Add player to house (keeps current)", "Moving", ["add", "house", "join"]),
     (".remove <#>", "Remove player from house", "Moving", ["remove", "house", "kick"]),
     (".knock <#>", "Knock on a house door", "Moving", ["knock", "door", "enter"]),
-    (".pendingknock / .showknocks", "True/False if any knock is pending + oldest age", "Moving", ["knock", "pending", "status"]),
+    (".pendingknock / .showknocks [restart]", "True/False if any knock is pending + oldest age (restart = scan all servers, owners only)", "Moving", ["knock", "pending", "status"]),
     (".renknock #House", "Knock on renamed house", "Moving", ["knock", "renamed", "house"]),
     (".pcadd #PC", "Add player to PC/renamed house", "Moving", ["pc", "add", "private"]),
     (".pcremove #PC", "Remove from PC/renamed house", "Moving", ["pc", "remove", "private"]),
@@ -118,6 +121,7 @@ COMMAND_INDEX = [
     (".houselistremove #house", "Remove a house from list", "Lists", ["house", "list", "remove", "admin"]),
     (".deadlist add @player <team> <role>", "Add to deadlist", "Lists", ["dead", "list", "add", "admin"]),
     (".deadlist remove @player", "Remove from deadlist", "Lists", ["dead", "list", "remove", "admin"]),
+    (".deadlist edit @player <team> <role>", "Edit deadlist entry", "Lists", ["dead", "list", "edit", "admin"]),
     (".settarget <channel_id>", "Set target channel (ID, not mention)", "Send Role", ["target", "channel", "set"]),
     (".sendrole/sr <players>", "Reply to a msg to forward it to the target channel (admin)", "Send Role", ["send", "role", "forward"]),
     (".teamroll <n1> \"msg1\" <n2> \"msg2\" ...", "Randomly assigns quoted roles (Admin)", "Send Role", ["team", "roll", "random", "assign", "admin"]),
@@ -162,7 +166,7 @@ COMMAND_INDEX = [
     (".narrationcolor", "Pick embed color (admin)", "Other", ["narration", "color", "embed", "admin"]),
     (".dice <n>", "Roll 1-N", "Other", ["dice", "roll", "random", "number"]),
     (".dice <opt1> <opt2> ...", "Random pick from options", "Other", ["dice", "choose", "pick", "random"]),
-    (".loc", "Show all houses and occupants", "Other", ["loc", "location", "houses", "occupants"]),
+    (".loc", "Show all houses and occupants (admin)", "Other", ["loc", "location", "houses", "occupants", "admin"]),
     (".gettag <link>", "Get mentioned users from a message", "Other", ["tag", "mention", "get"]),
     (".timer <time> [tag] [#ch]", "Set a timer", "Other", ["timer", "remind", "countdown"]),
     (".deletechannel", "Delete this channel (admin)", "Other", ["delete", "channel", "admin"]),
@@ -561,8 +565,7 @@ class Other(commands.Cog):
         if not guild_data:
             await ctx.send("Guild data not loaded.")
             return
-        spectator_role = discord.utils.get(ctx.guild.roles, name=guild_data["spectator_role_name"])
-        if not ctx.author.guild_permissions.administrator and not spectator_role in ctx.author.roles:
+        if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command.")
             return
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
@@ -577,6 +580,10 @@ class Other(commands.Cog):
         content_nempty = ""
         content_empty = ""
         for channel in houses_category.channels:
+            everyone_perms = channel.permissions_for(ctx.guild.default_role)
+            if everyone_perms.read_messages:
+                content_empty += f"{channel.name}\n\n"
+                continue
             players = []
             for member in channel.members:
                 if alive_role in member.roles or alt_role in member.roles or dead_role in member.roles:
@@ -587,7 +594,7 @@ class Other(commands.Cog):
                 content_nempty += f"{channel.name}\n"
                 content_nempty += "\n".join(players) + "\n\n"
             else:
-                content_empty += f"{channel.name}\n"
+                content_empty += f"{channel.name}\n\n"
         embed.add_field(name="Non Empty Houses:", value=content_nempty, inline=False)
         embed.add_field(name="Empty Houses:", value=content_empty, inline=False)
         await ctx.send(embed=embed)
@@ -821,10 +828,12 @@ class Other(commands.Cog):
             embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
             embeds.append(embed)
 
+        sent_messages = []
         try:
             for i, e in enumerate(embeds):
                 content = " ".join(ping_parts) if ping_parts and i == 0 else None
-                await ctx.send(content=content, embed=e)
+                msg = await ctx.send(content=content, embed=e)
+                sent_messages.append(msg)
         except discord.Forbidden:
             await ctx.send("I don't have permission to send embeds here.")
             return
@@ -832,6 +841,12 @@ class Other(commands.Cog):
             print(f"[Narration] Error sending embed: {e}")
             await ctx.send("An error occurred while sending the narration.")
             return
+
+        if sent_messages:
+            try:
+                await sent_messages[0].pin()
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
         try:
             await ctx.message.delete(delay=3)
@@ -1310,7 +1325,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
     async def help_setup(self, ctx):
-        embeds = discord.Embed(title="🏗️ - Setup commands", description="19 Commands", color=0xff3fb9)
+        embeds = discord.Embed(title="🏗️ - Setup commands", description="21 Commands", color=0xff3fb9)
         embeds.add_field(name="Core Setup", value=(
             "**`.setup <num>`** ─ Setup roles, channels & categories\n"
             "**`.roleset <key> @role`** ─ Assign a role for the bot\n"
@@ -1336,6 +1351,12 @@ class Other(commands.Cog):
             "**`.showaltsonrefuse`** ─ Show alts on knock refuse\n"
             "**`.candeadsinteract`** ─ Deads can open/refuse\n"
             "**`.canaltsinteract`** ─ Alts can open/refuse\n"
+            "**`.autopincorpse`** ─ Auto pin corpse messages in houses"
+        ), inline=False)
+        embeds.add_field(name="Daily Times", value=(
+            "**`.settime <event>`** ─ Set daily game time via dropdowns\n"
+            "  Events: `dayend` • `lynchend` • `presetend`\n"
+            "**`.times`** ─ Show all configured daily times & next occurrence"
         ), inline=False)
         embeds.add_field(name="Abbreviations", value=(
             "**RC** = RoleChat (player's private channel)  •  **PC** = Private Chat (extra channel)\n"
@@ -1357,6 +1378,7 @@ class Other(commands.Cog):
             "  *Refuse* ─ Knocker sees occupants\n"
             "  *Expires* ─ OS notified in RC\n"
             "**`.pendingknock`** / `.showknocks` ─ True/False if any knock is pending + oldest age\n"
+            "  *restart* ─ Scan all servers (owners only)\n"
             "**`.renknock #House`** ─ Knock on renamed house"
         ), inline=False)
         embedm.add_field(name="PC & Misc", value=(
@@ -1489,7 +1511,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedn, self.help_nominations)
 
     async def help_lists(self, ctx):
-        embedu = discord.Embed(title="📄 - Lists", description="9 commands", color=0xff3fb9)
+        embedu = discord.Embed(title="📄 - Lists", description="10 commands", color=0xff3fb9)
         embedu.add_field(name="Player Lists", value=(
             "**`.playerlist`** ─ List alive members\n"
             "**`.sponsorlist`** ─ List sponsor members\n"
@@ -1502,7 +1524,8 @@ class Other(commands.Cog):
             "**`.houselistremove #house`** ─ Remove a house from list\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.deadlist add @player <team> <role>`** ─ Add to deadlist\n"
-            "**`.deadlist remove @player`** ─ Remove from deadlist"
+            "**`.deadlist remove @player`** ─ Remove from deadlist\n"
+            "**`.deadlist edit @player <team> <role>`** ─ Edit deadlist entry"
         ), inline=False)
         embedu.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedu, self.help_lists)
@@ -1590,7 +1613,7 @@ class Other(commands.Cog):
         embedo.add_field(name="Fun & Utilities", value=(
             "**`.dice <n>`** ─ Roll 1–N\n"
             "**`.dice <opt1> <opt2> ...`** ─ Random pick\n"
-            "**`.loc`** ─ Show all houses and occupants\n"
+            "**`.loc`** ─ Show all houses and occupants (admin)\n"
             "**`.gettag <link>`** ─ Get mentioned users from a message\n"
             "**`.timer <time> [tag] [#ch]`** ─ Set a timer (1h2m10s)\n"
             "━━━━━━━━━━━━━━━━\n"

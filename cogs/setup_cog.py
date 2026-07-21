@@ -1,10 +1,12 @@
 import discord
 import asyncio
 import datetime
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from discord.ext import commands
-from discord.ui import Button, View
+from discord.ui import Button, View, Select
 from cogs.data_utils import load_guild_data, save_guild_data, base_variables
+from cogs.help_misc_cog import COMMON_TIMEZONES
 
 class Setup(commands.Cog):
     def __init__(self, bot):
@@ -512,6 +514,145 @@ class Setup(commands.Cog):
             await ctx.send("Guild data not loaded.")
 
     @commands.command()
+    async def autopincorpse(self, ctx, value: bool):
+        """Toggle whether corpse messages are automatically created and pinned."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if guild_data:
+            guild_data['auto_pin_corpse'] = value
+            save_guild_data(ctx.guild.id, guild_data)
+            await ctx.send(f"Auto Pin Corpses has been set to {value}.")
+        else:
+            await ctx.send("Guild data not loaded.")
+
+    @commands.command()
+    async def settime(self, ctx, event: str):
+        """Set a daily recurring game time via dropdowns. Events: dayend, lynchend, presetend."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command")
+            return
+        event_map = {
+            "dayend": ("day_end_time", "Day End"),
+            "lynchend": ("lynch_end_time", "Lynch End"),
+            "presetend": ("presets_end_time", "Presets End"),
+        }
+        match = event_map.get(event.lower())
+        if not match:
+            await ctx.send("❌ Unknown event. Use: `dayend`, `lynchend`, or `presetend`.")
+            return
+        key, label = match
+
+        hour_options = [discord.SelectOption(label=f"{h:02d}", value=str(h)) for h in range(24)]
+        minute_options = [discord.SelectOption(label=f"{m:02d}", value=str(m)) for m in range(0, 60, 5)]
+        tz_options = [
+            discord.SelectOption(label=name, value=tz, emoji=emoji)
+            for name, tz, emoji in COMMON_TIMEZONES
+        ]
+
+        state = {"hour": None, "minute": None, "tz": None}
+
+        hour_select = Select(placeholder="Hour (24h)...", options=hour_options, min_values=1, max_values=1, row=0)
+        minute_select = Select(placeholder="Minute...", options=minute_options, min_values=1, max_values=1, row=1)
+        tz_select = Select(placeholder="Timezone...", options=tz_options, min_values=1, max_values=1, row=2)
+
+        async def _save_and_confirm(interaction):
+            h = state["hour"]
+            m = state["minute"]
+            tz_name = state["tz"]
+            guild_data = load_guild_data(ctx.guild.id)
+            if not guild_data:
+                await interaction.response.edit_message(content="Guild data not loaded.", view=None)
+                return
+            guild_data[key] = f"{h:02d}:{m:02d}"
+            save_guild_data(ctx.guild.id, guild_data)
+            tz_obj = ZoneInfo(tz_name)
+            now_local = datetime.now(tz_obj)
+            target = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            if target <= now_local:
+                target += timedelta(days=1)
+            unix_ts = int(target.timestamp())
+            embed = discord.Embed(title=f"✅ {label} Updated", color=discord.Color.green())
+            embed.add_field(name="Time", value=f"`{h:02d}:{m:02d}` — <t:{unix_ts}:t> (<t:{unix_ts}:R>)", inline=False)
+            embed.set_footer(text="Village Game")
+            await interaction.response.edit_message(embed=embed, view=None)
+
+        async def _maybe_save(interaction):
+            if state["hour"] is not None and state["minute"] is not None and state["tz"] is not None:
+                await _save_and_confirm(interaction)
+            else:
+                await interaction.response.defer()
+
+        async def on_hour(interaction):
+            state["hour"] = int(hour_select.values[0])
+            hour_select.placeholder = f"Hour: {hour_select.values[0]}"
+            await _maybe_save(interaction)
+
+        async def on_minute(interaction):
+            state["minute"] = int(minute_select.values[0])
+            minute_select.placeholder = f"Minute: {minute_select.values[0]}"
+            await _maybe_save(interaction)
+
+        async def on_tz(interaction):
+            state["tz"] = tz_select.values[0]
+            tz_select.placeholder = f"Timezone: {state['tz']}"
+            await _maybe_save(interaction)
+
+        hour_select.callback = on_hour
+        minute_select.callback = on_minute
+        tz_select.callback = on_tz
+
+        view = View(timeout=120)
+        view.add_item(hour_select)
+        view.add_item(minute_select)
+        view.add_item(tz_select)
+
+        embed = discord.Embed(
+            title=f"Set {label} Time",
+            description="Pick the hour, minute, and timezone for this daily event.",
+            color=0xff3fb9,
+        )
+        embed.set_footer(text="Village Game • All three must be selected to save")
+        await ctx.send(embed=embed, view=view)
+
+    @commands.command()
+    async def times(self, ctx):
+        """Show all configured daily game times and when they next occur."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        events = [
+            ("day_end_time", "Day End", "dayend"),
+            ("lynch_end_time", "Lynch End", "lynchend"),
+            ("presets_end_time", "Presets End", "presetend"),
+        ]
+        embed = discord.Embed(title="Daily Game Times", color=0xff3fb9, timestamp=datetime.now())
+        embed.set_footer(text="Village Game")
+        any_set = False
+        for key, label, cmd in events:
+            val = guild_data.get(key)
+            if not val:
+                embed.add_field(name=label, value=f"Not set — use `.settime {cmd}`", inline=False)
+                continue
+            any_set = True
+            h, m = (int(x) for x in val.split(":"))
+            now = datetime.now(timezone.utc)
+            target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            unix_ts = int(target.timestamp())
+            embed.add_field(
+                name=label,
+                value=f"<t:{unix_ts}:t> (<t:{unix_ts}:R>)",
+                inline=False,
+            )
+        if not any_set:
+            embed.description = "No daily times configured yet."
+        await ctx.send(embed=embed)
+
+    @commands.command()
     async def settings(self, ctx):
         """View all current server configuration settings."""
         guild_data = load_guild_data(ctx.guild.id)
@@ -532,6 +673,10 @@ class Setup(commands.Cog):
         embed.add_field(name="Show Alts on knock refuse", value=str(guild_data.get("show_alt_on_refuse")), inline=False)
         embed.add_field(name="Can Deads interact with the door", value=str(guild_data.get("can_dead_open")), inline=False)
         embed.add_field(name="Can Alts interact with the door", value=str(guild_data.get("can_alt_open")), inline=False)
+        embed.add_field(name="Auto Pin Corpses", value=str(guild_data.get("auto_pin_corpse", True)), inline=False)
+        embed.add_field(name="Day End Time", value=str(guild_data.get("day_end_time") or "Not set"), inline=False)
+        embed.add_field(name="Lynch End Time", value=str(guild_data.get("lynch_end_time") or "Not set"), inline=False)
+        embed.add_field(name="Presets End Time", value=str(guild_data.get("presets_end_time") or "Not set"), inline=False)
         embed.add_field(name="Dashboard enabled", value=str(guild_data.get("dashboard_enabled", False)), inline=False)
 
         await ctx.send(embed=embed)

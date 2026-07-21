@@ -51,6 +51,10 @@ base_variables = {
     "show_alt_on_refuse": False,
     "can_dead_open": False,
     "can_alt_open": False,
+    "auto_pin_corpse": True,
+    "day_end_time": None,
+    "lynch_end_time": None,
+    "presets_end_time": None,
     "member_homes": {},
     "current_houses": {},
     "infos": {},
@@ -120,7 +124,7 @@ def add_player(player, team, role, server):
     _bot_db.add_player(player, team, role, server)
 
 def remove_player(player, server):
-    _bot_db.remove_player(player, server)
+    return _bot_db.remove_player(player, server)
 
 def get_team_players(team, server):
     return _bot_db.get_team_players(team, server)
