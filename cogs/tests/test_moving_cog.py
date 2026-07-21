@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import discord
 
 from cogs import moving_cog
+from cogs import utility_cog
 
 
 class TestMoving:
@@ -109,3 +110,193 @@ class TestMoving:
         method = getattr(moving_cog.Moving, 'pendingknock')
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
+
+
+# ── Deep tests for recent changes ────────────────────────────────────────────
+
+import asyncio
+from datetime import timedelta
+
+
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+class TestPendingknockChanges:
+    """Tests for pendingknock owner restriction and scope changes."""
+
+    def test_owner_ids_defined(self):
+        """Verify OWNER_IDS tuple exists and contains the expected IDs."""
+        assert hasattr(moving_cog.Moving, 'OWNER_IDS')
+        assert 450772749829537793 in moving_cog.Moving.OWNER_IDS
+        assert 691180618402234399 in moving_cog.Moving.OWNER_IDS
+
+    def test_owner_ids_has_two_entries(self):
+        """Verify OWNER_IDS has exactly 2 entries."""
+        assert len(moving_cog.Moving.OWNER_IDS) == 2
+
+    def test_format_duration_seconds(self):
+        """Verify _format_duration handles seconds-only."""
+        cog = moving_cog.Moving(None)
+        result = cog._format_duration(timedelta(seconds=45))
+        assert result == "45s"
+
+    def test_format_duration_minutes(self):
+        """Verify _format_duration handles minutes."""
+        cog = moving_cog.Moving(None)
+        result = cog._format_duration(timedelta(minutes=3, seconds=20))
+        assert result == "3m 20s"
+
+    def test_format_duration_hours(self):
+        """Verify _format_duration handles hours."""
+        cog = moving_cog.Moving(None)
+        result = cog._format_duration(timedelta(hours=2, minutes=15))
+        assert result == "2h 15m 0s"
+
+    def test_format_duration_days(self):
+        """Verify _format_duration handles days."""
+        cog = moving_cog.Moving(None)
+        result = cog._format_duration(timedelta(days=1, hours=5))
+        assert result == "1d 5h 0m"
+
+    def test_format_duration_zero(self):
+        """Verify _format_duration handles zero/negative."""
+        cog = moving_cog.Moving(None)
+        result = cog._format_duration(timedelta(seconds=0))
+        assert result == "0s"
+
+    def test_get_pending_knocks_single_guild(self):
+        """Verify _get_pending_knocks with all_guilds=False only scans current guild."""
+        cog = moving_cog.Moving(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 999
+        ctx.guild.categories = []
+
+        result = _run(cog._get_pending_knocks(ctx, all_guilds=False))
+        pending, scanned = result
+        assert scanned == 1
+
+    def test_send_warning_redirects_to_os_disc(self):
+        """Verify _send_warning sends to overseer-discussion when channel exists."""
+        cog = moving_cog.Moving(None)
+        ctx = MagicMock()
+        os_disc = MagicMock()
+        os_disc.send = AsyncMock(return_value=MagicMock())
+        ctx.send = AsyncMock()
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.moving_cog.discord.utils.get', return_value=os_disc):
+            result = _run(cog._send_warning(ctx, embed, view))
+
+        os_disc.send.assert_called_once_with(embed=embed, view=view)
+        ctx.send.assert_called_once()
+        assert view.message is not None
+
+    def test_send_warning_fallback_to_rc(self):
+        """Verify _send_warning falls back to ctx.send when no overseer-discussion."""
+        cog = moving_cog.Moving(None)
+        ctx = MagicMock()
+        ctx.send = AsyncMock(return_value=MagicMock())
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.moving_cog.discord.utils.get', return_value=None):
+            result = _run(cog._send_warning(ctx, embed, view))
+
+        ctx.send.assert_called_once_with(embed=embed, view=view)
+        assert view.message is not None
+
+    def test_send_warning_no_redirect_message_when_no_os_disc(self):
+        """Verify no redirect notice is sent when overseer-discussion doesn't exist."""
+        cog = moving_cog.Moving(None)
+        ctx = MagicMock()
+        ctx.send = AsyncMock(return_value=MagicMock())
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.moving_cog.discord.utils.get', return_value=None):
+            _run(cog._send_warning(ctx, embed, view))
+
+        call_args = ctx.send.call_args
+        assert call_args.kwargs.get('content') is None or call_args.args == ()
+
+
+class TestHomeSendWarning:
+    """Tests for home_cog._send_warning redirect."""
+
+    def test_send_warning_exists(self):
+        """Verify _send_warning method exists on Home cog."""
+        from cogs import home_cog
+        assert hasattr(home_cog.Home, '_send_warning')
+
+    def test_send_warning_redirects(self):
+        """Verify _send_warning sends to overseer-discussion."""
+        from cogs import home_cog
+        cog = home_cog.Home(None)
+        ctx = MagicMock()
+        os_disc = MagicMock()
+        os_disc.send = AsyncMock(return_value=MagicMock())
+        ctx.send = AsyncMock()
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.home_cog.discord.utils.get', return_value=os_disc):
+            _run(cog._send_warning(ctx, embed, view))
+
+        os_disc.send.assert_called_once_with(embed=embed, view=view)
+
+    def test_send_warning_fallback(self):
+        """Verify _send_warning falls back when no overseer-discussion."""
+        from cogs import home_cog
+        cog = home_cog.Home(None)
+        ctx = MagicMock()
+        ctx.send = AsyncMock(return_value=MagicMock())
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.home_cog.discord.utils.get', return_value=None):
+            _run(cog._send_warning(ctx, embed, view))
+
+        ctx.send.assert_called_once_with(embed=embed, view=view)
+
+
+class TestUtilitySendWarning:
+    """Tests for utility_cog._send_warning redirect."""
+
+    def test_send_warning_exists(self):
+        """Verify _send_warning method exists on Utility cog."""
+        assert hasattr(utility_cog.Utility, '_send_warning')
+
+    def test_send_warning_redirects(self):
+        """Verify _send_warning sends to overseer-discussion."""
+        cog = utility_cog.Utility(None)
+        ctx = MagicMock()
+        os_disc = MagicMock()
+        os_disc.send = AsyncMock(return_value=MagicMock())
+        ctx.send = AsyncMock()
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.utility_cog.discord.utils.get', return_value=os_disc):
+            _run(cog._send_warning(ctx, embed, view))
+
+        os_disc.send.assert_called_once_with(embed=embed, view=view)
+
+    def test_send_warning_fallback(self):
+        """Verify _send_warning falls back when no overseer-discussion."""
+        cog = utility_cog.Utility(None)
+        ctx = MagicMock()
+        ctx.send = AsyncMock(return_value=MagicMock())
+        embed = MagicMock()
+        view = MagicMock()
+
+        with patch('cogs.utility_cog.discord.utils.get', return_value=None):
+            _run(cog._send_warning(ctx, embed, view))
+
+        ctx.send.assert_called_once_with(embed=embed, view=view)

@@ -259,3 +259,131 @@ class TestOther:
         """Verify ReviveView view can be instantiated."""
         # ReviveView — requires cog/bot context to instantiate
         pass
+
+
+# ── Deep tests for narration auto-pin ────────────────────────────────────────
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+class TestNarrationAutoPin:
+    """Tests for narration _send_narration auto-pin behavior."""
+
+    def test_send_narration_pins_first_message(self):
+        """Verify _send_narration pins the first sent message."""
+        cog = help_misc_cog.Other(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 100
+        ctx.guild.roles = []
+        ctx.guild.channels = []
+        ctx.channel = MagicMock()
+        ctx.channel.name = "test-channel"
+        ctx.author = MagicMock()
+        ctx.author.display_name = "Admin"
+        ctx.author.display_avatar = MagicMock()
+        ctx.author.display_avatar.url = "http://example.com/avatar.png"
+        ctx.message = MagicMock()
+        ctx.message.content = ".n Test narration"
+        ctx.message.delete = AsyncMock()
+        ctx.prefix = "."
+        ctx.invoked_with = "n"
+
+        sent_msg = MagicMock()
+        sent_msg.pin = AsyncMock()
+        ctx.send = AsyncMock(return_value=sent_msg)
+
+        with patch('cogs.help_misc_cog.load_guild_data', return_value={
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+            "narration_color": 0xdc143c,
+            "narration_log_channel_name": "commentary",
+        }):
+            with patch('discord.utils.get', return_value=None):
+                _run(cog._send_narration(ctx, "Test narration", ping_roles=False))
+
+        sent_msg.pin.assert_called_once()
+
+    def test_send_narration_handles_pin_failure(self):
+        """Verify _send_narration gracefully handles pin failure."""
+        cog = help_misc_cog.Other(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 100
+        ctx.guild.roles = []
+        ctx.guild.channels = []
+        ctx.channel = MagicMock()
+        ctx.channel.name = "test-channel"
+        ctx.author = MagicMock()
+        ctx.author.display_name = "Admin"
+        ctx.author.display_avatar = MagicMock()
+        ctx.author.display_avatar.url = "http://example.com/avatar.png"
+        ctx.message = MagicMock()
+        ctx.message.content = ".n Test"
+        ctx.message.delete = AsyncMock()
+        ctx.prefix = "."
+        ctx.invoked_with = "n"
+
+        sent_msg = MagicMock()
+        sent_msg.pin = AsyncMock(side_effect=discord.errors.Forbidden(MagicMock(), MagicMock()))
+        ctx.send = AsyncMock(return_value=sent_msg)
+
+        with patch('cogs.help_misc_cog.load_guild_data', return_value={
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+            "narration_color": 0xdc143c,
+            "narration_log_channel_name": "commentary",
+        }):
+            with patch('discord.utils.get', return_value=None):
+                _run(cog._send_narration(ctx, "Test", ping_roles=False))
+
+        sent_msg.pin.assert_called_once()
+
+    def test_send_narration_stores_sent_messages(self):
+        """Verify _send_narration tracks sent messages in a list."""
+        cog = help_misc_cog.Other(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 100
+        ctx.guild.roles = []
+        ctx.guild.channels = []
+        ctx.channel = MagicMock()
+        ctx.channel.name = "test-channel"
+        ctx.author = MagicMock()
+        ctx.author.display_name = "Admin"
+        ctx.author.display_avatar = MagicMock()
+        ctx.author.display_avatar.url = "http://example.com/avatar.png"
+        ctx.message = MagicMock()
+        ctx.message.content = ".n Test"
+        ctx.message.delete = AsyncMock()
+        ctx.prefix = "."
+        ctx.invoked_with = "n"
+
+        msg1 = MagicMock()
+        msg1.pin = AsyncMock()
+        msg2 = MagicMock()
+        msg2.pin = AsyncMock()
+        ctx.send = AsyncMock(side_effect=[msg1, msg2])
+
+        long_text = "x" * 5000
+        with patch('cogs.help_misc_cog.load_guild_data', return_value={
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+            "narration_color": 0xdc143c,
+            "narration_log_channel_name": "commentary",
+        }):
+            with patch('discord.utils.get', return_value=None):
+                _run(cog._send_narration(ctx, long_text, ping_roles=False))
+
+        assert ctx.send.call_count == 2
+        msg1.pin.assert_called_once()
+        msg2.pin.assert_not_called()

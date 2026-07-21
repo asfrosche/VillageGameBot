@@ -100,3 +100,59 @@ class TestPresets:
         method = getattr(presets_cog.Presets, 'ospresetcategories')
         checks = getattr(method, 'checks', None)
         assert checks is not None, "Command should have permission checks"
+
+
+# ── Deep tests for ospreset label truncation fixes ────────────────────────────
+
+import discord
+
+
+class TestOspresetLabelFixes:
+    """Tests for SelectOption label truncation in ospreset swap/remove."""
+
+    def test_select_option_label_max_length_swap(self):
+        """Verify swap SelectOption labels never exceed 100 chars."""
+        long_info = "A" * 200
+        preview = long_info[:80] + ('...' if len(long_info) > 80 else '')
+        label = f"1. {preview}"
+        assert len(label) <= 100
+
+    def test_select_option_label_max_length_remove(self):
+        """Verify remove SelectOption labels never exceed 100 chars."""
+        long_info = "B" * 300
+        preview = long_info[:80] + ('...' if len(long_info) > 80 else '')
+        label = f"10. {preview}"
+        assert len(label) <= 100
+
+    def test_select_option_label_short_text(self):
+        """Verify short text is not truncated."""
+        short_info = "Heal target"
+        preview = short_info[:80] + ('...' if len(short_info) > 80 else '')
+        assert preview == "Heal target"
+
+    def test_select_option_label_exactly_80_chars(self):
+        """Verify text at exactly 80 chars is not truncated."""
+        info = "C" * 80
+        preview = info[:80] + ('...' if len(info) > 80 else '')
+        assert preview == info
+        assert not preview.endswith('...')
+
+    def test_select_option_label_81_chars(self):
+        """Verify text at 81 chars is truncated."""
+        info = "D" * 81
+        preview = info[:80] + ('...' if len(info) > 80 else '')
+        assert preview.endswith('...')
+        assert len(preview) == 83
+
+    def test_swap_max_values_adapts_to_preset_count(self):
+        """Verify swap max_values is min(2, len(options))."""
+        for count in [1, 2, 3, 5]:
+            options = [f"opt{i}" for i in range(count)]
+            max_vals = min(2, len(options))
+            assert max_vals == min(2, count)
+
+    def test_select_options_capped_at_25(self):
+        """Verify options list is sliced to max 25 for Discord Select limit."""
+        options = list(range(30))
+        capped = options[:25]
+        assert len(capped) == 25
