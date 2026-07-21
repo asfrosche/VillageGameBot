@@ -39,6 +39,16 @@ class AnalyticsService:
             except Exception:
                 logger.exception("Failed to initialize analytics provider %s", type(p).__name__)
 
+        # Purge stale CommandNotFound entries on startup
+        for p in self._providers:
+            if isinstance(p, LocalDBProvider):
+                try:
+                    deleted = p.db.purge_command_not_found()
+                    if deleted:
+                        logger.info("Purged %d CommandNotFound entries from error_log", deleted)
+                except Exception:
+                    logger.exception("Failed to purge CommandNotFound entries")
+
         logger.info("Analytics service initialized with %d provider(s)", len(self._providers))
 
     async def shutdown(self) -> None:
@@ -58,8 +68,12 @@ class AnalyticsService:
             except Exception:
                 logger.exception("Provider %s failed to capture event", type(p).__name__)
 
+    _SUPPRESSED_ERROR_TYPES = {"CommandNotFound", "UserInputError"}
+
     async def record_failure(self, event: CommandEvent) -> None:
         if not self._enabled:
+            return
+        if event.error_type in self._SUPPRESSED_ERROR_TYPES:
             return
         for p in self._providers:
             try:
@@ -80,6 +94,8 @@ class AnalyticsService:
 
     async def record_error(self, error: ErrorRecord) -> None:
         if not self._enabled:
+            return
+        if error.exception_type in self._SUPPRESSED_ERROR_TYPES:
             return
         for p in self._providers:
             try:

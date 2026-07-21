@@ -605,6 +605,16 @@ class AnalyticsDB:
         ).fetchone()
         return row["v"] or 0
 
+    def purge_command_not_found(self) -> int:
+        """Remove all CommandNotFound entries from error_log. Returns count deleted."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM error_log WHERE exception_type = ?",
+            ("CommandNotFound",),
+        )
+        conn.commit()
+        return cursor.rowcount
+
     def clear_errors(self) -> None:
         conn = self._get_conn()
 

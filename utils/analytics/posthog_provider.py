@@ -42,8 +42,12 @@ class PostHogProvider(AnalyticsProvider):
         except Exception:
             logger.exception("Failed to send event to PostHog")
 
+    _SUPPRESSED = {"CommandNotFound", "UserInputError"}
+
     async def record_error(self, error: ErrorRecord) -> None:
         if self._client is None:
+            return
+        if error.exception_type in self._SUPPRESSED:
             return
         try:
             distinct_id = error.user_id or "unknown"

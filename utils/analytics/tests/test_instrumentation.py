@@ -134,6 +134,7 @@ class TestOnCommandError:
         bot = MagicMock()
         bot.before_invoke = MagicMock()
         bot.after_invoke = MagicMock()
+        bot.on_command_error = None  # no pre-existing handler to chain
         service = MagicMock()
         service.enabled = True
         service.record_execution = AsyncMock()
