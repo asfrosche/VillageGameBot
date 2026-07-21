@@ -159,7 +159,7 @@ class ChannelMap(commands.Cog):
             channels_raw.append({
                 "name": ch.name,
                 "member_ids": member_ids,
-                "hidden": everyone_overwrites.read_messages is False,
+                "hidden": everyone_overwrites.send_messages is False,
                 "channel": ch,
             })
 

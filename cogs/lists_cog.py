@@ -4,6 +4,71 @@ from datetime import datetime
 from discord.ext import commands
 from cogs.data_utils import load_guild_data, save_guild_data, add_player, remove_player, get_team_players
 
+def _normalize_team(team: str):
+    """Normalize a team input to a canonical name.
+
+    Returns one of: village, evil, neutral, rk, corrupted.
+    Returns None if the team input is not recognized.
+    """
+    if not team:
+        return None
+    t = team.strip().lower()
+    if t in ["vill", "village", "v", "good"]:
+        return "village"
+    if t in ["evil", "e", "bad"]:
+        return "evil"
+    if t in ["neutral", "n", "solo", "s"]:
+        return "neutral"
+    if t in ["rk", "r", "lms"]:
+        return "rk"
+    if t in ["corrupted", "corr", "unk", "?", "???", "c"]:
+        return "corrupted"
+    return None
+
+
+_DEADLIST_USAGE = {
+    "add": (
+        "❌ **Usage:** `.deadlist add @player <team> <role>`\n"
+        "**Example:** `.deadlist add @Marr(Vacs) Village Doctor`\n\n"
+        "**Teams:** village (vill/v/good) • evil (e/bad) • neutral (n/solo/s) • rk (r/lms) • corrupted (corr/unk/?/c)\n"
+        "All three arguments are required."
+    ),
+    "edit": (
+        "❌ **Usage:** `.deadlist edit @player <team> <role>`\n"
+        "**Example:** `.deadlist edit @Marr(Vacs) Evil Wolf`\n\n"
+        "Updates an existing deadlist entry."
+    ),
+}
+
+
+def _deadlist_usage(action: str) -> str:
+    """Return a helpful usage message for a given deadlist action."""
+    return _DEADLIST_USAGE.get(
+        action,
+        "❌ **Usage:** `.deadlist add @player <team> <role>` | `.deadlist remove @player` | `.deadlist edit @player <team> <role>`",
+    )
+
+
+def _resolve_player_name(ctx, player_str: str) -> str:
+    """Resolve a player string to a display_name.
+
+    Handles discord.Member mentions (<@id>, <@!id>), raw user IDs, and plain text.
+    Returns the member's display_name if resolved, otherwise the raw string.
+    """
+    if not player_str:
+        return player_str
+    raw = player_str.strip()
+    if raw.startswith("<@") and raw.endswith(">"):
+        raw = raw.lstrip("<!@").rstrip(">")
+    try:
+        member = ctx.guild.get_member(int(raw))
+        if member is not None:
+            return member.display_name
+    except (ValueError, TypeError):
+        pass
+    return player_str
+
+
 class Lists(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -149,31 +214,28 @@ class Lists(commands.Cog):
                 await ctx.send("You don't have enough permissions to use this command.")
                 return
             if player and team and role:
-                team = team.lower()
-                if team in ["vill", "village", "v", "good"]:
-                    team = "village"
-                elif team in ["evil", "e", "bad"]:
-                    team = "evil"
-                elif team in ["neutral", "n", "solo", "s"]:
-                    team = "neutral"
-                elif team in ["rk", "r", "lms"]:
-                    team = "rk"
-                elif team in ["corrupted", "corr", "unk", "?", "???", "c"]:
-                	team = "corrupted"
-                else:
-                    await ctx.send("Invalid team. Use Village, Evil, Neutral, Rk or Corrupted.")
+                canonical = _normalize_team(team)
+                if canonical is None:
+                    await ctx.send(
+                        "❌ Invalid team. Use Village, Evil, Neutral, Rk or Corrupted.\n"
+                        "**Teams:** village (vill/v/good) • evil (e/bad) • neutral (n/solo/s) • rk (r/lms) • corrupted (corr/unk/?/c)"
+                    )
                     return
-                add_player(player, team, role, ctx.guild.id)
+                add_player(player, canonical, role, ctx.guild.id)
                 await ctx.send(f"{player} added to Deadlist")
             else:
-                await ctx.send("You have to fill all inputs: player, team, role.")
+                await ctx.send(_deadlist_usage("add"))
         elif action == "remove":
             if not ctx.author.guild_permissions.administrator:
                 await ctx.send("You don't have enough permissions to use this command.")
                 return
             if player:
-                remove_player(player, ctx.guild.id)
-                await ctx.send(f"{player} removed from Deadlist.")
+                resolved = _resolve_player_name(ctx, player)
+                deleted = remove_player(resolved, ctx.guild.id)
+                if deleted:
+                    await ctx.send(f"{resolved} removed from Deadlist.")
+                else:
+                    await ctx.send(f"No deadlist entry found for {resolved}.")
             else:
                 await ctx.send("No player specified.")
         elif action == 'edit':
@@ -181,23 +243,14 @@ class Lists(commands.Cog):
                 await ctx.send("You don't have enough permissions to use this command.")
                 return
             if player and team and role:
-                remove_player(player, ctx.guild.id)
-                team = team.lower()
-                if team in ["vill", "village", "v", "good"]:
-                    team = "village"
-                elif team in ["evil", "e", "bad"]:
-                    team = "evil"
-                elif team in ["neutral", "n", "solo", "s"]:
-                    team = "neutral"
-                elif team in ["rk", "r", "lms"]:
-                    team = "rk"
-                elif team in ["corrupted", "corr", "unk", "?", "???", "c"]:
-                    team = "corrupted"
-                else:
-                    ctx.send("Invalid team. Use Village, Evil, Neutral, Rk or Corrupted.")
+                resolved = _resolve_player_name(ctx, player)
+                remove_player(resolved, ctx.guild.id)
+                canonical = _normalize_team(team)
+                if canonical is None:
+                    await ctx.send("Invalid team. Use Village, Evil, Neutral, Rk or Corrupted.")
                     return
-                add_player(player, team, role, ctx.guild.id)
-                await ctx.send(f"{player} edited in deadlist.")
+                add_player(resolved, canonical, role, ctx.guild.id)
+                await ctx.send(f"{resolved} edited in deadlist.")
             else:
                 await ctx.send("You have to fill all inputs: player, team, role.")
 

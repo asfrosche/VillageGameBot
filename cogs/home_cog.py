@@ -18,6 +18,16 @@ class Home(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def _send_warning(self, ctx, embed, view):
+        os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+        if os_disc:
+            msg = await os_disc.send(embed=embed, view=view)
+            await ctx.send("⚠ Check **overseer-discussion** for status details.")
+        else:
+            msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        return msg
+
     @commands.command()
     async def home(self, ctx, type: str = None, user: discord.Member = None, new_channel: discord.TextChannel = None):
         """Bring a player home or manage home assignments (admin)."""
@@ -84,8 +94,7 @@ class Home(commands.Cog):
                 if _vb_hit:
                     _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
                     _vb_view = StatusWarningConfirmView(ctx.author.id)
-                    _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
-                    _vb_view.message = _vb_msg
+                    await self._send_warning(ctx, _vb_embed, _vb_view)
                     await _vb_view.wait()
                     if not _vb_view.confirmed:
                         return
@@ -95,8 +104,7 @@ class Home(commands.Cog):
                     if _st_hit:
                         _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
                         _st_view = StatusWarningConfirmView(ctx.author.id)
-                        _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
-                        _st_view.message = _st_msg
+                        await self._send_warning(ctx, _st_embed, _st_view)
                         await _st_view.wait()
                         if not _st_view.confirmed:
                             return

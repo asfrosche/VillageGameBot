@@ -722,10 +722,10 @@ class Presets(commands.Cog):
                     
                 options = []
                 for idx, p in enumerate(presets_now):
-                    preview = p['preset_info'] if len(p['preset_info']) <= 100 else p['preset_info'][:97] + '...'
+                    preview = p['preset_info'][:80] + ('...' if len(p['preset_info']) > 80 else '')
                     options.append(discord.SelectOption(label=f"{idx+1}. {preview}", value=p['preset_id']))
                 
-                select = Select(placeholder="Select two to swap", options=options, min_values=2, max_values=2)
+                select = Select(placeholder="Select two to swap", options=options[:25], min_values=2, max_values=min(2, len(options)))
 
                 async def sel_cb(sel_i: discord.Interaction):
                     try:
@@ -771,10 +771,10 @@ class Presets(commands.Cog):
                     
                 options = []
                 for idx, p in enumerate(presets_now):
-                    preview = p['preset_info'] if len(p['preset_info']) <= 100 else p['preset_info'][:97] + '...'
+                    preview = p['preset_info'][:80] + ('...' if len(p['preset_info']) > 80 else '')
                     options.append(discord.SelectOption(label=f"{idx+1}. {preview}", value=p['preset_id']))
                 
-                select = Select(placeholder="Select preset to remove", options=options, min_values=1, max_values=1)
+                select = Select(placeholder="Select preset to remove", options=options[:25], min_values=1, max_values=1)
 
                 async def sel_cb(sel_i: discord.Interaction):
                     try:

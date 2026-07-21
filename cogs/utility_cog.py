@@ -160,6 +160,16 @@ class Utility(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def _send_warning(self, ctx, embed, view):
+        os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+        if os_disc:
+            msg = await os_disc.send(embed=embed, view=view)
+            await ctx.send("⚠ Check **overseer-discussion** for status details.")
+        else:
+            msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        return msg
+
     def _extract_channel_from_arg(self, ctx, value):
         if not value:
             return None
@@ -672,6 +682,7 @@ class Utility(commands.Cog):
         embedlog.set_footer(text="Village Game")
         if whisper_logs_channel:
             await whisper_logs_channel.send(embed=embedlog)
+        await ctx.send(f"Whisper sent to {receiver_channel.mention}", mention_author=False)
 
     @commands.command()
     async def switch(self, ctx):
@@ -725,8 +736,7 @@ class Utility(commands.Cog):
                         description=_wt,
                     )
                     _warn_view = StatusWarningConfirmView(ctx.author.id)
-                    _msg = await ctx.send(embed=_embed, view=_warn_view)
-                    _warn_view.message = _msg
+                    await self._send_warning(ctx, _embed, _warn_view)
                     await _warn_view.wait()
                     if not _warn_view.confirmed:
                         return
@@ -843,8 +853,9 @@ class Utility(commands.Cog):
                                 for houses_channel in houses:
                                     await houses_channel.set_permissions(member, overwrite=None)
                                     if houses_channel == current_house:
-                                        corpse_message = await houses_channel.send(f'{member.mention} corpse is here')
-                                        await corpse_message.pin()
+                                        if guild_data.get("auto_pin_corpse", True):
+                                            corpse_message = await houses_channel.send(f'{member.mention} corpse is here')
+                                            await corpse_message.pin()
                                     else:
                                         await houses_channel.send(f'{member.mention} Leaves')
                             elif len(houses) > 1:
@@ -852,9 +863,10 @@ class Utility(commands.Cog):
                                 return
                             elif len(houses) == 1:
                                 for houses_channel in houses:
-                                    await houses_channel.set_permissions(member, overwrite=None)    
-                                    corpse_message = await houses_channel.send(f'{member.mention} corpse is here')
-                                    await corpse_message.pin()
+                                    await houses_channel.set_permissions(member, overwrite=None)
+                                    if guild_data.get("auto_pin_corpse", True):
+                                        corpse_message = await houses_channel.send(f'{member.mention} corpse is here')
+                                        await corpse_message.pin()
                         if str(member.id) in guild_data["member_homes"]:
                             old_house_id = guild_data["member_homes"].get(str(member.id))
                             old_house = ctx.guild.get_channel(old_house_id)
@@ -970,7 +982,7 @@ class Utility(commands.Cog):
             save_guild_data(ctx.guild.id, guild_data)
             await ctx.send(f"{target_member.mention} is now homeless")
 
-        if selected_house:
+        if selected_house and guild_data.get("auto_pin_corpse", True):
             corpse_message = await selected_house.send(f"{target_member.mention} corpse is here")
             await corpse_message.pin()
 

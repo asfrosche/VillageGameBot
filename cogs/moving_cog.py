@@ -20,6 +20,16 @@ class Moving(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def _send_warning(self, ctx, embed, view):
+        os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+        if os_disc:
+            msg = await os_disc.send(embed=embed, view=view)
+            await ctx.send("⚠ Check **overseer-discussion** for status details.")
+        else:
+            msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        return msg
+
     # ──────────────────────────────────────────────────────────────────────────
     # Add commands
     # ──────────────────────────────────────────────────────────────────────────
@@ -191,8 +201,8 @@ class Moving(commands.Cog):
                         )
                         embed.add_field(name='Removed From:', value=f"{new_channel.mention} `[{new_channel.name}]`", inline=False)
                         embed.set_footer(text="Village Game")
-                    if log_channel:
-                        await log_channel.send(embed=embed)
+                        if log_channel:
+                            await log_channel.send(embed=embed)
                 elif sponsor_role in member.roles:
                     ow = new_channel.overwrites_for(member)
                     if ow != discord.PermissionOverwrite():
@@ -229,8 +239,7 @@ class Moving(commands.Cog):
                     if _vb_hit:
                         _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
                         _vb_view = StatusWarningConfirmView(ctx.author.id)
-                        _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
-                        _vb_view.message = _vb_msg
+                        await self._send_warning(ctx, _vb_embed, _vb_view)
                         await _vb_view.wait()
                         if not _vb_view.confirmed:
                             return
@@ -240,8 +249,7 @@ class Moving(commands.Cog):
                         if _st_hit:
                             _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
                             _st_view = StatusWarningConfirmView(ctx.author.id)
-                            _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
-                            _st_view.message = _st_msg
+                            await self._send_warning(ctx, _st_embed, _st_view)
                             await _st_view.wait()
                             if not _st_view.confirmed:
                                 return
@@ -268,8 +276,7 @@ class Moving(commands.Cog):
                     if _vb_hit:
                         _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
                         _vb_view = StatusWarningConfirmView(ctx.author.id)
-                        _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
-                        _vb_view.message = _vb_msg
+                        await self._send_warning(ctx, _vb_embed, _vb_view)
                         await _vb_view.wait()
                         if not _vb_view.confirmed:
                             return
@@ -279,8 +286,7 @@ class Moving(commands.Cog):
                         if _st_hit:
                             _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
                             _st_view = StatusWarningConfirmView(ctx.author.id)
-                            _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
-                            _st_view.message = _st_msg
+                            await self._send_warning(ctx, _st_embed, _st_view)
                             await _st_view.wait()
                             if not _st_view.confirmed:
                                 return
@@ -368,8 +374,7 @@ class Moving(commands.Cog):
                 if _vb_hit:
                     _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
                     _vb_view = StatusWarningConfirmView(ctx.author.id)
-                    _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
-                    _vb_view.message = _vb_msg
+                    await self._send_warning(ctx, _vb_embed, _vb_view)
                     await _vb_view.wait()
                     if not _vb_view.confirmed:
                         return
@@ -378,8 +383,7 @@ class Moving(commands.Cog):
                 if _st_hit:
                     _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
                     _st_view = StatusWarningConfirmView(ctx.author.id)
-                    _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
-                    _st_view.message = _st_msg
+                    await self._send_warning(ctx, _st_embed, _st_view)
                     await _st_view.wait()
                     if not _st_view.confirmed:
                         return
@@ -407,8 +411,7 @@ class Moving(commands.Cog):
                 if _vb_hit:
                     _vb_embed = warning_embed(title="⚠ Visit Block Active", description=_vb_text)
                     _vb_view = StatusWarningConfirmView(ctx.author.id)
-                    _vb_msg = await ctx.send(embed=_vb_embed, view=_vb_view)
-                    _vb_view.message = _vb_msg
+                    await self._send_warning(ctx, _vb_embed, _vb_view)
                     await _vb_view.wait()
                     if not _vb_view.confirmed:
                         return
@@ -417,8 +420,7 @@ class Moving(commands.Cog):
                 if _st_hit:
                     _st_embed = warning_embed(title="⚠ Stealth Active", description=_st_text)
                     _st_view = StatusWarningConfirmView(ctx.author.id)
-                    _st_msg = await ctx.send(embed=_st_embed, view=_st_view)
-                    _st_view.message = _st_msg
+                    await self._send_warning(ctx, _st_embed, _st_view)
                     await _st_view.wait()
                     if not _st_view.confirmed:
                         return
@@ -432,18 +434,30 @@ class Moving(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
+    OWNER_IDS = (450772749829537793, 691180618402234399)
+
     @commands.command(aliases=["pendingknocks", "showknocks", "knocks"])
-    async def pendingknock(self, ctx):
+    async def pendingknock(self, ctx, *args):
         """Check if any knocks are pending and show the oldest pending knock age."""
-        pending, scanned = await self._get_pending_knocks(ctx)
+        scan_all = "restart" in [a.lower() for a in args]
+        if scan_all and ctx.author.id not in self.OWNER_IDS:
+            await ctx.send("Only the bot owners can scan all servers.")
+            return
+
+        searching_msg = await ctx.send("Searching for pending knocks...")
+
+        if scan_all:
+            pending, scanned = await self._get_pending_knocks(ctx, all_guilds=True)
+        else:
+            pending, scanned = await self._get_pending_knocks(ctx, all_guilds=False)
 
         if not pending:
-            await ctx.send(f"Pending knock: False\nScanned: {scanned} servers")
+            await searching_msg.edit(content=f"Pending knock: False\nScanned: {scanned} server{'s' if scanned != 1 else ''}")
             return
 
         lines = [
             "Pending knock: True",
-            f"Scanned: {scanned} servers",
+            f"Scanned: {scanned} server{'s' if scanned != 1 else ''}",
             f"Count: {len(pending)}",
         ]
         for created_at, channel, message in pending[:10]:
@@ -455,15 +469,18 @@ class Moving(commands.Cog):
         if len(pending) > 10:
             lines.append(f"...and {len(pending) - 10} more")
 
-        await ctx.send("\n".join(lines))
+        await searching_msg.edit(content="\n".join(lines))
 
-    async def _get_pending_knocks(self, ctx):
-        is_owner = await self.bot.is_owner(ctx.author)
-        eligible_guilds = []
-        for guild in self.bot.guilds:
-            member = guild.get_member(ctx.author.id)
-            if is_owner or (member and member.guild_permissions.administrator):
-                eligible_guilds.append(guild)
+    async def _get_pending_knocks(self, ctx, all_guilds=False):
+        if all_guilds:
+            is_owner = await self.bot.is_owner(ctx.author)
+            eligible_guilds = []
+            for guild in self.bot.guilds:
+                member = guild.get_member(ctx.author.id)
+                if is_owner or (member and member.guild_permissions.administrator):
+                    eligible_guilds.append(guild)
+        else:
+            eligible_guilds = [ctx.guild]
 
         pending = []
         for guild in eligible_guilds:

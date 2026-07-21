@@ -1735,14 +1735,15 @@ def add_player(player: str, team: str, role: str, server: int) -> None:
         conn.commit()
 
 
-def remove_player(player: str, server: int) -> None:
+def remove_player(player: str, server: int) -> int:
     _ensure_ready()
     with _connect() as conn:
-        conn.execute(
+        cursor = conn.execute(
             "DELETE FROM deadlist WHERE player = ? AND server = ?",
             (player, server),
         )
         conn.commit()
+        return cursor.rowcount
 
 
 def get_team_players(team: str, server: int) -> list[tuple[str, str]]:
