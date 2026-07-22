@@ -1,11 +1,15 @@
-# V6 Architecture: Evaluation & Diagnostics Engine
+# V6 Architecture: Adaptive Simulation Engine
 
 ## Overview
 
-V6 is **not a simulation engine** — it is a non-invasive evaluation and diagnostics layer that sits on top of V5. It runs V5 simulations against real match data, then computes calibration metrics, upset classification, statistical tests, and visualizations. V6 does not modify any V5 parameters or game logic.
+V6 wraps V5 with **live per-team xG corrections** based on real match results. As the tournament progresses, V6 learns which teams are performing better/worse than their ratings suggest and applies small corrections to improve predictions going forward.
+
+V6 is a **temporary adaptive layer** — not a permanent replacement for V5. Once the tournament is done, insights from V6 should be folded back into V5's parameters.
+
+V6 also contains evaluation/diagnostics utilities (calibration, upset classification, visualizations) accessible via the `.evaluate` command.
 
 ```
-Real Match Data → V5 Simulations → Poisson H/D/A → Market Comparison → Statistical Tests → Report
+Real Match Results → Per-Team Error Tracking → xG Corrections → V5 Simulation (with corrected xG)
 ```
 
 ---
@@ -19,10 +23,10 @@ MatchEngine (abstract base)
 ├── V3DynamicEngine         — 6 dynamic states + ELO + national modifiers
 ├── V4TacticalEngine        — wraps V3; tactical adjustments (13 factors)
 ├── V5MatchStateEngine      — wraps V4; phase-by-phase with fatigue, cards, subs
-└── V6EvaluationEngine      — wraps V5; evaluation pipeline, no match simulation
+└── V6AdaptiveEngine        — wraps V5; per-team xG corrections from real results
 ```
 
-V6 inherits from `MatchEngine` but delegates `simulate_match()` to V5 internally. Its primary entry point is `run_evaluation()`, not `simulate_match()`.
+V6 uses **composition** (wraps V5) and monkey-patches V3's `expected_goals` to inject per-team corrections.
 
 ---
 
@@ -191,7 +195,7 @@ The generated `v6_report.md` contains 9 sections:
 | Function | File | Purpose |
 |----------|------|---------|
 | `run_v6()` | `v6_evaluation_engine.py` | Convenience entry point |
-| `V6EvaluationEngine.run_evaluation()` | `v6_evaluation_engine.py` | Full 8-step pipeline |
+| `V6AdaptiveEngine.run_evaluation()` | `v6_evaluation_engine.py` | Full 8-step pipeline |
 | `poisson_hda()` | `v6_evaluation_engine.py` | xG → H/D/A probabilities |
 | `compute_v5_hda()` | `v6_evaluation_engine.py` | Add Poisson H/D/A to match metrics |
 | `classify_all_matches()` | `v6_evaluation_engine.py` | Upset classification |
@@ -232,8 +236,8 @@ from pathlib import Path
 summary = run_v6(odds_file=Path("odds.json"), output_dir=Path("output/"))
 
 # Direct engine usage
-from fifa_data.engines.v6_evaluation_engine import V6EvaluationEngine
-engine = V6EvaluationEngine(team_metrics=TEAM_METRICS)
+from fifa_data.engines.v6_evaluation_engine import V6AdaptiveEngine
+engine = V6AdaptiveEngine(team_metrics=TEAM_METRICS)
 result = engine.run_evaluation()
 ```
 

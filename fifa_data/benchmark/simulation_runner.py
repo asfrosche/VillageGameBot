@@ -216,6 +216,22 @@ def simulate_all_matches(
                 "is_extra_time": state.is_extra_time,
                 "is_penalty_shootout": state.is_penalty_shootout,
                 "total_events": len(events),
+                "real_xg_home": match.get("real_xg_home"),
+                "real_xg_away": match.get("real_xg_away"),
+                "real_shots_home": match.get("real_shots_home"),
+                "real_shots_away": match.get("real_shots_away"),
+                "real_sot_home": match.get("real_sot_home"),
+                "real_sot_away": match.get("real_sot_away"),
+                "real_possession_home": match.get("real_possession_home"),
+                "real_possession_away": match.get("real_possession_away"),
+                "real_corners_home": match.get("real_corners_home"),
+                "real_corners_away": match.get("real_corners_away"),
+                "real_yellows_home": match.get("real_yellows_home"),
+                "real_yellows_away": match.get("real_yellows_away"),
+                "real_reds_home": match.get("real_reds_home"),
+                "real_reds_away": match.get("real_reds_away"),
+                "real_ppda_home": match.get("real_ppda_home"),
+                "real_ppda_away": match.get("real_ppda_away"),
             })
 
         except Exception as e:

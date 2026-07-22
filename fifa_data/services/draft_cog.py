@@ -2262,7 +2262,7 @@ class DraftCog(commands.Cog):
 
     @commands.command(aliases=["simhelp"])
     async def simulate_help(self, ctx):
-        """Detailed explanation of simulation models (V1-V5)."""
+        """Detailed explanation of simulation models (V1-V6)."""
         embed1 = discord.Embed(title="Simulation Commands Overview", color=0xff3fb9)
         embed1.add_field(name="Tournament Simulation", value=(
             "`.simulate` / `.fsim` / `.sim` — **full World Cup 2026 sim**\n"
@@ -2331,7 +2331,19 @@ class DraftCog(commands.Cog):
             "• V4 — Manager profiles & tactical identity\n"
             "• V5 — Tournament results + champion breakdown with cross-version insights"
         ), inline=False)
-        embed2.set_footer(text="48 teams | 5 engines | 1 comprehensive output | .fsim v5 for the full picture")
+        embed2.add_field(name="V6 — Adaptive Simulation", value=(
+            "**`.simulate v6` / `.fsim v6` / `.montecarlo v6`**\n"
+            "Wraps V5 with live per-team xG corrections based on real match results. "
+            "V6 learns from actual outcomes and applies small corrections to improve "
+            "predictions going forward.\n\n"
+            "**How it works:** After each real match, V6 compares V5's predicted xG "
+            "to actual goals scored. Per-team corrections are applied with a small "
+            "learning rate (capped at ±0.3 xG). V5's global parameters (home advantage, "
+            "draw rates, tactical weights) are NOT modified.\n\n"
+            "**`.evaluate`** — Also runs the full evaluation/diagnostics pipeline "
+            "(calibration, upset classification, statistical tests, visualizations)."
+        ), inline=False)
+        embed2.set_footer(text="48 teams | 6 engines | 1 comprehensive output | .fsim v5 for the full picture")
         await ctx.send(embed=embed2)
 
     @commands.command(aliases=["how", "simcalc"])
@@ -2354,7 +2366,7 @@ class DraftCog(commands.Cog):
         # PAGE 1 — Overview & Scale
         # ──────────────────────────────────────────────────────────────────────
         p1 = discord.Embed(title="How the Simulation % Works", color=0xff3fb9)
-        p1.set_author(name="World Cup 2026 — 48 Teams · 5 Engines · 7.1M+ Outcomes")
+        p1.set_author(name="World Cup 2026 — 48 Teams · 6 Engines · 7.1M+ Outcomes")
         p1.description = (
             "This is not a prediction. It is a **probability engine** — it runs the "
             "entire 2026 World Cup tournament thousands of times and counts what happens. "
@@ -2699,7 +2711,45 @@ class DraftCog(commands.Cog):
         pages.append(p7)
 
         # ──────────────────────────────────────────────────────────────────────
-        # PAGE 8 — Percentage Split & Monte Carlo
+        # PAGE 8 — V6 Adaptive Simulation
+        # ──────────────────────────────────────────────────────────────────────
+        p8 = discord.Embed(title="V6 Engine — Adaptive Simulation", color=0x9c27b0)
+        p8.set_author(name="V5 + live per-team xG corrections")
+        p8.description = (
+            "V6 wraps V5 and applies **small per-team xG corrections** based on "
+            "real match results. As the tournament progresses, V6 learns which teams "
+            "are performing better/worse than their ratings suggest."
+        )
+        p8.add_field(name="🧠 How V6 Learns", value=(
+            "**After each real match:**\n"
+            "1. V6 records what V5 predicted (xG) vs what actually happened\n"
+            "2. Computes error: actual goals − predicted xG\n"
+            "3. Updates per-team correction with small learning rate\n\n"
+            "**Corrections are:**\n"
+            "• **Per-team attacking deltas only** — never global parameters\n"
+            "• **Capped at ±0.3 xG** — prevents catastrophic overcorrection\n"
+            "• **Requires 3+ matches** per team before applying\n"
+            "• **Blend factor:** takes ~10 matches for full correction to apply"
+        ), inline=False)
+        p8.add_field(name="🔒 Anti-Double-Tuning", value=(
+            "V5's global parameters (home advantage, draw rates, tactical weights) "
+            "are **never modified** by V6. Corrections only capture team-specific "
+            "over/underperformance that V5 cannot know ahead of time.\n\n"
+            "**What V6 corrects:** Team A scores 0.3 more goals than V5 predicts\n"
+            "**What V6 does NOT correct:** Home advantage is too high globally"
+        ), inline=False)
+        p8.add_field(name="📊 Evaluation & Diagnostics", value=(
+            "V6 also includes the full evaluation pipeline (`.evaluate`):\n"
+            "• Calibration metrics (Brier, log loss, reliability)\n"
+            "• Upset classification (True Upset, Model Failure, etc.)\n"
+            "• Statistical tests (t-test, chi-square, bootstrap CI)\n"
+            "• Visualizations (xG scatter, calibration curve, etc.)\n"
+            "• 9-section Markdown report with recommendations"
+        ), inline=False)
+        pages.append(p8)
+
+        # ──────────────────────────────────────────────────────────────────────
+        # PAGE 9 — Percentage Split & Monte Carlo
         # ──────────────────────────────────────────────────────────────────────
         p8 = discord.Embed(title="Monte Carlo & Percentage Split", color=0xff3fb9)
         p8.set_author(name="Why 14.4% doesn't mean 'France wins 1 in 7'")
@@ -2749,7 +2799,7 @@ class DraftCog(commands.Cog):
         pages.append(p8)
 
         # ──────────────────────────────────────────────────────────────────────
-        # PAGE 9 — Technical Deep Dive & Edge Cases
+        # PAGE 10 — Technical Deep Dive & Edge Cases
         # ──────────────────────────────────────────────────────────────────────
         p9 = discord.Embed(title="Technical Deep Dive", color=0xff3fb9)
         p9.set_author(name="ELO math, Poisson formulas, edge cases")
@@ -2785,10 +2835,12 @@ class DraftCog(commands.Cog):
             "**V2:** ~5,000 sims/sec · Player-level · Best for squad quality analysis\n"
             "**V3:** ~2,000 sims/sec · Dynamic state · Best for form/chemistry awareness\n"
             "**V4:** ~1,500 sims/sec · Tactical layer · Best for tactical matchups\n"
-            "**V5:** ~200 sims/sec · Full match simulation · Best for realistic scorelines\n\n"
+            "**V5:** ~200 sims/sec · Full match simulation · Best for realistic scorelines\n"
+            "**V6:** ~200 sims/sec · Adaptive xG · Best for live tournament use\n\n"
             "**Accuracy vs Speed tradeoff:** V1 is 50× faster than V5 but ignores "
             "players, tactics, and match state. Use V5 for detailed analysis, "
-            "V1 for fast Monte Carlo champion probability."
+            "V1 for fast Monte Carlo champion probability. "
+            "V6 wraps V5 with per-team corrections from real results — use for live predictions."
         ), inline=False)
         p9.add_field(name="⚠️ Edge Cases Handled", value=(
             "**Same team drawn twice:** Impossible — knockout bracket prevents rematches until final\n"
@@ -2812,7 +2864,7 @@ class DraftCog(commands.Cog):
 
     @commands.command(aliases=["sim", "fsim"])
     async def simulate(self, ctx, *, args: str = None):
-        """Run tournament simulation: `.simulate [v1|v2|v3|v4|v5] [fast|animated|detailed] [debug]` or `.fsim ...`."""
+        """Run tournament simulation: `.simulate [v1|v2|v3|v4|v5|v6] [fast|animated|detailed] [debug]` or `.fsim ...`."""
         if args and args.strip().lower() in ("help", "?"):
             return await self.simulate_help(ctx)
 
@@ -3047,7 +3099,7 @@ class DraftCog(commands.Cog):
 
     @commands.command(aliases=["eval", "v6eval"])
     async def evaluate(self, ctx, *, args: str = None):
-        """Run V6 evaluation: `.evaluate` — runs V6 diagnostics on V5 predictions."""
+        """Run V6 evaluation: `.evaluate` — diagnostics, calibration, and visualizations."""
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("Admin only.")
 
@@ -3099,6 +3151,87 @@ class DraftCog(commands.Cog):
         embed.set_footer(text="Full report saved to v6_output/v6_report.md")
         await status_msg.edit(content="", embed=embed)
 
+        comparisons = result.get("match_comparisons", [])
+        if not comparisons:
+            return
+
+        stage_order = {
+            "Group Stage": 0, "Round of 32": 1, "Round of 16": 2,
+            "Quarterfinals": 3, "Semifinals": 4, "Third Place": 5, "Final": 6,
+        }
+        comparisons.sort(key=lambda c: stage_order.get(c.get("stage", ""), 99))
+
+        def _fmt_match(c: dict) -> str:
+            lines = []
+            header = f"{c['home']} vs {c['away']}"
+            lines.append(header)
+            lines.append(f"{'':20s}{'Prediction':>18s}  {'Reality':>18s}")
+
+            pred_probs = c.get("pred_probs", "—")
+            actual_winner = c.get("actual_winner", "—")
+            lines.append(f"{'Win':20s}{pred_probs:>18s}  {actual_winner:>18s}")
+
+            pred_score = c.get("pred_score", "—")
+            actual_score = c.get("actual_score", "—")
+            lines.append(f"{'Score':20s}{pred_score:>18s}  {actual_score:>18s}")
+
+            real_xg = c.get("real_xg")
+            lines.append(f"{'xG':20s}{c.get('pred_xg', '—'):>18s}  {(real_xg or '—'):>18s}")
+
+            real_shots = c.get("real_shots")
+            lines.append(f"{'Shots':20s}{c.get('pred_shots', '—'):>18s}  {(real_shots or '—'):>18s}")
+
+            real_sot = c.get("real_sot")
+            lines.append(f"{'On Target':20s}{c.get('pred_sot', '—'):>18s}  {(real_sot or '—'):>18s}")
+
+            real_poss = c.get("real_poss")
+            lines.append(f"{'Possession':20s}{c.get('pred_poss', '—'):>18s}  {(real_poss or '—'):>18s}")
+
+            real_ppda = c.get("real_ppda")
+            lines.append(f"{'PPDA':20s}{c.get('pred_ppda', '—'):>18s}  {(real_ppda or '—'):>18s}")
+
+            real_corners = c.get("real_corners")
+            lines.append(f"{'Corners':20s}{c.get('pred_corners', '—'):>18s}  {(real_corners or '—'):>18s}")
+
+            real_yellows = c.get("real_yellows")
+            lines.append(f"{'Yellows':20s}{c.get('pred_yellows', '—'):>18s}  {(real_yellows or '—'):>18s}")
+
+            real_reds = c.get("real_reds")
+            lines.append(f"{'Reds':20s}{c.get('pred_reds', '—'):>18s}  {(real_reds or '—'):>18s}")
+
+            correct = c.get("winner_correct", False)
+            symbol = "\u2705 Correct" if correct else "\u274c Wrong"
+            lines.append(f"{'Winner Prediction':20s}{symbol}")
+            return "\n".join(lines)
+
+        current_stage = None
+        blocks: list[str] = []
+        current_block = ""
+
+        for c in comparisons:
+            stage = c.get("stage", "Other")
+            if stage != current_stage:
+                if current_block:
+                    blocks.append(current_block)
+                current_block = f"\n**{stage}**\n"
+                current_stage = current_stage  # keep same, will update below
+                current_stage = stage
+
+            match_text = _fmt_match(c)
+            candidate = current_block + "\n```\n" + match_text + "\n```\n"
+            if len(candidate) > 1900:
+                if current_block:
+                    blocks.append(current_block)
+                current_block = f"**{stage}**\n```\n{match_text}\n```\n"
+            else:
+                current_block = candidate
+
+        if current_block:
+            blocks.append(current_block)
+
+        for block in blocks:
+            await ctx.send(block)
+
     async def _simulate_detailed(self, ctx, tokens: list[str]) -> None:
         VALID_VERSIONS = {"v1", "v2", "v3", "v4", "v5", "v6"}
         VERSION_LABELS = {
@@ -3107,7 +3240,7 @@ class DraftCog(commands.Cog):
             "v3": "Dynamic Team State",
             "v4": "Tactical Intelligence",
             "v5": "Match State Simulation",
-            "v6": "Evaluation & Diagnostics",
+            "v6": "Adaptive Simulation",
         }
         MATCHES_TEAM_MAP = {
             "USA": "United States",
@@ -5474,7 +5607,7 @@ class _TopPlayersView(discord.ui.View):
         self.draft = draft
         self.guild = guild
         self.sort_mode = "overall_desc"
-        self.position = ""
+        self.position = "all"
         self.page = 0
         self._rows: list[dict] = []
         self._master_all: list[dict] = fantasy.build_master_player_list(draft, guild=guild)
@@ -5483,7 +5616,7 @@ class _TopPlayersView(discord.ui.View):
         self._update_buttons()
 
     def _build_filtered(self) -> list[dict]:
-        if self.position:
+        if self.position and self.position != "all":
             return [p for p in self._master_all if p["position"] == self.position]
         return list(self._master_all)
 
@@ -5516,7 +5649,7 @@ class _TopPlayersView(discord.ui.View):
         page_rows = self._rows[start:start + self.PAGE_SIZE]
 
         label = self._SORT_LABELS.get(self.sort_mode, "Overall (DESC)")
-        pos_label = f" — {self.position}" if self.position else ""
+        pos_label = f" — {self.position}" if self.position and self.position != "all" else ""
         title = f"🏆 Top Players{pos_label} — {label}"
 
         embed = discord.Embed(title=title, color=0xff3fb9)
@@ -5528,7 +5661,7 @@ class _TopPlayersView(discord.ui.View):
             owner = ""
             if r.get("owner_name"):
                 owner = f" • {r['owner_name']}"
-            pos_tag = f" {pos}" if pos and not self.position else ""
+            pos_tag = f" {pos}" if pos and self.position == "all" else ""
             flag_tag = f"{flag}" if flag else ""
             lines.append(f"#{rank} • **{pts_str}** • {flag_tag}**{r['name']}**{pos_tag}{owner}")
         embed.description = "\n".join(lines) if lines else "No players found."
@@ -5541,7 +5674,7 @@ class _TopPlayersView(discord.ui.View):
         self._prev.disabled = self.page == 0
         self._next.disabled = self.page >= total - 1
 
-    async def _refresh(self, interaction: discord.Interaction):
+    async def _refresh_view(self, interaction: discord.Interaction):
         self._refresh_data()
         self._update_buttons()
         embed = self._build_embed()
@@ -5564,7 +5697,7 @@ class _TopPlayersView(discord.ui.View):
         self.sort_mode = select.values[0]
         for opt in select.options:
             opt.default = opt.value == self.sort_mode
-        await self._refresh(interaction)
+        await self._refresh_view(interaction)
 
     # ── Position Filter Select ──
 
@@ -5572,7 +5705,7 @@ class _TopPlayersView(discord.ui.View):
         placeholder="Filter position...",
         row=1,
         options=[
-            discord.SelectOption(label="All Positions", value="", default=True),
+            discord.SelectOption(label="All Positions", value="all", default=True),
             discord.SelectOption(label="FWD", value="FWD"),
             discord.SelectOption(label="MID", value="MID"),
             discord.SelectOption(label="DEF", value="DEF"),
@@ -5583,7 +5716,7 @@ class _TopPlayersView(discord.ui.View):
         self.position = select.values[0]
         for opt in select.options:
             opt.default = opt.value == self.position
-        await self._refresh(interaction)
+        await self._refresh_view(interaction)
 
     # ── Pagination ──
 

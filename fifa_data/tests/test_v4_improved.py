@@ -85,11 +85,11 @@ class ManagerProfileTests(unittest.TestCase):
         self.assertGreater(mgr.risk_tolerance, 75, "Bielsa should be high risk")
         self.assertGreater(mgr.pressing_preference, 80, "Bielsa should be high pressing")
 
-    def test_southgate_cautious(self):
+    def test_tuchel_balanced(self):
         mgr = get_manager("England")
         self.assertIsNotNone(mgr)
-        self.assertLess(mgr.risk_tolerance, 60, "Southgate should be cautious")
-        self.assertGreater(mgr.defensive_discipline, 70, "Southgate should be disciplined")
+        self.assertGreater(mgr.tactical_flexibility, 70, "Tuchel should be flexible")
+        self.assertGreater(mgr.defensive_discipline, 70, "Tuchel should be disciplined")
 
     def test_nagelsmann_high_flexibility(self):
         mgr = get_manager("Germany")

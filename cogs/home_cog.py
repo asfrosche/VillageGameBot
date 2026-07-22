@@ -6,6 +6,7 @@ from datetime import datetime
 from discord.ext import commands
 from discord.ui import Button, View
 from cogs.data_utils import load_guild_data, save_guild_data
+from cogs.surveillance_cog import after_movement_update
 from cogs.status_cog import (
     check_move_warning,
     check_visitblock_warning,
@@ -135,6 +136,7 @@ class Home(commands.Cog):
                                     await home_channel.send(f'{member.mention} Joins')
                         else:
                             no_home.append(member.mention)
+                        await after_movement_update(ctx, member)
                     elif sponsor_role in member.roles:
                         for channel in category.channels:
                             permissions = channel.permissions_for(member)
@@ -147,6 +149,7 @@ class Home(commands.Cog):
                                 await home_channel.set_permissions(member, read_messages=True, send_messages=True)
                         else:
                             no_home.append(member.mention)
+                        await after_movement_update(ctx, member)
                 await ctx.send('Done')
                 if no_home:
                     await ctx.send(
@@ -444,6 +447,7 @@ class Home(commands.Cog):
                 await channel.set_permissions(member, read_messages=True, send_messages=True)
                 if alive_role in member.roles or alt_role in member.roles:
                     await channel.send(f'{member.mention} Joins')
+                await after_movement_update(ctx, member)
 
     async def list_home(self, ctx):
         if ctx.author.guild_permissions.administrator:

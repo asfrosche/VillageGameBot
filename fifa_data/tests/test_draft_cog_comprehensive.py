@@ -607,7 +607,7 @@ class TestDraftCogLoadSave:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestCommandRegistration:
-    """Verify all 24 commands are registered with correct names and aliases."""
+    """Verify all 25 commands are registered with correct names and aliases."""
 
     def test_all_commands_defined(self):
         from fifa_data.services.draft_cog import DraftCog
@@ -626,7 +626,7 @@ class TestCommandRegistration:
             "scoutingboard", "pause", "resume", "enddraft",
             "matches", "trending", "differentials", "refreshpoints",
             "simulate_help", "simulate", "montecarlo", "fsim_how",
-            "xsim", "xlineup",
+            "xsim", "xlineup", "evaluate",
         }
         missing = expected - cmd_names
         extra = cmd_names - expected
@@ -650,6 +650,8 @@ class TestCommandRegistration:
             "sim": "simulate",
             "fsim": "simulate",
             "mc": "montecarlo",
+            "eval": "evaluate",
+            "v6eval": "evaluate",
         }
         for alias, target in expected_aliases.items():
             assert alias in alias_map, f"Alias '{alias}' not registered"

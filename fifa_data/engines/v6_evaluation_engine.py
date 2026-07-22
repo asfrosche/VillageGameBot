@@ -1,18 +1,15 @@
-"""V6 - Evaluation & Diagnostics Engine.
+"""V6 - Adaptive Simulation Engine.
 
-Non-invasive analysis layer on top of V5 simulator. Produces comprehensive
-reports, calibration analysis, upset classification, market comparison,
-statistical tests, and visualizations.
+Wraps V5 with live per-team xG corrections based on real match results.
+V6 is a temporary adaptive layer for live tournament use — it learns from
+real results and applies small corrections to improve predictions going forward.
 
-Runs the full 8-step V6 evaluation end-to-end:
-1. Load real match data
-2. Run V5 simulations for all matches
-3. Compute V5 H/D/A probabilities from xG (Poisson model)
-4. Compute or load market odds
-5. Classify upsets
-6. Compute calibration metrics
-7. Run statistical tests (including home advantage & draw analysis)
-8. Generate visualizations and comprehensive report
+V6 is NOT a permanent replacement for V5. It captures team-specific
+over/underperformance that V5 cannot know ahead of time. Once the tournament
+is done, insights from V6 should be folded back into V5's parameters.
+
+Also contains evaluation/diagnostics utilities (reports, calibration,
+upset classification, visualizations) accessible via `.evaluate` command.
 """
 from __future__ import annotations
 
@@ -1379,38 +1376,175 @@ def _save_csv(match_metrics: list[dict], path: Path) -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# V6 Evaluation Engine (main entry point)
+# V6 Adaptive Engine (main entry point)
 # ═════════════════════════════════════════════════════════════════════════════
 
-class V6EvaluationEngine(MatchEngine):
-    """V6 Evaluation & Diagnostics Layer.
+class V6AdaptiveEngine(MatchEngine):
+    """V6: Wraps V5 with live per-team xG corrections from real match results.
 
-    Non-invasive analysis on top of V5 simulator. Does NOT modify
-    V5 game logic or hardcoded parameters. Produces comprehensive reports,
-    calibration analysis, upset classification, and market comparison.
+    V6 is a temporary adaptive layer. It uses V5 as its core simulation
+    and applies small per-team xG corrections based on how teams actually
+    perform versus V5's predictions.
+
+    Corrections are per-team attacking deltas only, capped at ±0.3 xG,
+    requiring minimum 3 matches per team. V6 never modifies V5's global
+    parameters (home advantage, draw rates, tactical weights, etc.).
     """
 
-    def __init__(self, data_dir: Path | None = None, team_metrics: dict | None = None,
-                 tournament_form: dict[str, float] | None = None):
-        self.data_dir = data_dir or FIFA_DATA
+    def __init__(
+        self,
+        data_dir: str | Path | None = None,
+        team_metrics: dict | None = None,
+        tournament_form: dict[str, float] | None = None,
+    ):
+        from .v5_match_state_engine import V5MatchStateEngine
+
+        self.data_dir = Path(data_dir) if data_dir else FIFA_DATA
+        resolved = self.data_dir
         self.team_metrics = team_metrics or {}
         self.tournament_form = tournament_form or {}
 
-    def simulate_match(self, home: str, away: str, can_draw: bool = True) -> dict:
-        from fifa_data.engines.v5_match_state_engine import V5MatchStateEngine
-        engine = V5MatchStateEngine(
-            data_dir=self.data_dir,
+        self._v5 = V5MatchStateEngine(
+            data_dir=resolved,
             team_metrics=self.team_metrics,
             tournament_form=self.tournament_form,
         )
-        return engine.simulate_match(home, away, can_draw)
+
+        self._corrections: dict[str, float] = {}
+        self._goals_scored: dict[str, list[float]] = {}
+        self._xg_when_attacking: dict[str, list[float]] = {}
+        self._pending_predictions: dict[str, float] = {}
+        self._real_matches_observed: int = 0
+
+        self._min_matches = 3
+        self._max_correction = 0.3
+        self._blend_ceiling = 10.0
+
+        self._orig_eg = self._v5._v4._v3.expected_goals
+        self._apply_xg_patch()
+
+    def _apply_xg_patch(self) -> None:
+        v3 = self._v5._v4._v3
+        engine = self
+        orig = self._orig_eg
+
+        def _corrected_xg(strength1, strength2):
+            base1, base2 = orig(strength1, strength2)
+            c1 = engine._corrections.get(strength1.team, 0.0)
+            c2 = engine._corrections.get(strength2.team, 0.0)
+            return (
+                max(engine._v5.minimum_lambda, base1 + c1),
+                max(engine._v5.minimum_lambda, base2 + c2),
+            )
+
+        v3.expected_goals = _corrected_xg
+
+    def simulate_match(
+        self,
+        team1: str,
+        team2: str,
+        can_draw: bool = True,
+    ) -> tuple[int, int]:
+        s1 = self._v5._v4._v3.get_team_strength(team1)
+        s2 = self._v5._v4._v3.get_team_strength(team2)
+        base1, base2 = self._orig_eg(s1, s2)
+        self._pending_predictions = {team1: base1, team2: base2}
+        return self._v5.simulate_match(team1, team2, can_draw)
+
+    def simulate_match_debug(
+        self,
+        team1: str,
+        team2: str,
+        can_draw: bool = True,
+    ) -> tuple[tuple[int, int], str]:
+        s1 = self._v5._v4._v3.get_team_strength(team1)
+        s2 = self._v5._v4._v3.get_team_strength(team2)
+        base1, base2 = self._orig_eg(s1, s2)
+        self._pending_predictions = {team1: base1, team2: base2}
+        return self._v5.simulate_match_debug(team1, team2, can_draw)
+
+    def simulate_match_detailed(
+        self,
+        team1: str,
+        team2: str,
+        can_draw: bool = True,
+        context: str | None = None,
+    ):
+        s1 = self._v5._v4._v3.get_team_strength(team1)
+        s2 = self._v5._v4._v3.get_team_strength(team2)
+        base1, base2 = self._orig_eg(s1, s2)
+        self._pending_predictions = {team1: base1, team2: base2}
+        return self._v5.simulate_match_detailed(team1, team2, can_draw, context)
+
+    def notify_match(
+        self,
+        team1: str,
+        team2: str,
+        goals1: int,
+        goals2: int,
+        is_real: bool,
+    ) -> None:
+        self._v5.notify_match(team1, team2, goals1, goals2, is_real)
+        if not is_real:
+            return
+
+        base1 = self._pending_predictions.get(team1, 1.2)
+        base2 = self._pending_predictions.get(team2, 1.2)
+        self._pending_predictions = {}
+
+        self._observe(team1, goals1, base1)
+        self._observe(team2, goals2, base2)
+        self._recompute_corrections()
+        self._real_matches_observed += 1
+
+    def expected_goals(
+        self,
+        team1: str,
+        team2: str,
+        context: str = "group",
+    ) -> tuple[float, float]:
+        return self._v5.expected_goals(team1, team2, context)
+
+    @property
+    def last_match_debug(self) -> str:
+        return self._v5.last_match_debug
+
+    @property
+    def last_match_state(self):
+        return self._v5.last_match_state
+
+    @property
+    def last_match_events(self):
+        return self._v5.last_match_events
+
+    def _observe(self, team: str, goals_scored: float, predicted_xg: float) -> None:
+        self._goals_scored.setdefault(team, []).append(goals_scored)
+        self._xg_when_attacking.setdefault(team, []).append(predicted_xg)
+
+    def _recompute_corrections(self) -> None:
+        for team in list(self._goals_scored.keys()):
+            scores = self._goals_scored[team]
+            xgs = self._xg_when_attacking[team]
+            n = len(scores)
+            if n < self._min_matches:
+                self._corrections[team] = 0.0
+                continue
+            avg_error = (sum(scores) / n) - (sum(xgs) / n)
+            blend = min(1.0, n / self._blend_ceiling)
+            raw = avg_error * blend
+            self._corrections[team] = max(
+                -self._max_correction,
+                min(self._max_correction, raw),
+            )
+
+    def get_corrections(self) -> dict[str, float]:
+        return dict(self._corrections)
 
     def run_evaluation(
         self,
         odds_file: Path | None = None,
         output_dir: Path | None = None,
     ) -> dict[str, Any]:
-        """Run the full V6 evaluation pipeline."""
         if output_dir is None:
             output_dir = HERE.parent / "v6_output"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1423,7 +1557,6 @@ class V6EvaluationEngine(MatchEngine):
 
         t0 = time.time()
 
-        # Step 1: Load real match data
         print("[1/8] Loading real match data...")
         from fifa_data.benchmark.data_loader import (
             load_real_matches, load_groups, load_team_metrics, get_stage_category,
@@ -1440,7 +1573,6 @@ class V6EvaluationEngine(MatchEngine):
             print(f"    {s}: {c} matches")
         print()
 
-        # Step 2: Run V5 simulations
         print("[2/8] Running V5 simulations for all matches...")
         from fifa_data.benchmark.simulation_runner import simulate_all_matches
         sim_results = simulate_all_matches(matches, groups, team_metrics)
@@ -1448,7 +1580,6 @@ class V6EvaluationEngine(MatchEngine):
         print(f"  Simulated {len(valid_sims)}/{len(matches)} matches successfully")
         print()
 
-        # Step 3: Compute V5 H/D/A from xG (Poisson)
         print("[3/8] Computing V5 win/draw probabilities from xG (Poisson model)...")
         from fifa_data.benchmark.metrics import compute_match_metrics, compute_tournament_summary
 
@@ -1476,7 +1607,6 @@ class V6EvaluationEngine(MatchEngine):
         print(f"  V5 Poisson-based winner accuracy: {v5_correct}/{total_valid} ({v5_correct/total_valid:.1%})")
         print()
 
-        # Step 4: Compute market odds
         print("[4/8] Computing market probabilities...")
         market = load_market_odds(matches, odds_file, team_metrics)
         print(f"  Loaded odds for {len(market)} matches")
@@ -1486,7 +1616,6 @@ class V6EvaluationEngine(MatchEngine):
             print("  Source: Synthetic (ELO-based)")
         print()
 
-        # Step 5: Classify upsets
         print("[5/8] Classifying upsets...")
         match_metrics = classify_all_matches(match_metrics, market)
         upset_summary = summarize_upsets(match_metrics)
@@ -1494,7 +1623,6 @@ class V6EvaluationEngine(MatchEngine):
         print(f"  Categories: {cats}")
         print()
 
-        # Step 6: Compute calibration
         print("[6/8] Computing calibration metrics...")
         from fifa_data.benchmark.calibration import compute_calibration_metrics
 
@@ -1505,7 +1633,6 @@ class V6EvaluationEngine(MatchEngine):
         print(f"  Reliability: {calibration.get('reliability', 0):.4f}")
         print()
 
-        # Step 7: Statistical tests
         print("[7/8] Running statistical tests...")
 
         goals_diffs = [m["predicted_total_goals"] - m["actual_total_goals"] for m in valid]
@@ -1610,7 +1737,6 @@ class V6EvaluationEngine(MatchEngine):
             print(f"    - {b['bias_name']}: {b['description']}")
         print()
 
-        # Step 8: Generate visualizations and report
         print("[8/8] Generating visualizations and report...")
         graphs = generate_all_graphs(match_metrics, calibration, tournament_summary, output_dir)
         print(f"  Generated {len(graphs)} graphs")
@@ -1628,6 +1754,60 @@ class V6EvaluationEngine(MatchEngine):
         )
         print(f"  Report: {output_dir / 'v6_report.md'}")
 
+        comparisons = []
+        for m in match_metrics:
+            if "error" in m:
+                continue
+            ph = m.get("predicted_home_goals", 0)
+            pa = m.get("predicted_away_goals", 0)
+            ah = m.get("actual_home_goals", 0)
+            aa = m.get("actual_away_goals", 0)
+            v5h = m.get("v5_home_prob", 0)
+            v5d = m.get("v5_draw_prob", 0)
+            v5a = m.get("v5_away_prob", 0)
+
+            def _fmt_real(key_h: str, key_a: str, fmt: str = "d") -> str | None:
+                rv_h = m.get(key_h)
+                rv_a = m.get(key_a)
+                if rv_h is None or rv_a is None:
+                    return None
+                if fmt == ".2f":
+                    return f"{float(rv_h):.2f} | {float(rv_a):.2f}"
+                if fmt == ".1f":
+                    return f"{float(rv_h):.1f} | {float(rv_a):.1f}"
+                if fmt == ".0f":
+                    return f"{float(rv_h):.0f} | {float(rv_a):.0f}"
+                return f"{int(rv_h)} | {int(rv_a)}"
+
+            comparisons.append({
+                "home": m["home"],
+                "away": m["away"],
+                "stage": m.get("stage_category", m.get("stage", "")),
+                "pred_score": f"{ph}-{pa}",
+                "actual_score": f"{ah}-{aa}",
+                "pred_winner": m.get("v5_favorite", "Draw"),
+                "actual_winner": m.get("actual_winner", "Draw"),
+                "winner_correct": m.get("v5_winner_correct", False),
+                "pred_probs": f"{v5h:.0%}|{v5d:.0%}|{v5a:.0%}",
+                "pred_xg": f"{m.get('predicted_xg_home', 0):.2f} | {m.get('predicted_xg_away', 0):.2f}",
+                "real_xg": _fmt_real("real_xg_home", "real_xg_away", ".2f"),
+                "pred_shots": f"{m.get('predicted_shots_home', 0)} | {m.get('predicted_shots_away', 0)}",
+                "real_shots": _fmt_real("real_shots_home", "real_shots_away"),
+                "pred_sot": f"{m.get('predicted_sot_home', 0)} | {m.get('predicted_sot_away', 0)}",
+                "real_sot": _fmt_real("real_sot_home", "real_sot_away"),
+                "pred_poss": f"{m.get('predicted_possession_home', 0):.0f} | {m.get('predicted_possession_away', 0):.0f}",
+                "real_poss": _fmt_real("real_possession_home", "real_possession_away", ".0f"),
+                "pred_ppda": f"{m.get('predicted_ppda_home', 0):.1f} | {m.get('predicted_ppda_away', 0):.1f}",
+                "real_ppda": _fmt_real("real_ppda_home", "real_ppda_away", ".1f"),
+                "pred_corners": f"{m.get('predicted_corners_home', 0)} | {m.get('predicted_corners_away', 0)}",
+                "real_corners": _fmt_real("real_corners_home", "real_corners_away"),
+                "pred_yellows": f"{m.get('predicted_yellows_home', 0)} | {m.get('predicted_yellows_away', 0)}",
+                "real_yellows": _fmt_real("real_yellows_home", "real_yellows_away"),
+                "pred_reds": f"{m.get('predicted_reds_home', 0)} | {m.get('predicted_reds_away', 0)}",
+                "real_reds": _fmt_real("real_reds_home", "real_reds_away"),
+                "upset_category": m.get("upset_category", ""),
+            })
+
         summary = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "total_matches": len(match_metrics),
@@ -1642,6 +1822,7 @@ class V6EvaluationEngine(MatchEngine):
                                   if isinstance(v, dict) and "p_approx" in v},
             "biases": biases,
             "analysis": analysis,
+            "match_comparisons": comparisons,
         }
         summary_path = output_dir / "v6_summary.json"
         summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
@@ -1667,20 +1848,16 @@ class V6EvaluationEngine(MatchEngine):
 
         return summary
 
-    def notify_match(self, match_result: dict) -> None:
-        pass
-
 
 def run_v6(odds_file: Path | None = None, output_dir: Path | None = None) -> dict[str, Any]:
-    """Convenience function to run V6 evaluation."""
     from fifa_data.services.simulation_service import TEAM_METRICS
-    engine = V6EvaluationEngine(team_metrics=TEAM_METRICS)
+    engine = V6AdaptiveEngine(team_metrics=TEAM_METRICS)
     return engine.run_evaluation(odds_file=odds_file, output_dir=output_dir)
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="V6 Evaluation & Diagnostics")
+    parser = argparse.ArgumentParser(description="V6 Adaptive Engine")
     parser.add_argument("--odds", type=str, default=None,
                         help="Path to sportsbook odds JSON file")
     parser.add_argument("--output", type=str, default=None,

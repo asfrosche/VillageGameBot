@@ -136,6 +136,22 @@ def compute_match_metrics(
             "is_extra_time": sim.get("is_extra_time", False),
             "is_penalty_shootout": sim.get("is_penalty_shootout", False),
             "total_events": sim.get("total_events", 0),
+            "real_xg_home": sim.get("real_xg_home"),
+            "real_xg_away": sim.get("real_xg_away"),
+            "real_shots_home": sim.get("real_shots_home"),
+            "real_shots_away": sim.get("real_shots_away"),
+            "real_sot_home": sim.get("real_sot_home"),
+            "real_sot_away": sim.get("real_sot_away"),
+            "real_possession_home": sim.get("real_possession_home"),
+            "real_possession_away": sim.get("real_possession_away"),
+            "real_corners_home": sim.get("real_corners_home"),
+            "real_corners_away": sim.get("real_corners_away"),
+            "real_yellows_home": sim.get("real_yellows_home"),
+            "real_yellows_away": sim.get("real_yellows_away"),
+            "real_reds_home": sim.get("real_reds_home"),
+            "real_reds_away": sim.get("real_reds_away"),
+            "real_ppda_home": sim.get("real_ppda_home"),
+            "real_ppda_away": sim.get("real_ppda_away"),
         })
 
     return metrics
