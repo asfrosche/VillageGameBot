@@ -94,12 +94,12 @@ class Surveillance(commands.Cog):
                 if isinstance(ch, discord.TextChannel) and ch.permissions_for(follower).send_messages:
                     await ch.set_permissions(follower, overwrite=None)
                     if not effective_stealth:
-                        await ch.send(f'{follower.mention} Leaves')
+                        await ch.send(f'{follower.mention} follows {target_member.mention} — Leaves')
 
             # Add to new house
             await new_house.set_permissions(follower, read_messages=True, send_messages=True)
             if not effective_stealth:
-                await new_house.send(f'{follower.mention} Joins')
+                await new_house.send(f'{follower.mention} follows {target_member.mention} — Joins {new_house.mention}')
 
             # Log (unless stealth)
             if log_channel and not effective_stealth:
@@ -128,7 +128,7 @@ class Surveillance(commands.Cog):
                     if follower and house_channel.permissions_for(follower).send_messages:
                         await house_channel.set_permissions(follower, overwrite=None)
                         if not is_stealth:
-                            await house_channel.send(f'{follower.mention} Leaves (followed {member.mention})')
+                            await house_channel.send(f'{follower.mention} follows {member.mention} — Leaves')
 
     # ═════════════════════════════════════════════════════════════════════════════
     # FOLLOW — Move with them

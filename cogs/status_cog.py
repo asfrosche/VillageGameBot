@@ -456,7 +456,7 @@ class Status(commands.Cog):
         else:
             await ctx.send(content, view=view)
 
-    @commands.hybrid_command(name="status")
+    @commands.hybrid_command(name="statusmgr", aliases=["sm"])
     @commands.has_permissions(administrator=True)
     async def status(self, ctx, *, subcommand: str = None):
         """Open the Status Manager for this channel, or use .status clear to clear all."""

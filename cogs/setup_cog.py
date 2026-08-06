@@ -8,6 +8,30 @@ from discord.ui import Button, View, Select
 from cogs.data_utils import load_guild_data, save_guild_data, base_variables
 from cogs.help_misc_cog import COMMON_TIMEZONES
 
+def _utc_offset_str(tz_name: str) -> str:
+    try:
+        offset = datetime.now(ZoneInfo(tz_name)).utcoffset()
+        total_seconds = int(offset.total_seconds())
+        hours, remainder = divmod(abs(total_seconds), 3600)
+        minutes = remainder // 60
+        sign = "+" if total_seconds >= 0 else "-"
+        if minutes:
+            return f" (UTC{sign}{hours}:{minutes:02d})"
+        return f" (UTC{sign}{hours})"
+    except Exception:
+        return ""
+
+def _parse_time_value(val: str):
+    """Parse a stored time value like '14:30' or '14:30|America/New_York'.
+    Returns (hour, minute, tz_name_or_None)."""
+    tz_name = None
+    if "|" in val:
+        time_part, tz_name = val.split("|", 1)
+    else:
+        time_part = val
+    h, m = (int(x) for x in time_part.split(":"))
+    return h, m, tz_name
+
 class Setup(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -528,10 +552,13 @@ class Setup(commands.Cog):
             await ctx.send("Guild data not loaded.")
 
     @commands.command()
-    async def settime(self, ctx, event: str):
+    async def settime(self, ctx, event: str = None):
         """Set a daily recurring game time via dropdowns. Events: dayend, lynchend, presetend."""
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough permissions to use this command")
+            return
+        if not event:
+            await ctx.send("❌ Usage: `.settime <event>`\nAvailable events: `dayend`, `lynchend`, `presetend`")
             return
         event_map = {
             "dayend": ("day_end_time", "Day End"),
@@ -547,7 +574,7 @@ class Setup(commands.Cog):
         hour_options = [discord.SelectOption(label=f"{h:02d}", value=str(h)) for h in range(24)]
         minute_options = [discord.SelectOption(label=f"{m:02d}", value=str(m)) for m in range(0, 60, 5)]
         tz_options = [
-            discord.SelectOption(label=name, value=tz, emoji=emoji)
+            discord.SelectOption(label=f"{name} {_utc_offset_str(tz)}", value=tz, emoji=emoji)
             for name, tz, emoji in COMMON_TIMEZONES
         ]
 
@@ -565,7 +592,7 @@ class Setup(commands.Cog):
             if not guild_data:
                 await interaction.response.edit_message(content="Guild data not loaded.", view=None)
                 return
-            guild_data[key] = f"{h:02d}:{m:02d}"
+            guild_data[key] = f"{h:02d}:{m:02d}|{tz_name}"
             save_guild_data(ctx.guild.id, guild_data)
             tz_obj = ZoneInfo(tz_name)
             now_local = datetime.now(tz_obj)
@@ -596,7 +623,8 @@ class Setup(commands.Cog):
 
         async def on_tz(interaction):
             state["tz"] = tz_select.values[0]
-            tz_select.placeholder = f"Timezone: {state['tz']}"
+            tz_label = next((n for n, v, _ in COMMON_TIMEZONES if v == state["tz"]), state["tz"])
+            tz_select.placeholder = f"Timezone: {tz_label}"
             await _maybe_save(interaction)
 
         hour_select.callback = on_hour
@@ -637,15 +665,23 @@ class Setup(commands.Cog):
                 embed.add_field(name=label, value=f"Not set — use `.settime {cmd}`", inline=False)
                 continue
             any_set = True
-            h, m = (int(x) for x in val.split(":"))
-            now = datetime.now(timezone.utc)
-            target = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            if target <= now:
+            h, m, tz_name = _parse_time_value(val)
+            tz_obj = ZoneInfo(tz_name) if tz_name else timezone.utc
+            tz_label = ""
+            if tz_name:
+                tz_label_name = next((n for n, v, _ in COMMON_TIMEZONES if v == tz_name), tz_name)
+                tz_label = f" {_utc_offset_str(tz_name)}"
+            now_local = datetime.now(tz_obj)
+            target = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            if target <= now_local:
                 target += timedelta(days=1)
             unix_ts = int(target.timestamp())
+            display = f"<t:{unix_ts}:t> (<t:{unix_ts}:R>)"
+            if tz_name:
+                display += f"\n`{tz_label_name}{tz_label}`"
             embed.add_field(
                 name=label,
-                value=f"<t:{unix_ts}:t> (<t:{unix_ts}:R>)",
+                value=display,
                 inline=False,
             )
         if not any_set:
@@ -674,9 +710,19 @@ class Setup(commands.Cog):
         embed.add_field(name="Can Deads interact with the door", value=str(guild_data.get("can_dead_open")), inline=False)
         embed.add_field(name="Can Alts interact with the door", value=str(guild_data.get("can_alt_open")), inline=False)
         embed.add_field(name="Auto Pin Corpses", value=str(guild_data.get("auto_pin_corpse", True)), inline=False)
-        embed.add_field(name="Day End Time", value=str(guild_data.get("day_end_time") or "Not set"), inline=False)
-        embed.add_field(name="Lynch End Time", value=str(guild_data.get("lynch_end_time") or "Not set"), inline=False)
-        embed.add_field(name="Presets End Time", value=str(guild_data.get("presets_end_time") or "Not set"), inline=False)
+        def _fmt_time_val(val):
+            if not val:
+                return "Not set"
+            h, m, tz_name = _parse_time_value(val)
+            base = f"{h:02d}:{m:02d}"
+            if tz_name:
+                tz_label = next((n for n, v, _ in COMMON_TIMEZONES if v == tz_name), tz_name)
+                return f"{base} ({tz_label}{_utc_offset_str(tz_name)})"
+            return f"{base} (UTC)"
+
+        embed.add_field(name="Day End Time", value=_fmt_time_val(guild_data.get("day_end_time")), inline=False)
+        embed.add_field(name="Lynch End Time", value=_fmt_time_val(guild_data.get("lynch_end_time")), inline=False)
+        embed.add_field(name="Presets End Time", value=_fmt_time_val(guild_data.get("presets_end_time")), inline=False)
         embed.add_field(name="Dashboard enabled", value=str(guild_data.get("dashboard_enabled", False)), inline=False)
 
         await ctx.send(embed=embed)

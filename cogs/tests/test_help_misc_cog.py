@@ -387,3 +387,104 @@ class TestNarrationAutoPin:
         assert ctx.send.call_count == 2
         msg1.pin.assert_called_once()
         msg2.pin.assert_not_called()
+
+
+class FakeHistory:
+    """Async iterator over a list of messages (for channel.history)."""
+
+    def __init__(self, messages):
+        self._messages = messages
+        self._it = None
+
+    def __aiter__(self):
+        self._it = iter(self._messages)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._it)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
+def make_msg(content="hello", author_id=123456, jump_url="https://discord.com/channels/a"):
+    msg = MagicMock()
+    msg.content = content
+    msg.author.id = author_id
+    msg.jump_url = jump_url
+    return msg
+
+
+class TestFirstMsg:
+    def test_firstmsg_exists(self):
+        """Verify firstmsg command exists on the cog."""
+        assert hasattr(help_misc_cog.Other, 'firstmsg')
+
+    def test_firstmsg_has_help(self):
+        """Verify firstmsg command has help text."""
+        method = getattr(help_misc_cog.Other, 'firstmsg')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    @pytest.mark.asyncio
+    async def test_no_channel_uses_current(self):
+        cog = help_misc_cog.Other(MagicMock())
+        author = MagicMock()
+        author.guild_permissions.administrator = False
+        channel = MagicMock()
+        channel.history.return_value = FakeHistory([make_msg("First ever message")])
+        ctx = MagicMock()
+        ctx.author = author
+        ctx.channel = channel
+        ctx.send = AsyncMock()
+        await cog.firstmsg.callback(cog, ctx)
+        channel.history.assert_called_once_with(limit=1, oldest_first=True)
+        ctx.send.assert_awaited_once()
+        embed = ctx.send.await_args.kwargs["embed"]
+        assert isinstance(embed, discord.Embed)
+        assert "First ever message" in embed.description
+        assert any("123456" in f.value for f in embed.fields)
+
+    @pytest.mark.asyncio
+    async def test_with_channel_as_admin(self):
+        cog = help_misc_cog.Other(MagicMock())
+        author = MagicMock()
+        author.guild_permissions.administrator = True
+        target = MagicMock()
+        target.history.return_value = FakeHistory([make_msg("From target channel")])
+        ctx = MagicMock()
+        ctx.author = author
+        ctx.channel = MagicMock()
+        ctx.send = AsyncMock()
+        await cog.firstmsg.callback(cog, ctx, target)
+        target.history.assert_called_once_with(limit=1, oldest_first=True)
+        ctx.send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_with_channel_non_admin_denied(self):
+        cog = help_misc_cog.Other(MagicMock())
+        author = MagicMock()
+        author.guild_permissions.administrator = False
+        target = MagicMock()
+        ctx = MagicMock()
+        ctx.author = author
+        ctx.send = AsyncMock()
+        await cog.firstmsg.callback(cog, ctx, target)
+        ctx.send.assert_awaited_once()
+        assert "admin" in ctx.send.await_args[0][0].lower()
+        target.history.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_channel(self):
+        cog = help_misc_cog.Other(MagicMock())
+        author = MagicMock()
+        author.guild_permissions.administrator = True
+        channel = MagicMock()
+        channel.history.return_value = FakeHistory([])
+        ctx = MagicMock()
+        ctx.author = author
+        ctx.channel = channel
+        ctx.send = AsyncMock()
+        await cog.firstmsg.callback(cog, ctx)
+        ctx.send.assert_awaited_once()
+        assert "No messages" in ctx.send.await_args[0][0]

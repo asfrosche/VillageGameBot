@@ -115,7 +115,14 @@ async def on_ready():
             save_guild_data(guild.id, guild_data)
     # Snapshot current invites for join tracking
     for guild in bot.guilds:
-        current_invites = await guild.invites()
+        try:
+            current_invites = await guild.invites()
+        except discord.Forbidden:
+            print(f"Missing permissions to fetch invites in: {guild.name} ({guild.id})")
+            continue
+        except discord.HTTPException as e:
+            print(f"Failed to fetch invites for {guild.name}: {e}")
+            continue
         invites = {invite.code: invite.uses for invite in current_invites}
         save_invites(guild.id, invites)
     await bot.change_presence(
@@ -180,7 +187,10 @@ async def on_guild_join(guild):
         await welcome_channel.send(embed=embedw)
     if load_guild_data(guild.id) is None:
         save_guild_data(guild.id, base_variables)
-    current_invites = await guild.invites()
+    try:
+        current_invites = await guild.invites()
+    except (discord.Forbidden, discord.HTTPException):
+        return
     invites = {invite.code: invite.uses for invite in current_invites}
     save_invites(guild.id, invites)
 
@@ -241,8 +251,9 @@ async def on_command_error(ctx, error):
         return
 
     if isinstance(error, commands.MissingRequiredArgument):
+        usage = ctx.command.help or ctx.command.brief or f"`.{' ' .join(ctx.command.aliases + [ctx.command.name])}`"
         embed = error_embed(
-            description="Missing required argument. Please check the command usage.",
+            description=f"Missing required argument: **{error.param.name}**\n\n**Usage:**\n{usage}",
         )
         await safe_reply(ctx, embed=embed, mention_author=False)
     elif isinstance(error, commands.BadArgument):

@@ -97,7 +97,7 @@ COMMAND_INDEX = [
     (".abstain", "Abstain from voting", "Voting", ["abstain", "skip", "vote"]),
     (".manipulate @target @vote", "Force @target's vote to @vote (admin)", "Voting", ["manipulate", "control", "force"]),
     (".removevote @player", "Remove a player's vote", "Voting", ["remove", "vote", "clear"]),
-    (".skipnight <min_votes>", "Start skip-night vote", "Voting", ["skip", "night", "vote"]),
+    (".skipnight <min_votes> [text]", "Start skip-night vote (custom title optional)", "Voting", ["skip", "night", "vote"]),
     (".votelist", "Show all current votes", "Voting", ["vote", "list", "current"]),
     (".resetvotes", "Reset all votes", "Voting", ["reset", "vote", "clear"]),
     (".votehistory/vh [mode]", "Scan vote history — modes: grouped (by target) or range (reply to end msg)", "Voting", ["history", "vote", "log"]),
@@ -135,6 +135,7 @@ COMMAND_INDEX = [
     (".dead", "Move your RC to Dead category (use in RC)", "Utility", ["dead", "rc", "move"]),
     (".deadrole", "Mark dead, remove house, pin corpse (use in RC)", "Utility", ["dead", "role", "mark", "corpse"]),
     (".deadc", "Move RC to Dead (admin)", "Utility", ["dead", "rc", "admin"]),
+    (".corpselist", "List all corpse locations (admin)", "Utility", ["corpse", "list", "dead", "locations"]),
     (".addrole @role @users...", "Give role to members", "Utility", ["role", "add", "give", "admin"]),
     (".removerole <role> <member>", "Remove role (admin)", "Utility", ["role", "remove", "admin"]),
     (".addcategoryperms @role <cat> <perm>", "R=Read, S=Send", "Utility", ["perm", "category", "read", "send", "admin"]),
@@ -157,6 +158,7 @@ COMMAND_INDEX = [
     (".where #RC", "Show a player's current location", "Other", ["where", "location", "find"]),
     (".map", "Show the game map", "Other", ["map", "game", "overview"]),
     (".role /.firstpin", "Show first pinned in RC", "Other", ["role", "pinned", "first", "pin"]),
+    (".firstmsg [#ch]", "Show first message in current channel (#ch needs admin)", "Other", ["first", "message", "jump", "oldest"]),
     (".roll @role <n>", "Random players from a role", "Other", ["roll", "random", "pick"]),
     (".ping", "Bot online check", "Other", ["ping", "bot", "online", "check"]),
     (".ding", "Dong!", "Other", ["ding", "fun", "easter"]),
@@ -257,6 +259,7 @@ COMMAND_INDEX = [
     (".removeplayer /.rp <slot> [name]", "Remove from slot", "Game Manager", ["player", "remove", "slot", "admin"]),
     (".closegame /.cg [name]", "Close & archive game", "Game Manager", ["game", "close", "archive", "admin"]),
     (".stats [@player]", "View player statistics", "Library & Stats", ["stats", "player", "statistics"]),
+    (".statsos <name or @ping>", "Overseer stats & team winrates", "Library & Stats", ["stats", "overseer", "host", "winrate"]),
     (".winrate", "Winrate stats by team", "Library & Stats", ["winrate", "stats", "team"]),
     (".relations [@user]", "Allies and nemeses", "Library & Stats", ["relations", "ally", "nemesis"]),
     (".lib", "Browse the game library", "Library & Stats", ["library", "browse", "games"]),
@@ -267,6 +270,8 @@ COMMAND_INDEX = [
     (".lib deletegame <#>", "Delete a game (alt)", "Library & Stats", ["library", "delete", "admin"]),
     (".lib setwin <#> <team>", "Set winning team", "Library & Stats", ["library", "win", "set", "admin"]),
     (".lib search <term>", "Search by name or player", "Library & Stats", ["library", "search", "find"]),
+    (".lib searchdisc <query>", "Search role descriptions & text", "Library & Stats", ["library", "search", "description", "text", "disc"]),
+    (".lib searchos <name or @ping>", "Search games by overseer", "Library & Stats", ["library", "search", "overseer", "host"]),
     (".lib idsearch <id>", "Search by game ID", "Library & Stats", ["library", "search", "id"]),
     (".lib migrateaccount", "Move stats to new account", "Library & Stats", ["library", "migrate", "account"]),
     (".lib mergeaccount", "Merge two accounts' stats", "Library & Stats", ["library", "merge", "account"]),
@@ -351,10 +356,24 @@ COMMAND_INDEX = [
     (".missingidsit", "Games with missing player IDs (IT)", "Library & Stats", ["missing", "ids", "italian", "admin"]),
     (".badnamesit", "List bad/unnamed players (IT)", "Library & Stats", ["bad", "names", "italian", "admin"]),
     (".removebadnameit <name>", "Remove a bad name (IT)", "Library & Stats", ["remove", "bad", "name", "italian", "admin"]),
-    ("/status", "Open Status Manager for this channel (admin)", "Status", ["status", "moderator", "track", "protection", "roleblock", "stealth", "immunity", "untargetable"]),
-    (".status clear", "Clear all statuses for this channel (admin)", "Status", ["status", "clear", "remove", "admin"]),
+    ("/statusmgr", "Open Status Manager for this channel (admin)", "Status", ["status", "moderator", "track", "protection", "roleblock", "stealth", "immunity", "untargetable"]),
+    (".statusmgr clear", "Clear all statuses for this channel (admin)", "Status", ["status", "clear", "remove", "admin"]),
     (".statuslist", "Show all channels with active statuses (admin)", "Status", ["status", "list", "overview", "moderator"]),
 ]
+
+
+def _utc_offset_str(tz_name: str) -> str:
+    try:
+        offset = datetime.datetime.now(ZoneInfo(tz_name)).utcoffset()
+        total_seconds = int(offset.total_seconds())
+        hours, remainder = divmod(abs(total_seconds), 3600)
+        minutes = remainder // 60
+        sign = "+" if total_seconds >= 0 else "-"
+        if minutes:
+            return f"(UTC{sign}{hours}:{minutes:02d})"
+        return f"(UTC{sign}{hours})"
+    except Exception:
+        return ""
 
 
 COMMON_TIMEZONES = [
@@ -392,8 +411,12 @@ class TimezoneSelectView(discord.ui.View):
     @discord.ui.select(
         placeholder="🌍 Pick a timezone...",
         options=[
-            discord.SelectOption(label=label, value=value, emoji=emoji)
-            for label, value, emoji in COMMON_TIMEZONES
+            discord.SelectOption(
+                label=f"{name} {_utc_offset_str(tz)}",
+                value=tz,
+                emoji=emoji,
+            )
+            for name, tz, emoji in COMMON_TIMEZONES
         ] + [discord.SelectOption(label="Custom...", value="__custom__", emoji="✏️")]
     )
     async def tz_select(self, interaction: discord.Interaction, select: discord.ui.Select):
@@ -1083,6 +1106,34 @@ class Other(commands.Cog):
         embed.set_footer(text="Village Game")
         await ctx.send(embed=embed)
             
+    @commands.command(name="firstmsg")
+    async def firstmsg(self, ctx, channel: discord.TextChannel = None):
+        """Show the first message in a channel. Optional #channel requires admin."""
+        if channel is None:
+            channel = ctx.channel
+        elif not ctx.author.guild_permissions.administrator:
+            await ctx.send("❌ Only server admins can specify a channel.")
+            return
+
+        first = None
+        async for message in channel.history(limit=1, oldest_first=True):
+            first = message
+            break
+        if first is None:
+            await ctx.send("No messages were found in that channel.")
+            return
+
+        embed = discord.Embed(
+            title="First Message",
+            description=first.content or "*[No content]*",
+            color=0xff3fb9,
+            timestamp=datetime.now(),
+        )
+        embed.add_field(name="Author", value=f"<@{first.author.id}>", inline=False)
+        embed.add_field(name=" ", value=f"[Jump to the message!]({first.jump_url})", inline=False)
+        embed.set_footer(text="Village Game")
+        await ctx.send(embed=embed)
+
     @commands.command()
     async def ping(self, ctx):
         """Check if the bot is online and responsive."""
@@ -1471,7 +1522,7 @@ class Other(commands.Cog):
             "**`.abstain`** ─ Abstain from voting\n"
             "**`.manipulate @target @vote`** ─ Manipulate a player's vote\n"
             "**`.removevote @player`** ─ Remove a player's vote\n"
-            "**`.skipnight <min_votes>`** ─ Start skip-night vote\n"
+            "**`.skipnight <min_votes> [text]`** ─ Start skip-night vote (custom title optional)\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.votelist`** ─ Show all current votes\n"
             "**`.resetvotes`** ─ Reset all votes\n"
@@ -1561,7 +1612,8 @@ class Other(commands.Cog):
         embedu.add_field(name="Player Status", value=(
             "**`.dead`** ─ Move your RC to Dead category (use in RC)\n"
             "**`.deadrole`** ─ Mark dead, remove house, pin corpse (use in RC)\n"
-            "**`.deadc`** ─ Move RC to Dead (admin)"
+            "**`.deadc`** ─ Move RC to Dead (admin)\n"
+            "**`.corpselist`** ─ List all corpse locations (admin)"
         ), inline=False)
         embedu.add_field(name="Admin — Roles & Perms", value=(
             "**`.addrole @role @users...`** ─ Give role to members\n"
@@ -1599,6 +1651,7 @@ class Other(commands.Cog):
             "**`.where #RC`** ─ Show a player's current location\n"
             "**`.map`** ─ Show the game map\n"
             "**`.role`/`.firstpinned`** ─ Show first pinned in RC\n"
+            "**`.firstmsg [#ch]`** ─ Show first message in current channel (#ch needs admin)\n"
             "**`.roll @role <n>`** ─ Random players from a role\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.ping`** ─ Bot online check\n"
@@ -1770,7 +1823,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_gamemanager)
 
     async def help_library(self, ctx):
-        embed = discord.Embed(title="📚 Library & Stats commands", description="19 commands", color=0xff3fb9)
+        embed = discord.Embed(title="📚 Library & Stats commands", description="21 commands", color=0xff3fb9)
         embed.add_field(name="Stats", value=(
             "**`.stats [@player]`** ─ View player statistics\n"
             "**`.winrate`** ─ Winrate stats by team\n"
@@ -1785,6 +1838,8 @@ class Other(commands.Cog):
             "**`.lib deletegame <#>`** ─ Delete a game\n"
             "**`.lib setwin <#> <team>`** ─ Set winning team\n"
             "**`.lib search <term>`** ─ Search by name or player\n"
+            "**`.lib searchdisc <query>`** ─ Search role descriptions & text\n"
+            "**`.lib searchos <name>`** ─ Search games by overseer\n"
             "**`.lib idsearch <id>`** ─ Search by game ID"
         ), inline=False)
         embed.add_field(name="Library — Account & Help", value=(

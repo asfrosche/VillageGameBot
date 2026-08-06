@@ -185,6 +185,42 @@ def _safe_get(row: sqlite3.Row, key: str, default: str = "") -> str:
         return default
 
 
+def _invite_code(raw: str) -> Optional[str]:
+    """Extract a Discord invite code from a full URL or a bare code."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    m = re.search(r"(?:discord(?:app)?\.(?:com|gg)/)(?:invite/)?([A-Za-z0-9_-]{2,32})", raw)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[A-Za-z0-9_-]{2,32}", raw):
+        return raw
+    return None
+
+
+async def _check_invite(bot: commands.Bot, raw: str) -> tuple[Optional[bool], str]:
+    """Validate a Discord invite. Returns (valid_or_None, human_label).
+
+    valid=True  → usable invite
+    valid=False → invalid, revoked, or expired
+    valid=None  → could not be verified right now
+    """
+    code = _invite_code(raw)
+    if not code:
+        return None, "Could not parse the invite link."
+    try:
+        inv = await bot.fetch_invite(code, with_counts=False, with_expiration=True)
+    except discord.NotFound:
+        return False, "Invite is invalid, revoked, or expired."
+    except discord.HTTPException:
+        return None, "Could not verify the invite right now."
+    if inv.expires_at is not None:
+        if inv.expires_at <= datetime.now(timezone.utc):
+            return False, "Invite has expired."
+        return True, f"Valid — expires {discord.utils.format_dt(inv.expires_at, 'R')}."
+    return True, "Valid — no expiration set."
+
+
 # ── embeds ─────────────────────────────────────────────────────────────────────
 
 def calendar_embed(games: list[sqlite3.Row]) -> discord.Embed:
@@ -200,7 +236,11 @@ def calendar_embed(games: list[sqlite3.Row]) -> discord.Embed:
         status = _safe_get(g, "status", "pending")
         emoji  = _status_emoji(status)
         range_display = _range_label_from_value(g["range_label"])
-        blocks.append(f"**{name}**\n{emoji} — {range_display}")
+        block  = f"**{name}**\n{emoji} — {range_display}"
+        invite = _safe_get(g, "discord_invite")
+        if invite:
+            block += f"\n🔗 {invite}"
+        blocks.append(block)
 
     embed.description = "\n\n".join(blocks)
     return embed
@@ -343,6 +383,19 @@ class AddGameDetailsModal(discord.ui.Modal, title="New Game Details"):
         range_value = f"{self.wizard.year}-{self.wizard.month:02d}-{self.wizard.half}"
         now_str     = datetime.now(timezone.utc).isoformat()
 
+        invite_raw = self.discord_invite.value.strip()
+        invite_note = ""
+        if invite_raw:
+            ok, invite_label = await _check_invite(interaction.client, invite_raw)
+            if ok is False:
+                await interaction.response.send_message(
+                    f"❌ {invite_label}\nPlease provide a valid, unexpired invite link.",
+                    ephemeral=True,
+                )
+                return
+            if ok is None:
+                invite_note = f"\n⚠️ {invite_label}"
+
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO Games "
@@ -357,13 +410,13 @@ class AddGameDetailsModal(discord.ui.Modal, title="New Game Details"):
                     self.name_input.value.strip(),
                     self.description.value.strip(),
                     max_p,
-                    self.discord_invite.value.strip(),
+                    invite_raw,
                     now_str,
                 ),
             )
 
         await interaction.response.edit_message(
-            content="✅ Game successfully added to the Heartside Calendar!", view=None
+            content=f"✅ Game successfully added to the Heartside Calendar!{invite_note}", view=None
         )
         if self.wizard.calendar_message:
             new_view = CalendarView(self.cog, self.wizard.invoker_id)
@@ -608,6 +661,54 @@ class EditFieldModal(discord.ui.Modal):
             await interaction.response.send_message("❌ Unknown field.", ephemeral=True)
             return
 
+        await interaction.response.defer()
+        with get_db() as conn:
+            updated = conn.execute("SELECT * FROM Games WHERE id=?", (self.game["id"],)).fetchone()
+        await self.cog.show_game_detail(interaction, updated)
+
+
+# ── server link modal ──────────────────────────────────────────────────────────
+
+class ServerLinkModal(discord.ui.Modal, title="Server Link"):
+    """Set or update the Discord invite for a game, validating it first."""
+
+    invite_input = discord.ui.TextInput(
+        label="Discord Invite Link",
+        placeholder="https://discord.gg/...   (leave empty to remove)",
+        required=False,
+        max_length=100,
+    )
+
+    def __init__(self, cog: "GameManagerEn", game: sqlite3.Row):
+        super().__init__()
+        self.cog  = cog
+        self.game = game
+        self.invite_input.default = _safe_get(game, "discord_invite")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not _can_manage(self.game, interaction.user.id):
+            await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+            return
+
+        val = self.invite_input.value.strip()
+
+        if val:
+            ok, label = await _check_invite(interaction.client, val)
+            if ok is False:
+                await interaction.response.send_message(
+                    f"❌ {label}\nThe link was not saved.", ephemeral=True
+                )
+                return
+            if ok is None:
+                await interaction.response.send_message(
+                    f"⚠️ {label}\nThe link was saved anyway; double-check it before sharing.",
+                    ephemeral=True,
+                )
+        else:
+            label = ""
+
+        with get_db() as conn:
+            conn.execute("UPDATE Games SET discord_invite=? WHERE id=?", (val, self.game["id"]))
         await interaction.response.defer()
         with get_db() as conn:
             updated = conn.execute("SELECT * FROM Games WHERE id=?", (self.game["id"],)).fetchone()
@@ -860,6 +961,19 @@ class GameDetailView(discord.ui.View):
 
         edit_select.callback = edit_callback
         self.add_item(edit_select)
+
+        # ── row 4: Server Link (host/admin only) ──────────────────────────────
+        link_btn = discord.ui.Button(
+            label="🔗 Server Link", style=discord.ButtonStyle.secondary, row=4,
+        )
+        async def link_callback(interaction: discord.Interaction):
+            if not _can_manage(self.game, interaction.user.id):
+                await interaction.response.send_message("❌ Permission denied.", ephemeral=True)
+                return
+            await interaction.response.send_modal(ServerLinkModal(self.cog, self.game))
+
+        link_btn.callback = link_callback
+        self.add_item(link_btn)
 
     async def on_timeout(self):
         for item in self.children:

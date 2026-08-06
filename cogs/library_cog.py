@@ -383,6 +383,66 @@ class LibraryDatabase:
             """, (q, q, q, limit))
             return [dict(row) for row in cursor.fetchall()]
 
+    def search_roles_deep(self, tokens: List[str], limit: int = 25) -> List[dict]:
+        """Substring search across all text fields of roles.
+
+        Returns roles where ANY text field contains the token (OR semantics
+        across tokens). Returns all roles with row data plus a '_matches' key
+        containing the number of distinct token matches."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            all_roles = [dict(row) for row in cursor.execute("SELECT * FROM roles ORDER BY game_number DESC").fetchall()]
+
+        TEAM_NAMES = {1: "Village", 2: "Evil", 3: "Random Killer", 4: "Neutral", 5: "Bonus/Extra"}
+
+        results = []
+        for role in all_roles:
+            text_fields = [
+                role.get("role_name") or "",
+                role.get("player_name") or "",
+                role.get("sponsor_name") or "",
+                role.get("game_name") or "",
+                role.get("description1") or "",
+                role.get("description2") or "",
+                role.get("description3") or "",
+                role.get("description4") or "",
+                TEAM_NAMES.get(role.get("team"), ""),
+            ]
+            combined = " ".join(text_fields).lower()
+            matched_count = 0
+            for token in tokens:
+                if token.lower() in combined:
+                    matched_count += 1
+            if matched_count > 0:
+                role["_matches"] = matched_count
+                results.append(role)
+
+        results.sort(key=lambda r: r["_matches"], reverse=True)
+        return results[:limit]
+
+    def search_roles_deep_phrase(self, phrase: str, limit: int = 25) -> List[dict]:
+        """Exact phrase search across all text fields.
+
+        Returns roles where the phrase (case-insensitive substring) appears
+        anywhere in any text field. Returns results ordered by game_number DESC."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            q = f"%{phrase.lower()}%"
+            cursor.execute("""
+                SELECT DISTINCT roles.* FROM roles
+                WHERE LOWER(role_name) LIKE ?
+                   OR LOWER(player_name) LIKE ?
+                   OR LOWER(sponsor_name) LIKE ?
+                   OR LOWER(game_name) LIKE ?
+                   OR LOWER(description1) LIKE ?
+                   OR LOWER(description2) LIKE ?
+                   OR LOWER(description3) LIKE ?
+                   OR LOWER(description4) LIKE ?
+                ORDER BY game_number DESC
+                LIMIT ?
+            """, (q, q, q, q, q, q, q, q, limit))
+            return [dict(row) for row in cursor.fetchall()]
+
     def search_roles_by_player_name(self, player_name: str) -> List[dict]:
         """Exact (case-insensitive) player name search across all games."""
         with self._connect() as conn:
@@ -410,6 +470,208 @@ class LibraryDatabase:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM roles WHERE sponsor_id = ?", (sponsor_id,))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_host_name_by_id(self, discord_id: int) -> str | None:
+        """Return the most recent host_name for a Discord ID, or None."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT host_name FROM game_hosts
+                WHERE host_id = ? AND host_name IS NOT NULL
+                ORDER BY game_number DESC LIMIT 1
+            """, (discord_id,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def get_sponsor_name_by_id(self, discord_id: int) -> str | None:
+        """Backward-compat alias for get_host_name_by_id."""
+        return self.get_host_name_by_id(discord_id)
+
+    def search_games_by_host_name(self, host_name: str) -> List[Tuple[int, str]]:
+        """Search games overseered by a host (case-insensitive)."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT h.game_number, r.game_name
+                FROM game_hosts h
+                JOIN roles r ON r.game_number = h.game_number
+                WHERE LOWER(h.host_name) = LOWER(?)
+                ORDER BY h.game_number DESC
+            """, (host_name,))
+            seen = {}
+            for row in cursor.fetchall():
+                if row[0] not in seen:
+                    seen[row[0]] = row[1]
+            return list(seen.items())
+
+    def search_hosts_fuzzy(self, query: str, limit: int = 25) -> List[str]:
+        """LIKE-based search for host names, returns matching distinct names."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            q = f"%{query.lower()}%"
+            cursor.execute("""
+                SELECT DISTINCT host_name FROM game_hosts
+                WHERE LOWER(host_name) LIKE ?
+                ORDER BY host_name
+                LIMIT ?
+            """, (q, limit))
+            return [row[0] for row in cursor.fetchall()]
+
+    def search_games_by_sponsor_name(self, sponsor_name: str) -> List[Tuple[int, str]]:
+        """Backward-compat alias for search_games_by_host_name."""
+        return self.search_games_by_host_name(sponsor_name)
+
+    def get_overseer_stats(self, host_name: str) -> dict:
+        """Get team winrates for games overseered by a host."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT DISTINCT game_number FROM game_hosts
+                WHERE LOWER(host_name) = LOWER(?)
+            """, (host_name,))
+            game_numbers = [row[0] for row in cursor.fetchall()]
+
+            if not game_numbers:
+                return {}
+
+            total_games = len(game_numbers)
+            placeholders = ','.join(['?'] * len(game_numbers))
+            params = game_numbers
+
+            cursor.execute(f"""
+                SELECT team,
+                       COUNT(DISTINCT game_number) AS games,
+                       SUM(win) AS wins
+                FROM roles
+                WHERE game_number IN ({placeholders}) AND count = 1 AND team != 5
+                GROUP BY team
+            """, params)
+
+            team_stats = {}
+            for row in cursor.fetchall():
+                team_name = TEAMS.get(row["team"], f"Team {row['team']}")
+                games = row["games"] or 0
+                wins = row["wins"] or 0
+                team_stats[team_name] = {
+                    "games": games,
+                    "wins": wins,
+                    "winrate": (wins / games * 100) if games else 0,
+                }
+
+            return {
+                "total_games": total_games,
+                "team_stats": team_stats,
+            }
+
+    def get_overseer_game_history(self, host_name: str) -> List[dict]:
+        """Return per-game details for all games overseered by a host."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT DISTINCT h.game_number, r.game_name
+                FROM game_hosts h
+                JOIN roles r ON r.game_number = h.game_number
+                WHERE LOWER(h.host_name) = LOWER(?)
+                ORDER BY h.game_number DESC
+            """, (host_name,))
+            seen = {}
+            for row in cursor.fetchall():
+                if row[0] not in seen:
+                    seen[row[0]] = row[1]
+            games = list(seen.items())
+
+            if not games:
+                return []
+
+            game_nums = [g[0] for g in games]
+            placeholders = ','.join(['?'] * len(game_nums))
+
+            cursor.execute(f"""
+                SELECT game_number, team, COUNT(*) AS cnt
+                FROM roles
+                WHERE game_number IN ({placeholders}) AND count = 1 AND team != 5
+                GROUP BY game_number, team
+            """, game_nums)
+            team_counts_data = {}
+            for row in cursor.fetchall():
+                gn = row["game_number"]
+                if gn not in team_counts_data:
+                    team_counts_data[gn] = {}
+                team_counts_data[gn][row["team"]] = row["cnt"]
+
+            cursor.execute(f"""
+                SELECT game_number, team
+                FROM roles
+                WHERE game_number IN ({placeholders}) AND win = 1
+                GROUP BY game_number, team
+            """, game_nums)
+            winning_data = {}
+            for row in cursor.fetchall():
+                gn = row["game_number"]
+                if gn not in winning_data:
+                    winning_data[gn] = []
+                winning_data[gn].append(row["team"])
+
+            result = []
+            for game_number, game_name in games:
+                result.append({
+                    "game_number": game_number,
+                    "game_name": game_name.replace('-', ' ').title(),
+                    "team_counts": team_counts_data.get(game_number, {}),
+                    "winning_teams": winning_data.get(game_number, []),
+                })
+
+            return result
+
+    def get_all_overseer_stats(self, min_games: int = 1) -> List[dict]:
+        """Return aggregated stats for every overseer (host)."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    h.host_id,
+                    MAX(h.host_name) AS host_name,
+                    COUNT(DISTINCT h.game_number) AS total_games,
+                    COUNT(DISTINCT CASE WHEN r.team = 1 AND r.win = 1 THEN h.game_number END) AS village_wins,
+                    COUNT(DISTINCT CASE WHEN r.team = 2 AND r.win = 1 THEN h.game_number END) AS evil_wins,
+                    COUNT(DISTINCT CASE WHEN r.team = 3 AND r.win = 1 THEN h.game_number END) AS rk_wins,
+                    COUNT(DISTINCT CASE WHEN r.team = 4 AND r.win = 1 THEN h.game_number END) AS neutral_wins
+                FROM game_hosts h
+                LEFT JOIN roles r ON r.game_number = h.game_number AND r.count = 1 AND r.team != 5
+                WHERE h.host_name IS NOT NULL AND h.host_name != ''
+                GROUP BY h.host_id
+                HAVING COUNT(DISTINCT h.game_number) >= ?
+                ORDER BY COUNT(DISTINCT h.game_number) DESC
+            """, (min_games,))
+
+            results = []
+            for row in cursor.fetchall():
+                total = row["total_games"] or 0
+                vw = row["village_wins"] or 0
+                ew = row["evil_wins"] or 0
+                rw = row["rk_wins"] or 0
+                nw = row["neutral_wins"] or 0
+                total_wins = vw + ew + rw + nw
+
+                results.append({
+                    "sponsor_id": row["host_id"],
+                    "sponsor_name": row["host_name"],
+                    "total_games": total,
+                    "village_wins": vw,
+                    "village_wr": (vw / total * 100) if total else 0,
+                    "evil_wins": ew,
+                    "evil_wr": (ew / total * 100) if total else 0,
+                    "rk_wins": rw,
+                    "rk_wr": (rw / total * 100) if total else 0,
+                    "neutral_wins": nw,
+                    "neutral_wr": (nw / total * 100) if total else 0,
+                    "total_wins": total_wins,
+                    "winrate": (total_wins / total * 100) if total else 0,
+                })
+
+            return results
 
     # Deprecated — kept for backward compatibility
     def search_role_by_name(self, game_number: int, role_name: str) -> Optional[dict]:
@@ -741,7 +1003,7 @@ class LibraryDatabase:
                 SELECT game_number, game_name, role_id, role_name, team, win, mvp
                 FROM roles
                 WHERE player_id = ? AND count = 1 AND team != 5
-                ORDER BY game_number ASC
+                ORDER BY game_number DESC
             """, (player_id,))
             return [
                 {
@@ -2090,6 +2352,343 @@ class StatsView(discord.ui.View):
         await interaction.response.send_message(embed=view.get_embed(), view=view)
 
 
+class OverseerSearchSelectView(discord.ui.View):
+    """View for selecting from overseer search results (list of games)."""
+    def __init__(self, games: List[Tuple[int, str]], db, page: int = 0):
+        super().__init__(timeout=300)
+        self.games = games
+        self.db = db
+        self.page = page
+        self.max_page = math.ceil(len(games) / 10) - 1
+
+        if self.max_page > 0:
+            self.prev_btn = discord.ui.Button(label="◀ Previous", style=discord.ButtonStyle.primary, disabled=True)
+            self.prev_btn.callback = self.prev_page
+            self.add_item(self.prev_btn)
+
+            self.next_btn = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.primary)
+            self.next_btn.callback = self.next_page
+            self.add_item(self.next_btn)
+
+    def get_embed(self) -> discord.Embed:
+        start_idx = self.page * 10
+        end_idx = min(start_idx + 10, len(self.games))
+        page_games = self.games[start_idx:end_idx]
+
+        embed = discord.Embed(
+            title="🔍 Overseer Search Results",
+            description=f"Found **{len(self.games)}** game(s). Select one to view.",
+            color=EMBED_COLOR,
+        )
+
+        games_text = ""
+        for game_num, game_name in page_games:
+            winners = self.db.get_winning_teams(game_num)
+            winner_str = f" | 🏆 {', '.join(winners)}" if winners else ""
+            games_text += f"**{game_num}** | {game_name.replace('-', ' ').title()}{winner_str}\n"
+
+        embed.add_field(name="Games Overseered", value=games_text, inline=False)
+
+        if self.max_page > 0:
+            embed.set_footer(text=f"{EMBED_FOOTER_TEXT} | Page {self.page + 1}/{self.max_page + 1}", icon_url=EMBED_FOOTER_ICON)
+        else:
+            embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
+
+        return embed
+
+    async def prev_page(self, interaction: discord.Interaction):
+        self.page = max(0, self.page - 1)
+        await self._update(interaction)
+
+    async def next_page(self, interaction: discord.Interaction):
+        self.page = min(self.max_page, self.page + 1)
+        await self._update(interaction)
+
+    async def _update(self, interaction: discord.Interaction):
+        self.prev_btn.disabled = self.page == 0
+        self.next_btn.disabled = self.page >= self.max_page
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+
+class InteractiveOverseerSearchView(discord.ui.View):
+    """Interactive search view for overseer search."""
+    def __init__(self, db):
+        super().__init__(timeout=300)
+        self.db = db
+
+    @discord.ui.button(label="👤 Enter Overseer Name", style=discord.ButtonStyle.primary, row=0)
+    async def enter_overseer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(OverseerSearchModal(self.db))
+
+
+class OverseerSearchModal(discord.ui.Modal, title="Search by Overseer Name"):
+    """Modal for entering an overseer name to search."""
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+
+    overseer_name = discord.ui.TextInput(
+        label="Overseer Name",
+        placeholder="Enter overseer name...",
+        required=True,
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        name = self.overseer_name.value.strip()
+        games = self.db.search_games_by_host_name(name)
+        if not games:
+            await interaction.response.send_message(f"❌ No games found for overseer '{name}'!", ephemeral=True)
+            return
+        view = OverseerSearchSelectView(games, self.db)
+        await interaction.response.edit_message(embed=view.get_embed(), view=view)
+
+
+class OverseerLeaderboardView(discord.ui.View):
+    """Leaderboard view for overseers."""
+    def __init__(self, stats, min_games: int = 5, sort_mode: str = "games", page: int = 0):
+        super().__init__(timeout=300)
+        self.raw_stats = stats
+        self.min_games = min_games
+        self.sort_mode = sort_mode
+        self.page = page
+        self.page_size = 10
+
+    def get_embed(self) -> discord.Embed:
+        players = self._get_sorted()
+        total = len(players)
+
+        embed = discord.Embed(
+            title=f"🏆 Overseer Leaderboard — {self.min_games}+ Games",
+            color=EMBED_COLOR,
+        )
+
+        if total == 0:
+            embed.description = "No overseers match this filter."
+            return embed
+
+        max_page = max(0, (total - 1) // self.page_size)
+        self.page = min(self.page, max_page)
+        start = self.page * self.page_size
+        page_players = players[start:start + self.page_size]
+
+        sort_labels = {
+            "games": "Games Overseered", "winrate": "Winrate",
+            "village_wr": "Village Winrate", "evil_wr": "Evil Winrate",
+            "rk_wr": "RK Winrate", "neutral_wr": "Neutral Winrate",
+            "name": "Alphabetical",
+        }
+
+        desc = ""
+        for idx, p in enumerate(page_players, start=start + 1):
+            parts = [f"V {p['village_wins']}W", f"E {p['evil_wins']}W",
+                     f"RK {p['rk_wins']}W", f"N {p['neutral_wins']}W"]
+            line = (
+                f"**#{idx} — {p['sponsor_name']}**\n"
+                f"{p['total_games']} games • {' • '.join(parts)}\n"
+            )
+            desc += line + "\n"
+
+        embed.description = desc
+        embed.set_footer(
+            text=f"{EMBED_FOOTER_TEXT} | {self.min_games}+ games | Sorted by {sort_labels.get(self.sort_mode, 'Games')} | Page {self.page + 1}/{max_page + 1}",
+            icon_url=EMBED_FOOTER_ICON,
+        )
+        return embed
+
+    def _get_sorted(self):
+        players = [p for p in self.raw_stats if p["total_games"] >= self.min_games]
+        key_map = {
+            "games":       lambda p: (-p["total_games"], -p["winrate"]),
+            "winrate":     lambda p: (-p["winrate"], -p["total_games"]),
+            "village_wr":  lambda p: (-p["village_wr"], -p["village_wins"], -p["total_games"]),
+            "evil_wr":     lambda p: (-p["evil_wr"], -p["evil_wins"], -p["total_games"]),
+            "rk_wr":       lambda p: (-p["rk_wr"], -p["rk_wins"], -p["total_games"]),
+            "neutral_wr":  lambda p: (-p["neutral_wr"], -p["neutral_wins"], -p["total_games"]),
+            "name":        lambda p: p["sponsor_name"].lower(),
+        }
+        players.sort(key=key_map.get(self.sort_mode, key_map["games"]))
+        return players
+
+    @discord.ui.select(
+        placeholder="Sort by...",
+        options=[
+            discord.SelectOption(label="Games Overseered", value="games"),
+            discord.SelectOption(label="Winrate", value="winrate"),
+            discord.SelectOption(label="Alphabetical (A–Z)", value="name"),
+            discord.SelectOption(label="Village Winrate", value="village_wr"),
+            discord.SelectOption(label="Evil Winrate", value="evil_wr"),
+            discord.SelectOption(label="RK Winrate", value="rk_wr"),
+            discord.SelectOption(label="Neutral Winrate", value="neutral_wr"),
+        ],
+        row=0,
+    )
+    async def sort_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.sort_mode = select.values[0]
+        self.page = 0
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="🔢 Set Min Games", style=discord.ButtonStyle.primary, row=1)
+    async def set_min_games(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(MinGamesModal(self))
+
+    @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary, row=2)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary, row=2)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        max_page = max(0, (len(self._get_sorted()) - 1) // self.page_size)
+        if self.page < max_page:
+            self.page += 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+
+class OverseerStatsView(discord.ui.View):
+    """View for overseer stats with paginated game history."""
+    TEAM_EMOJI = {1: "🏘️", 2: "😈", 3: "🔪", 4: "⚖️"}
+
+    def __init__(self, db, stats: dict, history: List[dict], overseer_name: str, avatar_url: str = None, page: int = 0):
+        super().__init__(timeout=300)
+        self.db = db
+        self.stats = stats
+        self.history = history
+        self.overseer_name = overseer_name
+        self.avatar_url = avatar_url
+        self.page = page
+        self.page_size = 10
+        self.max_page = max(0, (len(history) - 1) // self.page_size)
+
+        self.prev_btn = discord.ui.Button(label="◀ Prev", style=discord.ButtonStyle.secondary, disabled=True)
+        self.prev_btn.callback = self.prev_page
+        self.add_item(self.prev_btn)
+
+        self.next_btn = discord.ui.Button(label="Next ▶", style=discord.ButtonStyle.secondary, disabled=self.max_page == 0)
+        self.next_btn.callback = self.next_page
+        self.add_item(self.next_btn)
+
+        self.lb_btn = discord.ui.Button(label="🏆 View Leaderboard", style=discord.ButtonStyle.primary, row=1)
+        self.lb_btn.callback = self.show_leaderboard
+        self.add_item(self.lb_btn)
+
+    async def show_leaderboard(self, interaction: discord.Interaction):
+        all_stats = self.db.get_all_overseer_stats()
+        if not all_stats:
+            await interaction.response.send_message("❌ No overseer data found.", ephemeral=True)
+            return
+        view = OverseerLeaderboardView(all_stats)
+        await interaction.response.send_message(embed=view.get_embed(), view=view)
+
+    # ── helpers ─────────────────────────────────────────────────────────────────
+
+    def _compute_faction_stats(self):
+        factions = [
+            (1, "🏘️", "Village"),
+            (2, "😈", "Evil"),
+            (3, "🔪", "Random Killer"),
+            (4, "⚖️", "Neutral"),
+        ]
+        results = []
+        for tid, emoji, name in factions:
+            games = sum(1 for g in self.history if tid in g["team_counts"])
+            wins = sum(1 for g in self.history if tid in g["winning_teams"])
+            results.append((emoji, name, wins, games))
+        return results
+
+    def _compute_overview(self):
+        games_os = self.stats["total_games"]
+        if not self.history:
+            return games_os, 0.0, 0, None
+        per_game_totals = [sum(g["team_counts"].values()) for g in self.history]
+        avg_players = sum(per_game_totals) / len(per_game_totals)
+        largest_game = max(per_game_totals)
+        first_game = min(g["game_number"] for g in self.history)
+        return games_os, avg_players, largest_game, first_game
+
+    def get_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title=f"📊 Overseer Stats • {self.overseer_name}",
+            color=EMBED_COLOR,
+        )
+        if self.avatar_url:
+            embed.set_thumbnail(url=self.avatar_url)
+
+        # ── Overview ─────────────────────────────────────────────────────────────
+        games_os, avg_players, largest_game, first_game = self._compute_overview()
+        overview_lines = [
+            f"├─ Games Hosted      {games_os}",
+            f"├─ Average Players   {avg_players:.1f}",
+            f"├─ Largest Game      {largest_game}",
+        ]
+        if first_game is not None:
+            overview_lines.append(f"└─ First Game        #{first_game}")
+        else:
+            overview_lines.append("└─ First Game        —")
+        embed.add_field(name="📈 Overview", value="\n".join(overview_lines), inline=False)
+
+        # ── Faction Results ──────────────────────────────────────────────────────
+        faction_data = self._compute_faction_stats()
+        name_pad = max(len(n) for _, _, n, _, _ in [(e, n, n, w, g) for e, n, w, g in faction_data])
+        faction_lines = []
+        for emoji, name, wins, games in faction_data:
+            padded_name = name.ljust(name_pad)
+            if games:
+                wr = f"{wins / games * 100:.1f}%"
+                faction_lines.append(f"{emoji} {padded_name}  {wins}/{games}   {wr}")
+            else:
+                faction_lines.append(f"{emoji} {padded_name}  0/0   —")
+        embed.add_field(name="🏆 Faction Results", value="\n".join(faction_lines), inline=False)
+
+        # ── Recent Games ─────────────────────────────────────────────────────────
+        ABBR = {1: "V", 2: "E", 3: "RK", 4: "N"}
+        start = self.page * self.page_size
+        items = self.history[start:start + self.page_size]
+
+        desc_lines = []
+        if items:
+            for g in items:
+                desc_lines.append(f"#{g['game_number']} {g['game_name']}")
+                comp_parts = []
+                for tid in (1, 2, 3, 4):
+                    if tid in g["team_counts"]:
+                        comp_parts.append(f"{g['team_counts'][tid]}{ABBR[tid]}")
+                desc_lines.append(" • ".join(comp_parts))
+                primary = [t for t in g["winning_teams"] if t != 4]
+                if not primary:
+                    primary = g["winning_teams"]
+                winner_name = TEAMS.get(primary[0], "?") if primary else "—"
+                desc_lines.append(f"🏆 {winner_name}" if primary else "—")
+                desc_lines.append("")
+
+        total_pages = max(1, (len(self.history) - 1) // self.page_size + 1)
+        field_name = f"📜 Recent Games • Page {self.page + 1}/{total_pages}"
+        embed.add_field(
+            name=field_name,
+            value="\n".join(desc_lines).strip() if desc_lines else "*No games found.*",
+            inline=False,
+        )
+
+        embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
+        return embed
+
+    async def prev_page(self, interaction: discord.Interaction):
+        if self.page > 0:
+            self.page -= 1
+        await self._update(interaction)
+
+    async def next_page(self, interaction: discord.Interaction):
+        if self.page < self.max_page:
+            self.page += 1
+        await self._update(interaction)
+
+    async def _update(self, interaction: discord.Interaction):
+        self.prev_btn.disabled = self.page == 0
+        self.next_btn.disabled = self.page >= self.max_page
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+
 class MissingIDPageView(discord.ui.View):
     def __init__(self, cog, missing_players, page=0):
         super().__init__(timeout=300)
@@ -2684,6 +3283,229 @@ class GameLibrary(commands.Cog):
         view = RoleSelectionView(roles, self.db)
         await ctx.send(embed=view.get_embed(), view=view)
 
+    def _parse_search_query(self, args: tuple) -> tuple[List[str], List[str]]:
+        """Parse search args into quoted phrases and unquoted tokens.
+
+        Returns (phrases, tokens) where phrases are quoted substrings
+        and tokens are individual unquoted words.
+
+        Example: .lib searchdisc "teleport" visit
+        -> phrases=["teleport"], tokens=["visit"]"""
+        raw = " ".join(args)
+        if not raw.strip():
+            return [], []
+        phrases = []
+        for match in re.finditer(r'"([^"]*)"', raw):
+            phrases.append(match.group(1))
+        for match in re.finditer(r"'([^']*)'", raw):
+            phrases.append(match.group(1))
+        remaining = re.sub(r'"[^"]*"', '', raw)
+        remaining = re.sub(r"'[^']*'", '', remaining)
+        tokens = [t for t in remaining.split() if t.strip()]
+        return phrases, tokens
+
+    def _score_deep_match(self, role: dict, terms: List[str]) -> float:
+        """Score a role against a list of search terms.
+
+        Uses substring matching across all text fields. Higher scores for:
+        - More total matches across tokens
+        - Matches spread across more distinct fields
+        - Matches in role_name (weighted 3x higher)"""
+        TEAM_NAMES = {1: "Village", 2: "Evil", 3: "Random Killer", 4: "Neutral", 5: "Bonus/Extra"}
+        fields = {
+            "role_name": (role.get("role_name") or "").lower(),
+            "player_name": (role.get("player_name") or "").lower(),
+            "sponsor_name": (role.get("sponsor_name") or "").lower(),
+            "game_name": (role.get("game_name") or "").lower(),
+            "description1": (role.get("description1") or "").lower(),
+            "description2": (role.get("description2") or "").lower(),
+            "description3": (role.get("description3") or "").lower(),
+            "description4": (role.get("description4") or "").lower(),
+            "team": TEAM_NAMES.get(role.get("team"), "").lower(),
+        }
+        total_matches = 0
+        fields_hit = set()
+        for term in terms:
+            t = term.lower()
+            for fname, fval in fields.items():
+                if t in fval:
+                    total_matches += 1
+                    fields_hit.add(fname)
+                    if fname == "role_name":
+                        total_matches += 2
+        spread_bonus = len(fields_hit) * 0.5
+        return total_matches + spread_bonus
+
+    @lib.command(name="searchdisc")
+    async def lib_searchdisc(self, ctx, *, query: str = ""):
+        """Search role descriptions and all text fields.
+
+        Supports:
+        - Unquoted tokens: OR semantics (match any)
+          Example: .lib searchdisc teleport visit
+        - Quoted phrases: AND semantics across multiple phrases
+          Example: .lib searchdisc "teleport" "visit" (both in same role)
+        - Mixed quoted + unquoted: AND across all
+          Example: .lib searchdisc "teleport" visit
+        - Optional game number at the end
+          Example: .lib searchdisc teleport 87"""
+        if not query.strip():
+            view = InteractiveSearchView(self.db)
+            embed = discord.Embed(
+                title="🔍 Search Role Descriptions",
+                description=(
+                    "Search across ALL role text fields:\n"
+                    "• Role name, aliases\n"
+                    "• Description, abilities\n"
+                    "• Player & sponsor names\n"
+                    "• Game names\n\n"
+                    "**Query syntax:**\n"
+                    "• Words = OR (match any)\n"
+                    "• `\"quoted\"` = exact substring\n"
+                    "• Multiple `\"quoted\"` = AND (all in same role)\n"
+                    "• End with a number = filter by game\n\n"
+                    "Examples:\n"
+                    "`.lib searchdisc teleport` — OR\n"
+                    "`.lib searchdisc \"teleport\" \"visit\"` — AND\n"
+                    "`.lib searchdisc teleport 87` — by game"
+                ),
+                color=EMBED_COLOR,
+            )
+            await ctx.send(embed=embed, view=view)
+            return
+
+        game_number = None
+        # Check if query ends with a numeric game number
+        parts = query.rsplit(None, 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            game_number = int(parts[1])
+            query = parts[0]
+
+        if not query.strip():
+            await ctx.send("❌ Invalid query.")
+            return
+
+        phrases, tokens = self._parse_search_query((query,))
+
+        if not phrases and not tokens:
+            await ctx.send("❌ Invalid query.")
+            return
+
+        if phrases and not tokens:
+            if len(phrases) == 1:
+                roles = self.db.search_roles_deep_phrase(phrases[0], limit=500)
+            else:
+                role_sets = []
+                for phrase in phrases:
+                    role_sets.append(set(
+                        (r["game_number"], r["role_id"])
+                        for r in self.db.search_roles_deep_phrase(phrase, limit=500)
+                    ))
+                common_ids = role_sets[0]
+                for rs in role_sets[1:]:
+                    common_ids &= rs
+                all_roles = []
+                for phrase in phrases:
+                    all_roles.extend(self.db.search_roles_deep_phrase(phrase, limit=500))
+                roles = [r for r in all_roles
+                         if (r["game_number"], r["role_id"]) in common_ids]
+                seen = set()
+                roles = [r for r in roles
+                         if not ((r["game_number"], r["role_id"]) in seen
+                                 or seen.add((r["game_number"], r["role_id"])))]
+            roles.sort(key=lambda r: self._score_deep_match(r, phrases), reverse=True)
+        elif tokens and not phrases:
+            roles = self.db.search_roles_deep(tokens, limit=500)
+        else:
+            all_terms = phrases + tokens
+            all_roles = []
+            for term in all_terms:
+                all_roles.extend(self.db.search_roles_deep_phrase(term, limit=500))
+            term_matches = []
+            for role_dict in all_roles:
+                matched_all = True
+                for term in all_terms:
+                    if not self._check_role_matches_term(role_dict, term):
+                        matched_all = False
+                        break
+                if matched_all:
+                    term_matches.append(role_dict)
+            seen = set()
+            roles = []
+            for r in term_matches:
+                k = (r["game_number"], r["role_id"])
+                if k not in seen:
+                    seen.add(k)
+                    roles.append(r)
+            roles.sort(key=lambda r: self._score_deep_match(r, all_terms), reverse=True)
+
+        # Filter by game number if specified
+        if game_number is not None:
+            roles = [r for r in roles if r["game_number"] == game_number]
+
+        if not roles:
+            await ctx.send("❌ No matching roles found.")
+            return
+
+        if len(roles) == 1:
+            role = roles[0]
+            team_roles = self.db.get_roles_by_team(role["game_number"], role["team"])
+            index = next(i for i, r in enumerate(team_roles) if r[0] == role["role_id"])
+            view = RoleDescriptionView(role["game_number"], role["game_name"], team_roles, index, self.db)
+            await ctx.send(embed=view.get_embed(), view=view)
+            return
+
+        view = RoleSelectionView(roles, self.db)
+        await ctx.send(embed=view.get_embed(), view=view)
+
+    def _check_role_matches_term(self, role: dict, term: str) -> bool:
+        """Check if a role matches a single search term across all text fields."""
+        TEAM_NAMES = {1: "Village", 2: "Evil", 3: "Random Killer", 4: "Neutral", 5: "Bonus/Extra"}
+        text_fields = [
+            role.get("role_name") or "",
+            role.get("player_name") or "",
+            role.get("sponsor_name") or "",
+            role.get("game_name") or "",
+            role.get("description1") or "",
+            role.get("description2") or "",
+            role.get("description3") or "",
+            role.get("description4") or "",
+            TEAM_NAMES.get(role.get("team"), ""),
+        ]
+        combined = " ".join(text_fields).lower()
+        return term.lower() in combined
+
+    @lib.command(name="searchos")
+    async def lib_searchos(self, ctx, *, name: str = None):
+        """Search games overseered by a specific person — Usage: .lib searchos <name> or .lib searchos @ping"""
+        if not name:
+            view = InteractiveOverseerSearchView(self.db)
+            embed = discord.Embed(
+                title="🔍 Search by Overseer",
+                description=(
+                    "Search for all games overseered by a specific person.\n\n"
+                    "Examples:\n"
+                    "`.lib searchos PlayerName`\n"
+                    "`.lib searchos @Player`"
+                ),
+                color=EMBED_COLOR,
+            )
+            await ctx.send(embed=embed, view=view)
+            return
+
+        sponsor_name, _ = await self._resolve_overseer_input(ctx, name)
+        if not sponsor_name:
+            await ctx.send(f"❌ Could not resolve '{name}' to an overseer!")
+            return
+
+        games = self.db.search_games_by_host_name(sponsor_name)
+        if not games:
+            await ctx.send(f"❌ No games found for overseer '{sponsor_name}'!")
+            return
+
+        view = OverseerSearchSelectView(games, self.db)
+        await ctx.send(embed=view.get_embed(), view=view)
+
     @lib.command(name="idsearch")
     async def lib_idsearch(self, ctx, game_number: int, role_id: int):
         """Jump to a role by ID — Usage: .lib idsearch <game#> <role_id>"""
@@ -3020,11 +3842,13 @@ class GameLibrary(commands.Cog):
             "**`.lib search <game#>`**\nJump directly to a game\n\n"
             "**`.lib search <game#> <role name>`**\nSearch within a specific game\n\n"
             "**`.lib idsearch <game#> <role_id>`**\nJump directly to a role by ID\n\n"
+            "**`.lib searchos <name or @ping>`**\nSearch games overseered by a specific person\n\n"
             "**`.lib summary <game#>`**\nShow game summary + team pie chart"
         ), inline=False)
 
         embed.add_field(name="📊 Statistics", value=(
             "**`.stats`** or **`.stats @player`**\nView player statistics including ⭐ MVPs\n\n"
+            "**`.statsos <name or @ping>`**\nView overseer stats (team winrates)\n\n"
             "**`.winrate`**\nView overall team winrates"
         ), inline=False)
 
@@ -3229,6 +4053,69 @@ class GameLibrary(commands.Cog):
         embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
 
         await ctx.send(embed=embed, view=StatsView(self.db, member))
+
+    async def _resolve_overseer_input(self, ctx, member_input: str):
+        """Resolve ping, username, or nickname to (sponsor_name, avatar_url).
+        Returns (None, None) and sends an error message if unresolvable."""
+        member = None
+        if ctx.guild:
+            mention_match = re.search(r"<@!?(\d+)>", member_input)
+            if mention_match:
+                try:
+                    member = await ctx.guild.fetch_member(int(mention_match.group(1)))
+                except Exception:
+                    member = None
+
+            if not member:
+                lowered = member_input.strip().lower()
+                for m in ctx.guild.members:
+                    if m.display_name.lower() == lowered or m.name.lower() == lowered:
+                        member = m
+                        break
+
+        if member:
+            db_name = self.db.get_host_name_by_id(member.id)
+            if db_name:
+                return db_name, member.display_avatar.url
+            return member_input.strip(), member.display_avatar.url
+
+        return member_input.strip(), None
+
+    @commands.command(name="statsos")
+    async def statsos(self, ctx, *, member_input: str = None):
+        """View overseer stats — Usage: .statsos, .statsos <name>, or .statsos @ping"""
+        if not member_input:
+            db_name = self.db.get_host_name_by_id(ctx.author.id)
+            if not db_name:
+                await ctx.send("❌ You don't have any overseer stats on record.")
+                return
+            sponsor_name = db_name
+            avatar_url = ctx.author.display_avatar.url
+        else:
+            sponsor_name, avatar_url = await self._resolve_overseer_input(ctx, member_input)
+            if not sponsor_name:
+                return
+
+        stats = self.db.get_overseer_stats(sponsor_name)
+
+        if not stats or stats["total_games"] == 0:
+            fuzzy = self.db.search_hosts_fuzzy(sponsor_name)
+            if len(fuzzy) == 1:
+                sponsor_name = fuzzy[0]
+                stats = self.db.get_overseer_stats(sponsor_name)
+            elif len(fuzzy) > 1:
+                matches = "\n".join(f"**{i+1}.** {n}" for i, n in enumerate(fuzzy[:10]))
+                await ctx.send(f"❌ No overseer stats found for '{sponsor_name}'.\n\nDid you mean:\n{matches}")
+                return
+
+        if not stats or stats["total_games"] == 0:
+            await ctx.send(f"❌ No overseer stats found for '{sponsor_name}'!")
+            return
+
+        history = self.db.get_overseer_game_history(sponsor_name)
+
+        view = OverseerStatsView(self.db, stats, history, sponsor_name, avatar_url)
+        await ctx.send(embed=view.get_embed(), view=view)
 
     @commands.command(name="winrate")
     async def winrate(self, ctx):

@@ -17,9 +17,10 @@ from cogs.status_cog import (
 
 class SkipNightView(discord.ui.View):
 
-    def __init__(self, session):
+    def __init__(self, session, title="🌙 Vote to Skip the Night"):
         super().__init__(timeout=None)
         self.session = session
+        self.title = title
 
     def is_alive(self, member, guild_data):
         alive_role = discord.utils.get(
@@ -52,7 +53,7 @@ class SkipNightView(discord.ui.View):
         )
 
         embed = discord.Embed(
-            title="🌙 Vote to Skip the Night",
+            title=self.title,
             description=(
                 f"{progress}\n\n"
                 f"**{current_votes}/{required_votes}** votes needed\n"
@@ -357,9 +358,45 @@ class Utility(commands.Cog):
             return await ctx.send("Please reply to a message or provide `from_id` and `to_id`.")
         if not messages_to_delete:
             return await ctx.send("No messages to delete in the specified range.")
-        await self.broom_delete(ctx, messages_to_delete)
 
-    async def broom_delete(self, ctx, messages_to_delete):
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        recent = [m for m in messages_to_delete if m.created_at >= cutoff]
+        old = [m for m in messages_to_delete if m.created_at < cutoff]
+
+        summary = f"🧹 **{len(recent)}** recent messages will be bulk deleted."
+        if old:
+            summary += f"\n⚠️ **{len(old)}** messages older than 14 days will be deleted individually (max 50)."
+        summary += "\n\nAre you sure?"
+
+        confirm_view = View(timeout=30)
+        confirmed = {"value": False}
+
+        async def confirm_cb(interaction):
+            if interaction.user == ctx.author:
+                confirmed["value"] = True
+                await interaction.response.edit_message(content="🧹 Sweeping...", view=None)
+
+        async def cancel_cb(interaction):
+            if interaction.user == ctx.author:
+                await interaction.response.edit_message(content="Cancelled.", view=None)
+
+        confirm_btn = Button(label="✔ Sweep", style=discord.ButtonStyle.green)
+        confirm_btn.callback = confirm_cb
+        cancel_btn = Button(label="❌ Cancel", style=discord.ButtonStyle.red)
+        cancel_btn.callback = cancel_cb
+        confirm_view.add_item(confirm_btn)
+        confirm_view.add_item(cancel_btn)
+
+        confirm_msg = await ctx.send(summary, view=confirm_view)
+        await confirm_view.wait()
+
+        if not confirmed["value"]:
+            return
+
+        await self.broom_delete(ctx, messages_to_delete, old_count=len(old))
+        await confirm_msg.delete()
+
+    async def broom_delete(self, ctx, messages_to_delete, old_count=None):
         """Delete messages and log to broom channel (shared by .broom and shop broom)."""
         guild_data = load_guild_data(ctx.guild.id)
         broom_channel_name = guild_data.get("edit_del_logs")
@@ -370,13 +407,44 @@ class Utility(commands.Cog):
                 content = message.content.replace('\n', ' ')[:1000]
                 temp_log.write(f"{timestamp} - {message.author}: {content}\n")
             temp_log_name = temp_log.name
-        for i in range(0, len(messages_to_delete), 100):
-            await ctx.channel.delete_messages(messages_to_delete[i:i + 100])
+
+        if old_count is None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+            recent = [m for m in messages_to_delete if m.created_at >= cutoff]
+            old = [m for m in messages_to_delete if m.created_at < cutoff]
+        else:
+            old = messages_to_delete[-old_count:] if old_count else []
+            recent = messages_to_delete[:-old_count] if old_count else messages_to_delete
+
+        MAX_INDIVIDUAL = 50
+        deleted = len(recent)
+        skipped = 0
+
+        for i in range(0, len(recent), 100):
+            await ctx.channel.delete_messages(recent[i:i + 100])
+
+        for msg in old[:MAX_INDIVIDUAL]:
+            try:
+                await msg.delete()
+                deleted += 1
+                await asyncio.sleep(0.25)
+            except discord.NotFound:
+                pass
+            except discord.HTTPException:
+                pass
+
+        if len(old) > MAX_INDIVIDUAL:
+            skipped = len(old) - MAX_INDIVIDUAL
+
         if broom_channel:
             await broom_channel.send(f'🧹 **{ctx.author}** used a broom in {ctx.channel.mention}')
             await broom_channel.send(file=discord.File(temp_log_name))
         os.remove(temp_log_name)
-        await ctx.send(f"🧹 Broom swept away **{len(messages_to_delete)}** messages.", delete_after=5)
+
+        msg = f"🧹 Broom swept away **{deleted}** messages."
+        if skipped:
+            msg += f"\n⚠️ Skipped **{skipped}** messages older than 14 days (limit: {MAX_INDIVIDUAL})."
+        await ctx.send(msg, delete_after=5)
 
     @commands.command()
     async def housecheck(self, ctx, hours: int = 24):
@@ -962,12 +1030,18 @@ class Utility(commands.Cog):
 
         selected_house = None
         if not corpse_houses:
-            await ctx.send("No stored house found for this player. Mention the channel for the corpse message:")
+            await ctx.send("No stored house found for this player. Reply with the house channel (e.g. `#house-3`) to place the corpse there, or reply `skip` to skip the corpse pin:")
             def check(m):
-                return m.author == ctx.author and m.channel == ctx.channel and m.mentions
+                return m.author == ctx.author and m.channel == ctx.channel
             try:
                 reply = await self.bot.wait_for("message", timeout=60, check=check)
-                selected_house = reply.mentions[0] if reply.mentions else None
+                if reply.content.strip().lower() == "skip":
+                    selected_house = None
+                elif reply.channel_mentions:
+                    selected_house = reply.channel_mentions[0]
+                else:
+                    await ctx.send("No valid channel found. Corpse pin skipped.")
+                    selected_house = None
             except asyncio.TimeoutError:
                 await ctx.send("Timed out. No corpse message will be sent.")
         elif len(corpse_houses) == 1:
@@ -1024,7 +1098,49 @@ class Utility(commands.Cog):
         estate_cog = self.bot.get_cog('Estate')
         if estate_cog:
             await estate_cog.update_estate_map(ctx.guild)
-    
+
+    @commands.command()
+    async def corpselist(self, ctx):
+        """List all corpse locations in the server."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
+        dead_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        categories = [cat for cat in [houses_category, dead_category] if cat]
+        if not categories:
+            await ctx.send("No houses or dead RC category found.")
+            return
+
+        corpses = []
+        for category in categories:
+            for channel in category.text_channels:
+                try:
+                    pins = await channel.pins()
+                except discord.Forbidden:
+                    continue
+                for pin in pins:
+                    if "corpse is here" in (pin.content or "").lower():
+                        corpses.append((channel, pin.author, pin))
+
+        if not corpses:
+            await ctx.send("No corpses found.")
+            return
+
+        lines = []
+        for channel, author, pin in corpses:
+            # Extract the mention from the message content
+            content = pin.content
+            mention_part = content.split(" corpse is here")[0].strip() if "corpse is here" in content else content
+            lines.append(f"💀 {mention_part} — {channel.mention}")
+
+        embed = discord.Embed(title="Corpse Locations", description="\n".join(lines), color=discord.Color.dark_grey())
+        await ctx.send(embed=embed)
+
     @commands.command()
     async def addrole(self, ctx, role: discord.Role, *members):
         """Give a role to one or more members."""
@@ -1152,8 +1268,8 @@ class Utility(commands.Cog):
         await ctx.send(embed=prompt, view=view)
 
     @commands.command(name="skipnight")
-    async def skipnight(self, ctx, min_votes: int):
-        """Start a vote to skip the night phase."""
+    async def skipnight(self, ctx, min_votes: int, *words):
+        """Start a vote to skip the night phase. Usage: .skipnight <votes> [custom text]"""
 
         guild_data = load_guild_data(ctx.guild.id)
 
@@ -1200,10 +1316,12 @@ class Utility(commands.Cog):
             "pinged": False
         }
 
+        title = " ".join(words) if words else "🌙 Vote to Skip the Night"
+
         progress = "⬛" * alive_count
 
         embed = discord.Embed(
-            title="🌙 Vote to Skip the Night",
+            title=title,
             description=(
                 f"{progress}\n\n"
                 f"**0/{min_votes}** votes needed\n"
@@ -1217,7 +1335,7 @@ class Utility(commands.Cog):
             text="Votes are anonymous • Village Game"
         )
 
-        view = SkipNightView(session)
+        view = SkipNightView(session, title=title)
 
         await announcements_channel.send(
             content=alive_role.mention if alive_role else "",
