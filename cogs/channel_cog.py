@@ -133,28 +133,25 @@ class ChannelMap(commands.Cog):
         if not category:
             return []
 
-        # First pass: collect all qualifying members across channels
-        all_members = {}
+        # Use guild.members (authoritative) instead of ch.members (cache-dependent)
+        # This matches .who's approach but applied server-wide
         channels_raw = []
         for ch in category.text_channels:
             if ch.name == "duplicate-this":
                 continue
             member_ids = []
-            for member in ch.members:
+            for member in guild.members:
                 if member.bot:
                     continue
-                has_send = ch.permissions_for(member).send_messages
-                if not has_send:
+                perms = ch.permissions_for(member)
+                if not perms.send_messages:
                     continue
                 has_alive = alive_role is not None and alive_role in member.roles
                 has_alt = alt_role is not None and alt_role in member.roles
                 has_dead = dead_role is not None and dead_role in member.roles
                 if not (has_alive or has_alt or has_dead):
                     continue
-                if member.id in all_members:
-                    continue
                 member_ids.append(member.id)
-                all_members[member.id] = member
             everyone_overwrites = ch.overwrites_for(guild.default_role)
             channels_raw.append({
                 "name": ch.name,
@@ -162,6 +159,12 @@ class ChannelMap(commands.Cog):
                 "hidden": everyone_overwrites.send_messages is False,
                 "channel": ch,
             })
+
+        # Collect all unique member objects for avatar fetching
+        all_member_ids = set()
+        for ch_raw in channels_raw:
+            all_member_ids.update(ch_raw["member_ids"])
+        all_members = {m.id: m for m in guild.members if m.id in all_member_ids}
 
         # Fetch all avatars concurrently
         avatar_map = {}

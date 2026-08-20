@@ -60,6 +60,12 @@ class TestBirthday:
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
 
+    def test_birthdays_alias_bds(self):
+        """Verify birthdays has 'bds' as an alias."""
+        method = getattr(bday.Birthday, 'birthdays')
+        aliases = getattr(method, 'aliases', [])
+        assert 'bds' in aliases
+
     def test_helpbday_exists(self):
         """Verify helpbday command exists on the cog."""
         assert hasattr(bday.Birthday, 'helpbday')

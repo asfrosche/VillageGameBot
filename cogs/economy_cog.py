@@ -12,13 +12,15 @@ from cogs.data_utils import (
     load_guild_data,
     save_guild_data,
 )
-from utils.bot_db import (
+from utils.economy_db import (
     add_inventory_item_channel,
     add_shop_item,
+    buy_shop_item,
     clear_channel_inventory,
     get_economy_account,
     get_economy_channel_balance,
     get_inventory_channel,
+    get_removed_default_items,
     get_shop_item_by_name,
     get_shop_items,
     get_top_economy_channels,
@@ -269,7 +271,7 @@ class InventoryView(View):
 
         done = asyncio.Event()
         delivered = False
-        view = View()
+        view = View(timeout=300)
 
         for chunk_start in range(0, len(members), 25):
             chunk = members[chunk_start:chunk_start + 25]
@@ -351,12 +353,19 @@ class InventoryView(View):
             view=view,
             ephemeral=True,
         )
-        await done.wait()
+        try:
+            await asyncio.wait_for(done.wait(), timeout=300)
+        except asyncio.TimeoutError:
+            pass
         return delivered
 
     async def _do_broom(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        houses_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("houses_category_name"))
+        if interaction.channel.category != houses_cat:
+            await interaction.response.send_message("🧹 Broom can only be used in a House channel.", ephemeral=True)
+            return False
         try:
-            guild_data = load_guild_data(interaction.guild_id)
             await interaction.response.defer(ephemeral=True)
             prompt = await interaction.channel.send(
                 embed=plain_embed(
@@ -466,9 +475,8 @@ class InventoryView(View):
 
     async def _do_peephole(self, interaction: discord.Interaction) -> bool:
         guild_data = load_guild_data(interaction.guild_id)
-        houses_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("houses_category_name"))
-        if interaction.channel.category != houses_cat:
-            await interaction.response.send_message("🔭 Peep Hole can only be used in a House channel. Use `.use peephole` from the house you want to activate it in.", ephemeral=True)
+        if not _is_houses_category(interaction, guild_data=guild_data):
+            await interaction.response.send_message("🔭 Peep Hole can only be used in a House channel.", ephemeral=True)
             return False
 
         alive_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("alive_role_name"))
@@ -611,8 +619,11 @@ class ShopView(View):
                 f"Need **{item['price']:,}**, have **{bal:,}**.", ephemeral=True
             )
 
-        update_economy_channel_balance(self.guild_id, self.channel_id, -item["price"])
-        new_qty = add_inventory_item_channel(self.guild_id, self.channel_id, item["id"], 1)
+        ok, new_qty = buy_shop_item(self.guild_id, self.channel_id, item["id"], item["price"], 1)
+        if not ok:
+            return await interaction.response.send_message(
+                "Purchase failed. That item may have just been removed from the shop.", ephemeral=True
+            )
 
         await interaction.response.send_message(
             f"Bought **{item['name']}** for **{item['price']:,}**. ×{new_qty}", ephemeral=True
@@ -724,8 +735,9 @@ class Economy(commands.Cog):
     async def _ensure_default_items(self, guild: discord.Guild) -> None:
         items = get_shop_items(guild.id)
         existing_names = {i["name"] for i in items}
+        removed = get_removed_default_items(guild.id)
         for item in DEFAULT_SHOP_ITEMS:
-            if item["name"] in existing_names:
+            if item["name"] in existing_names or item["name"] in removed:
                 continue
             add_shop_item(
                 guild.id,
@@ -876,8 +888,12 @@ class Economy(commands.Cog):
         if cost > bal:
             return await ctx.send(f"You don't have enough coins. You need **{cost:,}**, have **{bal:,}**.")
 
-        update_economy_channel_balance(ctx.guild.id, ctx.channel.id, -cost)
-        new_qty = add_inventory_item_channel(ctx.guild.id, ctx.channel.id, item["id"], quantity)
+        ok, new_qty = buy_shop_item(ctx.guild.id, ctx.channel.id, item["id"], item["price"], quantity)
+        if not ok:
+            still_exists = any(i["id"] == item["id"] for i in get_shop_items(ctx.guild.id))
+            if not still_exists:
+                return await ctx.send("Item not found. Use a part of the name (e.g. `.buy fumo`).")
+            return await ctx.send(f"You don't have enough coins. You need **{cost:,}**, have **{bal:,}**.")
 
         embed = success_embed(
             title="✅ Purchase successful",
@@ -1015,7 +1031,14 @@ class Economy(commands.Cog):
                 return await ctx.send("Price must be >= 0.")
             ok = update_shop_item_by_name(ctx.guild.id, item_name, price=val)
         elif field == "name":
-            ok = update_shop_item_by_name(ctx.guild.id, item_name, name=new_value.strip())
+            new_name = new_value.strip()
+            if not new_name:
+                return await ctx.send("Item name cannot be empty.")
+            if update_shop_item_by_name(ctx.guild.id, item_name, name=new_name):
+                return await ctx.send("Updated **name** for that item.")
+            if get_shop_item_by_name(ctx.guild.id, item_name) is None:
+                return await ctx.send("Item not found. Use a part of the name.")
+            return await ctx.send("An item with that name already exists.")
         else:
             ok = update_shop_item_by_name(ctx.guild.id, item_name, description=new_value.strip())
         if not ok:
@@ -1305,7 +1328,7 @@ class Economy(commands.Cog):
                 deleted_ids.append(entry["channel_id"])
 
         for cid in deleted_ids:
-            update_economy_channel_balance(ctx.guild.id, cid, 0)
+            set_economy_channel_balance(ctx.guild.id, cid, 0)
 
         if not clean:
             return await ctx.send("No active rolechats with economy data.")
@@ -1658,6 +1681,9 @@ class Economy(commands.Cog):
                 qty = int(qty_str)
             except ValueError:
                 await ctx.send(f"Invalid quantity for `{pair}`.")
+                continue
+            if qty <= 0:
+                await ctx.send(f"Quantity for `{pair}` must be greater than 0.")
                 continue
             item = get_shop_item_by_name(ctx.guild.id, name_part)
             if not item:

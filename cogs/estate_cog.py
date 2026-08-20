@@ -203,6 +203,7 @@ class Estate(commands.Cog):
                 
             for member in ch.members:
                 if member.bot: continue
+                if not ch.permissions_for(member).send_messages: continue
                 
                 is_alive = alive_role in member.roles if alive_role else False
                 is_alt = alt_role in member.roles if alt_role else False

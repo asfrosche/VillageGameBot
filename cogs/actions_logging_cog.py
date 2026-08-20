@@ -94,14 +94,15 @@ class ActionButtons(ui.View):
 
 
 class CancelOnlyView(ui.View):
-    def __init__(self, user_embed: discord.Message, log_embed: discord.Message, user_embed_obj: Embed, log_embed_obj: Embed, timeout=86400):
+    def __init__(self, user_embed: discord.Message, log_embed: discord.Message, user_embed_obj: Embed, log_embed_obj: Embed, meta: dict, timeout=86400):
         super().__init__(timeout=timeout)
         self.user_embed = user_embed
         self.log_embed = log_embed
         self.user_embed_obj = user_embed_obj
         self.log_embed_obj = log_embed_obj
+        self.meta = meta
 
-    async def update_embed(self, interaction: discord.Interaction, status_text: str, color: int):
+    async def update_embed(self, interaction: discord.Interaction, status_text: str, color: int, store_done: bool):
         timestamp = datetime.now(timezone.utc).strftime("%d-%m %H:%M:%S")
         footer_text = f"{status_text} at {timestamp} by {interaction.user.display_name}"
 
@@ -112,10 +113,34 @@ class CancelOnlyView(ui.View):
         self.log_embed_obj.color = discord.Color(color)
         self.log_embed_obj.remove_author()
 
-        await interaction.response.edit_message(embed=self.user_embed_obj, view=None)
+        await interaction.response.edit_message(embed=self.log_embed_obj, view=None)
         await self.user_embed.edit(embed=self.user_embed_obj, view=None)
         await self.log_embed.edit(embed=self.log_embed_obj, view=None)
+
+        if store_done:
+            try:
+                insert_action_log(
+                    guild_id=self.meta["guild_id"],
+                    channel_id=self.meta["channel_id"],
+                    player_id=self.meta.get("player_id"),
+                    message=self.meta.get("message", "")[:1000],
+                    created_at=self.meta.get("created_at", datetime.now(timezone.utc)),
+                    marked_at=datetime.now(timezone.utc),
+                    marked_by_id=interaction.user.id,
+                )
+            except Exception:
+                pass
+
         self.stop()
+
+    @ui.button(label="Confirm", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm_button(self, interaction: discord.Interaction, button: ui.Button):
+        guild_data = load_guild_data(interaction.guild.id)
+        os_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("overseer_role_name"))
+        if os_role not in interaction.user.roles:
+            await interaction.response.send_message("Only overseers can confirm this action.", ephemeral=True)
+            return
+        await self.update_embed(interaction, "✅ Confirmed", 0x00FF00, True)
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.danger, emoji="❌")
     async def cancel_button(self, interaction: discord.Interaction, button: ui.Button):
@@ -133,7 +158,7 @@ class CancelOnlyView(ui.View):
         ):
             await interaction.response.send_message("You don't have permission to use this button.", ephemeral=True)
             return
-        await self.update_embed(interaction, "❌ Cancelled", 0xff0000)
+        await self.update_embed(interaction, "❌ Cancelled", 0xff0000, False)
 
 class ActionsLogging(commands.Cog):
     def __init__(self, bot):
@@ -224,6 +249,15 @@ class ActionsLogging(commands.Cog):
         await tag_message.delete()
 
         log_message = await log_channel.send(embed=embed_log)
+
+        log_jump_link = f" | [Jump To Action on #{log_channel.name}]({log_message.jump_url})"
+        embed_user.description = (
+            f"**Message:**\n{content}\n\n"
+            f"**Log Channel:** {log_channel.mention}\n"
+            f"**Time:** {timestamp}\n"
+            f"{jump_link}{pinned_link}{log_jump_link}"
+        )
+
         user_message = await message.channel.send(embed=embed_user)
 
         meta = {
@@ -245,7 +279,8 @@ class ActionsLogging(commands.Cog):
             user_embed=user_message,
             log_embed=log_message,
             user_embed_obj=embed_user,
-            log_embed_obj=embed_log
+            log_embed_obj=embed_log,
+            meta=meta,
         )
 
         await log_message.edit(view=log_view)

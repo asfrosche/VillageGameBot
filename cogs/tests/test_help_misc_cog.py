@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import discord
+from discord.ext import commands
 
 from cogs import help_misc_cog
 
@@ -488,3 +489,75 @@ class TestFirstMsg:
         await cog.firstmsg.callback(cog, ctx)
         ctx.send.assert_awaited_once()
         assert "No messages" in ctx.send.await_args[0][0]
+
+
+class TestCommandAutocorrect:
+    """Tests for the misspelled-command suggestion feature."""
+
+    @staticmethod
+    def _make_command(name, aliases=(), qualified_name=None):
+        cmd = MagicMock()
+        cmd.name = name
+        cmd.aliases = aliases
+        cmd.qualified_name = qualified_name or name
+        return cmd
+
+    def _make_cog(self, commands):
+        bot = MagicMock()
+        bot.walk_commands.return_value = commands
+        return help_misc_cog.Other(bot)
+
+    def test_suggest_corrects_misspelling(self):
+        cog = self._make_cog([
+            self._make_command("calendar"),
+            self._make_command("role"),
+            self._make_command("vote"),
+        ])
+        assert cog._suggest_commands("calender") == ["calendar"]
+
+    def test_suggest_matches_alias(self):
+        cog = self._make_cog([
+            self._make_command("pendingknock", aliases=["knocks"]),
+        ])
+        assert cog._suggest_commands("knok") == ["pendingknock"]
+
+    def test_suggest_empty_for_unrelated_word(self):
+        cog = self._make_cog([
+            self._make_command("calendar"),
+            self._make_command("role"),
+        ])
+        assert cog._suggest_commands("xyzzy") == []
+
+    def test_suggest_requires_first_letter_for_short_words(self):
+        cog = self._make_cog([
+            self._make_command("add"),
+            self._make_command("role"),
+        ])
+        assert cog._suggest_commands("alt") == []
+
+    @pytest.mark.asyncio
+    async def test_listener_sends_suggestion(self):
+        cog = self._make_cog([
+            self._make_command("calendar"),
+            self._make_command("role"),
+        ])
+        ctx = MagicMock()
+        ctx.author.bot = False
+        ctx.invoked_with = "calender"
+        ctx.prefix = "."
+        ctx.send = AsyncMock()
+        error = commands.CommandNotFound("Command \"calender\" is not found")
+        await cog.on_command_error(ctx, error)
+        ctx.send.assert_awaited_once()
+        assert "calendar" in ctx.send.await_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_listener_ignores_other_errors(self):
+        cog = self._make_cog([self._make_command("calendar")])
+        ctx = MagicMock()
+        ctx.author.bot = False
+        ctx.invoked_with = "calender"
+        ctx.send = AsyncMock()
+        error = ValueError("boom")
+        await cog.on_command_error(ctx, error)
+        ctx.send.assert_not_called()

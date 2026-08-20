@@ -1,11 +1,22 @@
 import os
 import shlex
 import random
+import asyncio
 import discord
 from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from zoneinfo import ZoneInfo
 from cogs.data_utils import load_guild_data
+
+# channel_id -> partner_channel_id. Kept as a flat module-level dict so
+# multiple independent radio links (e.g. 1<->2 and 3<->4) can coexist:
+# each channel appears as a key in at most one active link at a time.
+active_radios = {}
+
+# channel_id -> asyncio.Task that will auto-close the link after 10 minutes.
+# Both channels of a link point to the SAME task object, so cancelling it
+# via either channel (e.g. from .stopradio) cancels the auto-expiry once.
+radio_tasks = {}
 
 class Privatecommands(commands.Cog):
     def __init__(self, bot):
@@ -38,6 +49,166 @@ class Privatecommands(commands.Cog):
         sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         result = "\n".join([f"**{user.display_name}**: {count}" for user, count in sorted_counts])
         await ctx.send(f"📊 {channel.mention} stats:\n{result}")
+
+    @commands.command(name="radio")
+    @commands.guild_only()
+    async def radio(self, ctx, channel: discord.TextChannel):
+        """
+        Usage: .radio #canale
+        Collega il canale corrente e #canale per 10 minuti: ogni messaggio
+        scritto in uno dei due viene inoltrato anonimamente (solo contenuto
+        ed eventuali allegati, senza indicare l'autore) nell'altro.
+        """
+        origin = ctx.channel
+
+        if channel.id == origin.id:
+            await ctx.send("❌ Non puoi collegare un canale con se stesso.")
+            return
+
+        if origin.id in active_radios or channel.id in active_radios:
+            await ctx.send("❌ Uno dei due canali è già impegnato in un collegamento radio attivo.")
+            return
+
+        me_origin = origin.guild.me
+        me_target = channel.guild.me
+        if not origin.permissions_for(me_origin).send_messages or not channel.permissions_for(me_target).send_messages:
+            await ctx.send("❌ Non ho i permessi per inviare messaggi in uno dei due canali.")
+            return
+
+        active_radios[origin.id] = channel.id
+        active_radios[channel.id] = origin.id
+
+        async def end_link(origin_id, partner_id, delay):
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                # Interrotto in anticipo (es. .stopradio): la pulizia e il
+                # messaggio di chiusura li gestisce già chi ha cancellato.
+                return
+            # Rimuove solo se il collegamento è ancora quello originale
+            # (evita di cancellare un link diverso creato nel frattempo)
+            if active_radios.get(origin_id) == partner_id:
+                del active_radios[origin_id]
+            if active_radios.get(partner_id) == origin_id:
+                del active_radios[partner_id]
+            radio_tasks.pop(origin_id, None)
+            radio_tasks.pop(partner_id, None)
+            origin_ch = self.bot.get_channel(origin_id)
+            partner_ch = self.bot.get_channel(partner_id)
+            for ch in (origin_ch, partner_ch):
+                if ch is None:
+                    continue
+                try:
+                    await ch.send("📻 Il collegamento radio è terminato.")
+                except discord.Forbidden:
+                    pass
+
+        link_task = self.bot.loop.create_task(end_link(origin.id, channel.id, 600))
+        radio_tasks[origin.id] = link_task
+        radio_tasks[channel.id] = link_task
+
+        await ctx.send(
+            f"📻 Collegamento radio attivato tra questo canale e {channel.mention} per 10 minuti. "
+            "I messaggi scritti in uno dei due canali verranno inoltrati anonimamente nell'altro."
+        )
+        try:
+            await channel.send(
+                f"📻 Collegamento radio attivato tra questo canale e {origin.mention} per 10 minuti. "
+                "I messaggi scritti in uno dei due canali verranno inoltrati anonimamente nell'altro."
+            )
+        except discord.Forbidden:
+            pass
+
+    @radio.error
+    async def radio_error(self, ctx, error):
+        if isinstance(error, commands.ChannelNotFound):
+            await ctx.send("❌ Canale non trovato. Usa una menzione tipo `.radio #canale`.")
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("❌ Uso corretto: `.radio #canale`.")
+        elif isinstance(error, commands.NoPrivateMessage):
+            await ctx.send("❌ Questo comando funziona solo nei server.")
+        else:
+            raise error
+
+    @commands.command(name="stopradio")
+    @commands.guild_only()
+    async def stopradio(self, ctx, channel: discord.TextChannel = None):
+        """
+        Usage: .stopradio [#canale]
+        Interrompe anticipatamente un collegamento radio attivo, prima
+        della scadenza automatica dei 10 minuti. Se non specifichi un
+        canale viene usato quello corrente. Puoi indicare uno qualsiasi
+        dei due canali "accoppiati": la connessione viene comunque
+        eliminata da entrambi i lati.
+        """
+        target = channel or ctx.channel
+
+        partner_id = active_radios.get(target.id)
+        if partner_id is None:
+            await ctx.send("❌ Nessun collegamento radio attivo su questo canale.")
+            return
+
+        origin_id = target.id
+
+        active_radios.pop(origin_id, None)
+        active_radios.pop(partner_id, None)
+
+        # Le due chiavi puntano allo stesso task: basta cancellarlo una volta.
+        link_task = radio_tasks.pop(origin_id, None)
+        radio_tasks.pop(partner_id, None)
+        if link_task is not None:
+            link_task.cancel()
+
+        origin_ch = self.bot.get_channel(origin_id)
+        partner_ch = self.bot.get_channel(partner_id)
+        for ch in (origin_ch, partner_ch):
+            if ch is None:
+                continue
+            try:
+                await ch.send("📻 Il collegamento radio è stato interrotto manualmente.")
+            except discord.Forbidden:
+                pass
+
+    @stopradio.error
+    async def stopradio_error(self, ctx, error):
+        if isinstance(error, commands.ChannelNotFound):
+            await ctx.send("❌ Canale non trovato. Usa una menzione tipo `.stopradio #canale`.")
+        elif isinstance(error, commands.NoPrivateMessage):
+            await ctx.send("❌ Questo comando funziona solo nei server.")
+        else:
+            raise error
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        # Evita loop: ignora messaggi del bot stesso e messaggi da webhook
+        if message.author.bot or message.webhook_id is not None:
+            return
+        if message.guild is None:
+            return
+        partner_id = active_radios.get(message.channel.id)
+        if partner_id is None:
+            return
+        partner_channel = self.bot.get_channel(partner_id)
+        if partner_channel is None:
+            return
+
+        content = message.content or None
+        files = []
+        for attachment in message.attachments:
+            try:
+                files.append(await attachment.to_file())
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+        if content is None and not files:
+            return
+
+        try:
+            await partner_channel.send(content=content, files=files or None)
+        except discord.Forbidden:
+            pass
+        except discord.HTTPException:
+            pass
 
     cute_gifs = ["https://media1.tenor.com/m/cjIZE-yQloAAAAAC/engage-kiss-anime-kiss.gif", "https://media1.tenor.com/m/9OV4Q-nMTxsAAAAC/yosuga-no-sora-anime-kiss.gif", "https://media1.tenor.com/m/iVKQga_D3mYAAAAC/kiss-anime-couple.gif", "https://media1.tenor.com/m/2tB89ikESPEAAAAC/kiss-kisses.gif", "https://media1.tenor.com/m/APN_rYYwVCQAAAAC/runa-shirakawa-ryuuto-kashima.gif", "https://media1.tenor.com/m/b7DWF8ecBkIAAAAC/kiss-anime-anime.gif", "https://media1.tenor.com/m/_X0Fb3lhi3AAAAAC/anime.gif", "https://media1.tenor.com/m/9u2vmryDP-cAAAAC/horimiya-animes.gif", "https://media.tenor.com/OEPq5qCDF24AAAAM/anime-kiss.gif"]
 
@@ -77,7 +248,7 @@ class Privatecommands(commands.Cog):
                 emb.set_footer(text="Village Game")
             await ctx.send(embed=emb)
         else:
-            await ctx.send("Prr")
+            await ctx.send("you don't have a butthole")
 
     @commands.command()
     async def fake(self, ctx, user: discord.User = None, *, content: str):

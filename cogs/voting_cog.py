@@ -1,10 +1,146 @@
 import re
+import time
 import asyncio
 import discord
 import datetime
-from datetime import datetime
+from datetime import datetime, timedelta
 from discord.ext import commands
 from cogs.data_utils import load_guild_data, save_guild_data
+
+# Duration of a public execution vote ("letale fisica" -> lynch vote), in minutes
+EXECUTION_VOTE_MINUTES = 15
+# Solo in memoria: si perde a ogni riavvio, non tocca mai guild_data.
+active_executions = {}
+
+class ExecutionView(discord.ui.View):
+    """Sì/No buttons for a public execution vote.
+
+    Several execution votes can run at the same time, one per target, tracked
+    separately in the in-memory active_executions dict (never guild_data, never
+    written to disk - a restart loses any vote in progress by design). Only
+    members with the guild's 'alive' role can vote, and votes can be changed.
+    Nothing about the tally is ever shown live: when the vote ends, its record
+    is dropped and the full breakdown is posted once to the private
+    overseer-discussion channel.
+    """
+
+    def __init__(self, bot, guild_id: int, target_id: int):
+        super().__init__(timeout=EXECUTION_VOTE_MINUTES * 60)
+        self.bot = bot
+        self.guild_id = guild_id
+        self.target_id = target_id
+        self.message: discord.Message | None = None
+
+    async def _handle_vote(self, interaction: discord.Interaction, value: bool):
+        guild_data = load_guild_data(self.guild_id)
+        executions = active_executions.get(self.guild_id, {})
+        execution = executions.get(str(self.target_id))
+        if not execution or time.time() >= execution.get("end_timestamp", 0):
+            await interaction.response.send_message("Questa votazione non è più attiva.", ephemeral=True)
+            return
+        alive_role = discord.utils.get(interaction.guild.roles, name=guild_data["alive_role_name"])
+        if alive_role is None or alive_role not in interaction.user.roles:
+            await interaction.response.send_message("Non puoi votare in questa votazione.", ephemeral=True)
+            return
+        voter_id = str(interaction.user.id)
+        previous = execution["votes"].get(voter_id)
+        execution["votes"][voter_id] = value
+        if previous is None:
+            msg = "Voto registrato."
+        elif previous != value:
+            msg = "Voto aggiornato."
+        else:
+            msg = "Hai già votato così."
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @discord.ui.button(label="Sì", style=discord.ButtonStyle.success)
+    async def vote_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle_vote(interaction, True)
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
+    async def vote_no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle_vote(interaction, False)
+
+    async def on_timeout(self):
+        executions = active_executions.get(self.guild_id, {})
+        execution = executions.get(str(self.target_id))
+        if not execution:
+            return
+
+        guild = self.bot.get_guild(self.guild_id)
+        target = guild.get_member(self.target_id) if guild else None
+        target_text = target.mention if target else "Il giocatore"
+
+        alive_members = []
+        yes_names, no_names, non_voters = [], [], []
+        threshold, executed = 0, False
+        try:
+            guild_data = load_guild_data(self.guild_id) if guild else None
+            alive_role = (
+                discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
+                if guild_data
+                else None
+            )
+            alive_members = alive_role.members if alive_role else []
+            alive_ids = {m.id for m in alive_members}
+
+            for uid, v in execution["votes"].items():
+                if int(uid) not in alive_ids:
+                    continue
+                member = guild.get_member(int(uid)) if guild else None
+                name = member.display_name if member else f"ID {uid}"
+                (yes_names if v else no_names).append(name)
+            non_voters = [m.display_name for m in alive_members if str(m.id) not in execution["votes"]]
+
+            threshold = len(alive_members) // 2 + 1
+            executed = len(alive_members) > 0 and len(yes_names) >= threshold
+        except Exception:
+            # Never let a bug here leave the vote stuck "active" forever -
+            # log it (visible in the bot's console/logs) and fall through
+            # with the safe defaults above so cleanup below still runs.
+            import traceback
+            print(f"[execution] on_timeout failed for target {self.target_id} in guild {self.guild_id}:")
+            traceback.print_exc()
+
+        # Drop the record and disable the buttons unconditionally - even if
+        # the tally above failed, the vote must not stay open.
+        del executions[str(self.target_id)]
+        for child in self.children:
+            child.disabled = True
+
+        if self.message:
+            result_embed = discord.Embed(
+                title="⚖️ Esecuzione conclusa",
+                description=("A breve vi diremo i risultati"),
+                color=0xff3fb9,
+            )
+            result_embed.set_footer(text="Village Game")
+            try:
+                await self.message.edit(embed=result_embed, view=self)
+            except discord.HTTPException:
+                pass
+
+        # Full breakdown (counts + who voted what) goes only here, once, to the
+        # private admin channel - never anywhere public, never kept in storage.
+        overseer_channel_name = "overseer-discussion"
+        overseer_channel = discord.utils.get(guild.channels, name=overseer_channel_name) if guild else None
+        if overseer_channel:
+            detail_embed = discord.Embed(
+                title=f"Risultato voto: {target.display_name if target else 'sconosciuto'}",
+                color=0xff3fb9,
+                timestamp=datetime.now(),
+            )
+            detail_embed.add_field(name="Esito", value="Sì ha vinto" if executed else "No ha vinto", inline=False)
+            detail_embed.add_field(name="Quorum necessario", value=f"{threshold} / {len(alive_members)}", inline=False)
+            detail_embed.add_field(name=f"Voti Sì ({len(yes_names)})", value="\n".join(yes_names) or "—", inline=True)
+            detail_embed.add_field(name=f"Voti No ({len(no_names)})", value="\n".join(no_names) or "—", inline=True)
+            detail_embed.add_field(name=f"Non votanti ({len(non_voters)})", value="\n".join(non_voters) or "—", inline=False)
+            detail_embed.set_footer(text="Village Game")
+            try:
+                await overseer_channel.send(embed=detail_embed)
+            except discord.HTTPException:
+                pass
+
 
 class Voting(commands.Cog):
     def __init__(self, bot):
@@ -548,3 +684,69 @@ class Voting(commands.Cog):
                 await ctx.send("Vote count channel not found")
         else:
             await ctx.send("Guild data not loaded")
+
+    # ---- Execution vote ("letali fisiche" mechanic) ----
+
+    async def _notify(self, channel: discord.abc.Messageable, text: str, delay: int = 8):
+        """Send a short-lived notice so replies don't clutter the channel."""
+        try:
+            msg = await channel.send(text)
+            await asyncio.sleep(delay)
+            await msg.delete()
+        except discord.HTTPException:
+            pass
+
+    @commands.command(name="execution", aliases=["patibolo"])
+    async def execution(self, ctx, target: discord.Member):
+        """Start a public execution vote for a player on the gallows (admin only).
+
+        Multiple execution votes can run at the same time, one per target -
+        they're tracked separately and never interfere with each other.
+        """
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
+
+        if not ctx.author.guild_permissions.administrator:
+            return
+
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return
+
+        announcement_channel_name = guild_data.get("announcements_channel_name")
+        announcement_channel = discord.utils.get(ctx.guild.channels, name=announcement_channel_name)
+        if not announcement_channel:
+            await self._notify(ctx.channel, f"Canale annunci `{announcement_channel_name}` non trovato.")
+            return
+
+        overseer_channel_name = "overseer-discussion"
+        if not discord.utils.get(ctx.guild.channels, name=overseer_channel_name):
+            await self._notify(ctx.channel, f"Canale privato `{overseer_channel_name}` non trovato.")
+            return
+
+        executions = active_executions.setdefault(ctx.guild.id, {})
+        if str(target.id) in executions:
+            await self._notify(ctx.channel, f"C'è già una votazione di esecuzione attiva per {target.display_name}.")
+            return
+
+        end_timestamp = time.time() + EXECUTION_VOTE_MINUTES * 60
+        embed = discord.Embed(
+            title="⚖️ Esecuzione",
+            description=f"{target.mention} è sul patibolo.\nVotate entro <t:{int(end_timestamp)}:R>.",
+            color=0xff3fb9,
+        )
+        embed.set_footer(text="Village Game")
+
+        view = ExecutionView(self.bot, ctx.guild.id, target.id)
+        message = await announcement_channel.send(embed=embed, view=view)
+        view.message = message
+
+        executions[str(target.id)] = {
+            "target_id": target.id,
+            "channel_id": announcement_channel.id,
+            "message_id": message.id,
+            "votes": {},
+            "end_timestamp": end_timestamp,
+        }

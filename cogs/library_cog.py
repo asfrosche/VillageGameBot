@@ -217,6 +217,51 @@ class LibraryDatabase:
                   player_id, sponsor_name, sponsor_id, description1))
             conn.commit()
 
+    def import_roles_atomic(self, game_number: int, game_name: str, roles: list[dict]) -> int:
+        """Import a complete approved game in one SQLite transaction."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN")
+                cursor.execute(
+                    "SELECT COALESCE(MAX(role_id), 0) FROM roles WHERE game_number = ?",
+                    (game_number,),
+                )
+                next_role_id = int(cursor.fetchone()[0]) + 1
+                for role in roles:
+                    role_id = next_role_id
+                    next_role_id += 1
+                    cursor.execute(
+                        """
+                        INSERT OR REPLACE INTO roles
+                            (game_number, game_name, role_id, role_name, team,
+                             player_name, player_id, sponsor_name, sponsor_id,
+                             description1, description2, description3, description4,
+                             win, count, mvp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0)
+                        """,
+                        (
+                            game_number,
+                            game_name,
+                            role_id,
+                            role["role_name"],
+                            role["team"],
+                            role.get("player_name"),
+                            role.get("player_id"),
+                            role.get("sponsor_name"),
+                            role.get("sponsor_id"),
+                            role.get("description1"),
+                            role.get("description2"),
+                            role.get("description3"),
+                            role.get("description4"),
+                        ),
+                    )
+                conn.commit()
+                return len(roles)
+            except Exception:
+                conn.rollback()
+                raise
+
     def update_field(self, game_number: int, role_id: int, field: str, value):
         """Update a specific field for a role."""
         valid_fields = [

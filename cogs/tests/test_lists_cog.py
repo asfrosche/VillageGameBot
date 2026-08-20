@@ -80,6 +80,22 @@ class TestLists:
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
 
+    def test_rollhouses_exists(self):
+        """Verify rollhouses command exists on the cog."""
+        assert hasattr(lists_cog.Lists, 'rollhouses')
+
+    def test_rollhouses_has_help(self):
+        """Verify rollhouses command has help text."""
+        method = getattr(lists_cog.Lists, 'rollhouses')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    def test_rollhouses_alias(self):
+        """Verify rollhouses has 'rh' as an alias."""
+        method = getattr(lists_cog.Lists, 'rollhouses')
+        aliases = getattr(method, 'aliases', [])
+        assert 'rh' in aliases
+
     def test_deadlist_exists(self):
         """Verify deadlist command exists on the cog."""
         assert hasattr(lists_cog.Lists, 'deadlist')

@@ -1,357 +1,220 @@
-import re
-from datetime import datetime, timezone
-from typing import Optional
-
 import discord
 from discord.ext import commands
-from discord.ui import View, Button, Select
+from discord.ui import View, Button, Select, Modal, TextInput
+from datetime import datetime, timezone
+import json
+import os
 
-from cogs.actions_logging_cog import ActionButtons, CancelOnlyView
-from cogs.data_utils import load_guild_data, save_guild_data
-from utils.bot_db import (
-    adjust_visits,
-    get_actions_for_channel,
-    get_role_abilities,
-    get_role_dashboard,
-    insert_action_log,
-    modify_active_ability,
-    modify_passive_ability,
-    replace_active_abilities,
-    replace_passive_abilities,
-    set_visit_block,
-    set_visits,
-    upsert_role_dashboard,
-)
-from utils.embeds import info_embed, success_embed, error_embed, plain_embed
+CONFIG_FILE_PATH = "db/roles_config.json"
 
+# ------------------------------------------------------------------ #
+# Gestione JSON (Lettura, Salvataggio e Helpers Status)
+# ------------------------------------------------------------------ #
 
-# ─────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────
+def load_json_data() -> dict:
+    if not os.path.exists(CONFIG_FILE_PATH):
+        return {}
+    try:
+        with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[ERROR] Impossibile caricare {CONFIG_FILE_PATH}: {e}")
+        return {}
 
-def _fmt_ts(dt) -> str:
-    """Format datetime as dd-mm hh:mm:ss (UTC)."""
-    if hasattr(dt, "strftime"):
-        return dt.strftime("%d-%m %H:%M:%S")
-    if isinstance(dt, str):
-        try:
-            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
-            return dt.strftime("%d-%m %H:%M:%S")
-        except Exception:
-            return str(dt)[:16]
-    return str(dt)[:19]
+def save_json_data(data: dict):
+    try:
+        with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        print(f"[ERROR] Impossibile salvare {CONFIG_FILE_PATH}: {e}")
 
+def get_channel_config(channel_id: int) -> dict:
+    data = load_json_data()
+    return data.get(str(channel_id), {})
 
-EMBED_COLOR_FUCSIA = 0xFF3FB9
+def update_channel_config(channel_id: int, channel_data: dict):
+    data = load_json_data()
+    data[str(channel_id)] = channel_data
+    save_json_data(data)
 
+# --- HELPER DEDICATI AGLI STATUS ---
 
-def _get_current_house_names(guild: discord.Guild, guild_data: dict, rc_channel: discord.TextChannel) -> list[str]:
-    """Return house channel names where the RC's members (alive/dead/alt) currently have send_messages."""
-    houses_category = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
-    if not houses_category:
-        return []
-    alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
-    dead_role = discord.utils.get(guild.roles, name=guild_data.get("dead_role_name"))
-    alt_role = discord.utils.get(guild.roles, name=guild_data.get("alt_role_name"))
-    names = []
-    for member in rc_channel.members:
-        if (
-            not (alive_role and alive_role in member.roles)
-            and not (dead_role and dead_role in member.roles)
-            and not (alt_role and alt_role in member.roles)
-        ):
-            continue
-        for ch in houses_category.channels:
-            if ch.permissions_for(member).send_messages and ch.name not in names:
-                names.append(ch.name)
-    return names
-
-
-def _get_rc_channel(ctx: commands.Context, channel: Optional[discord.TextChannel]) -> discord.TextChannel:
-    """Resolve the target RoleChat channel.
-
-    Admins can target any channel. Non-admins are always restricted to their current channel.
-    """
-    if channel is not None and ctx.author.guild_permissions.administrator:
-        return channel
-    return ctx.channel
-
-
-def _rc_categories(guild: discord.Guild, guild_data: dict) -> set:
-    """Return the set of rolechat categories for this guild (may contain None entries — filter before use)."""
-    return {
-        discord.utils.get(guild.categories, name=guild_data.get("rc_category_name")),
-        discord.utils.get(guild.categories, name=guild_data.get("alt_category_name")),
-        discord.utils.get(guild.categories, name=guild_data.get("dead_rc_category_name")),
+def get_player_status(channel_id: int) -> dict:
+    """Restituisce il dizionario degli status per la RoleChat specificata."""
+    ch_config = get_channel_config(channel_id)
+    default_status = {
+        "protected": False,
+        "visit_blocked": False,
+        "role_blocked": False,
+        "wounded": False,
+        "custom_status": []
     }
+    return ch_config.get("status", default_status)
+
+def update_player_status(channel_id: int, status_key: str, value):
+    """Aggiorna uno specifico status per il canale specificato."""
+    ch_config = get_channel_config(channel_id)
+    if "status" not in ch_config:
+        ch_config["status"] = {
+            "protected": False,
+            "visit_blocked": False,
+            "role_blocked": False,
+            "wounded": False,
+            "custom_status": []
+        }
+    ch_config["status"][status_key] = value
+    update_channel_config(channel_id, ch_config)
 
 
-def _is_overseer(interaction: discord.Interaction, guild_data: dict | None) -> bool:
-    """Return True if the interaction user is an admin or has the overseer role."""
-    if interaction.user.guild_permissions.administrator:
+# Helpers per stato gilda/server
+def load_guild_data(guild_id: int) -> dict:
+    if os.path.exists("guild_data.json"):
+        with open("guild_data.json", "r", encoding="utf-8") as f:
+            return json.load(f).get(str(guild_id), {})
+    return {}
+
+def save_guild_data(guild_id: int, g_data: dict):
+    all_g = {}
+    if os.path.exists("guild_data.json"):
+        with open("guild_data.json", "r", encoding="utf-8") as f:
+            all_g = json.load(f)
+    all_g[str(guild_id)] = g_data
+    with open("guild_data.json", "w", encoding="utf-8") as f:
+        json.dump(all_g, f, indent=4)
+
+def _rc_categories(guild: discord.Guild, guild_data: dict) -> list:
+    cat_names = guild_data.get("rolechat_categories", [])
+    if not cat_names and "rc_category_name" in guild_data:
+        cat_names = [guild_data["rc_category_name"]]
+    return [c for c in guild.categories if c.name in cat_names]
+
+def _is_overseer(ctx_or_interaction, guild_data: dict) -> bool:
+    user = getattr(ctx_or_interaction, "user", None) or getattr(ctx_or_interaction, "author", None)
+    if not user:
+        return False
+    if user.guild_permissions.administrator:
         return True
-    if guild_data:
-        os_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("overseer_role_name"))
-        if os_role and os_role in interaction.user.roles:
-            return True
+    overseer_role_id = guild_data.get("overseer_role_id")
+    if overseer_role_id:
+        return any(r.id == overseer_role_id for r in user.roles)
+    overseer_role_name = guild_data.get("overseer_role_name")
+    if overseer_role_name:
+        return any(r.name == overseer_role_name for r in user.roles)
     return False
 
+def _get_current_house_names(guild: discord.Guild, guild_data: dict, rc_channel: discord.TextChannel) -> list:
+    houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
+    if not houses_cat:
+        return []
+    found_houses = []
+    for ch in houses_cat.channels:
+        if ch.permissions_for(rc_channel.guild.default_role).read_messages is False:
+            found_houses.append(ch.name)
+    return found_houses
 
-# ─────────────────────────────────────────────
-# Visit approval view
-# ─────────────────────────────────────────────
+def insert_action_log(guild_id: int, channel_id: int, player_id: int, message: str, created_at, marked_at, marked_by_id):
+    pass
 
-class VisitApprovalView(View):
-    def __init__(
-        self,
-        dashboard_cog: "Dashboard",
-        guild_id: int,
-        rc_channel_id: int,
-        target_channel_id: int,
-        requester_id: int,
-        visit_type: str,
-        house_name: str,
-        rc_pending_message: Optional[discord.Message] = None,
-        timeout: int = 86400,
-    ):
-        super().__init__(timeout=timeout)
-        self.dashboard_cog = dashboard_cog
-        self.guild_id = guild_id
-        self.rc_channel_id = rc_channel_id
-        self.target_channel_id = target_channel_id
-        self.requester_id = requester_id
-        self.visit_type = visit_type
-        self.house_name = house_name
-        self.message_id: int | None = None
-        self.rc_pending_message = rc_pending_message
 
-    async def _guard_overseer(self, interaction: discord.Interaction) -> bool:
-        """Send an ephemeral error and return False if the user isn't an overseer/admin."""
-        guild_data = load_guild_data(interaction.guild.id) if interaction.guild else None
-        if not _is_overseer(interaction, guild_data):
-            await interaction.response.send_message(
-                "You don't have permission to manage visits.",
-                ephemeral=True,
-            )
-            return False
-        return True
+# ------------------------------------------------------------------ #
+# Modal per Input Testuali (Arcade Gannon: Peaceful Zone)
+# ------------------------------------------------------------------ #
 
-    def _build_done_footer(self, interaction: discord.Interaction, symbol: str) -> str:
-        return (
-            f"{symbol} {'Done' if symbol == '✅' else 'Denied'} at "
-            f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} "
-            f"by {interaction.user.display_name}"
+class ArcadePeacefulZoneModal(Modal, title="Peaceful Zone — Accedi a Chat"):
+    chat_name = TextInput(
+        label="Nome della Chat Privata",
+        placeholder="Inserisci il nome esatto della chat...",
+        required=True,
+        max_length=100
+    )
+
+    def __init__(self, cog: "Dashboard", rc_channel: discord.TextChannel, ability: dict):
+        super().__init__()
+        self.cog = cog
+        self.rc_channel = rc_channel
+        self.ability = ability
+
+    async def on_submit(self, interaction: discord.Interaction):
+        input_name = self.chat_name.value.strip()
+        custom_msg = (
+            f"🕊️ **[Peaceful Zone]** Richiesta d'accesso inviata per la chat: `{input_name}`.\n"
+            f"*Gli Overseer verificheranno l'esistenza della chat e ti aggiungeranno se valida.*"
         )
-
-    async def _update_embeds(
-        self,
-        interaction: discord.Interaction,
-        color: int,
-        footer_text: str,
-    ) -> None:
-        """Edit both the log embed and the RC pending embed to the resolved state."""
-        if interaction.message and interaction.message.embeds:
-            embed = interaction.message.embeds[0]
-            embed.color = discord.Color(color)
-            embed.set_footer(text=footer_text)
-            embed.timestamp = None
-            await interaction.response.edit_message(embed=embed, view=None)
-        else:
-            await interaction.response.edit_message(view=None)
-
-        if self.rc_pending_message and self.rc_pending_message.embeds:
-            emb = self.rc_pending_message.embeds[0]
-            emb.color = discord.Color(color)
-            emb.set_footer(text=footer_text)
-            emb.timestamp = None
-            try:
-                await self.rc_pending_message.edit(embed=emb, view=None)
-            except Exception:
-                pass
-
-    async def _perform_visit(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        if not guild or guild.id != self.guild_id:
-            return await interaction.response.send_message(
-                "This visit request is no longer valid (guild mismatch).",
-                ephemeral=True,
-            )
-
-        guild_data = load_guild_data(guild.id)
-        if not guild_data:
-            return await interaction.response.send_message(
-                "Guild data not loaded; cannot execute visit.",
-                ephemeral=True,
-            )
-
-        rc_channel = guild.get_channel(self.rc_channel_id)
-        target_channel = guild.get_channel(self.target_channel_id)
-        if not isinstance(rc_channel, discord.TextChannel) or not isinstance(target_channel, discord.TextChannel):
-            return await interaction.response.send_message(
-                "Channels for this visit no longer exist.",
-                ephemeral=True,
-            )
-
-        from_house_names = _get_current_house_names(guild, guild_data, rc_channel)
-        from_str = ", ".join(from_house_names) if from_house_names else "—"
-
-        delta_normal = delta_forced = delta_stealth = 0
-        if self.visit_type == "normal":
-            delta_normal = -1
-        elif self.visit_type == "forced":
-            delta_forced = -1
-        elif self.visit_type == "stealth":
-            delta_stealth = -1
-
-        dash = get_role_dashboard(guild.id, rc_channel.id)
-        if dash:
-            updated = adjust_visits(
-                guild.id,
-                rc_channel.id,
-                delta_normal=delta_normal,
-                delta_forced=delta_forced,
-                delta_stealth=delta_stealth,
-            )
-            if not updated:
-                return await interaction.response.send_message(
-                    "Dashboard data not found for this channel; cannot execute visit.",
-                    ephemeral=True,
-                )
-
-        moving_cog = self.dashboard_cog.bot.get_cog("Moving")
-        if not moving_cog:
-            if dash:
-                adjust_visits(
-                    guild.id,
-                    rc_channel.id,
-                    delta_normal=-delta_normal,
-                    delta_forced=-delta_forced,
-                    delta_stealth=-delta_stealth,
-                )
-            return await interaction.response.send_message(
-                "Moving system not loaded; visit refunded." if dash else "Moving system not loaded.",
-                ephemeral=True,
-            )
-
-        dummy_message = interaction.message
-        ctx = await self.dashboard_cog.bot.get_context(dummy_message)
-        ctx.channel = rc_channel
-        ctx.author = interaction.user
-
-        try:
-            if self.visit_type == "normal":
-                await moving_cog.process_knock(ctx, target_channel, guild_data)
-            else:
-                is_stealth = self.visit_type == "stealth"
-                await moving_cog.process_move(ctx, target_channel, is_stealth=is_stealth, read_only=False)
-        except Exception:
-            if dash:
-                adjust_visits(
-                    guild.id,
-                    rc_channel.id,
-                    delta_normal=-delta_normal,
-                    delta_forced=-delta_forced,
-                    delta_stealth=-delta_stealth,
-                )
-            return await interaction.response.send_message(
-                "Error executing visit. Visit refunded." if dash else "Error executing visit.",
-                ephemeral=True,
-            )
-
-        try:
-            insert_action_log(
-                guild_id=guild.id,
-                channel_id=rc_channel.id,
-                player_id=self.requester_id,
-                message=f"visit from {from_str} to {target_channel.name}",
-                created_at=datetime.now(timezone.utc),
-                marked_at=datetime.now(timezone.utc),
-                marked_by_id=interaction.user.id,
-            )
-        except Exception:
-            pass
-
-        await self._update_embeds(
-            interaction,
-            color=0x00FF00,
-            footer_text=self._build_done_footer(interaction, "✅"),
-        )
-
-    @discord.ui.button(label="Allow visit", style=discord.ButtonStyle.success, emoji="✅")
-    async def allow_visit(self, interaction: discord.Interaction, button: Button):
-        if not await self._guard_overseer(interaction):
-            return
-        await self._perform_visit(interaction)
-        self.stop()
-
-    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger, emoji="❌")
-    async def deny_visit(self, interaction: discord.Interaction, button: Button):
-        if not await self._guard_overseer(interaction):
-            return
-        await self._update_embeds(
-            interaction,
-            color=0xFF0000,
-            footer_text=self._build_done_footer(interaction, "❌"),
-        )
-        self.stop()
+        await self.cog._commit_ability_usage(interaction, self.rc_channel, self.ability, f"Chat: {input_name}", custom_msg)
 
 
-# ─────────────────────────────────────────────
-# Template regexes
-# ─────────────────────────────────────────────
-
-TEMPLATE_NAME_RE = re.compile(r"^Name:\s*(.+)$", re.IGNORECASE)
-TEMPLATE_TEAM_RE = re.compile(r"^Team:\s*(.+)$", re.IGNORECASE)
-TEMPLATE_VISITS_RE = re.compile(
-    r"^Visits:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*$",
-    re.IGNORECASE,
-)
-TEMPLATE_PASSIVE_RE = re.compile(r"^Passive ability\s+\d+:\s*(.+)$", re.IGNORECASE)
-TEMPLATE_ACTIVE_RE = re.compile(
-    r"^Active ability\s+\d+:\s*([^,]+),\s*(.+)$",
-    re.IGNORECASE,
-)
-
-
-# ─────────────────────────────────────────────
-# Dashboard UI view
-# ─────────────────────────────────────────────
+# ------------------------------------------------------------------ #
+# Dashboard View (Pulsanti Giocatore + Gestione ALT)
+# ------------------------------------------------------------------ #
 
 class DashboardView(View):
-    def __init__(self, cog: "Dashboard", rc_channel: discord.TextChannel, invoker: discord.Member, timeout: int = 300):
+    def __init__(self, cog: "Dashboard", rc_channel: discord.TextChannel, timeout: int = 600):
         super().__init__(timeout=timeout)
         self.cog = cog
         self.rc_channel = rc_channel
-        self.invoker = invoker
 
     async def _guard(self, interaction: discord.Interaction) -> bool:
-        if interaction.user != self.invoker:
-            await interaction.response.send_message(
-                "This dashboard isn't yours. Run `.dashboard` in your own RoleChat.",
-                ephemeral=True,
-            )
+        guild = interaction.guild
+        guild_data = load_guild_data(guild.id)
+        
+        allowed_categories = _rc_categories(guild, guild_data)
+        if allowed_categories and interaction.channel.category not in allowed_categories:
+            await interaction.response.send_message("⛔ Puoi usare la Dashboard solo all'interno delle RoleChat!", ephemeral=True)
             return False
-        if not interaction.user.guild_permissions.administrator:
-            guild_data = load_guild_data(interaction.guild.id)
-            if not guild_data:
-                await interaction.response.send_message("Guild data not loaded.", ephemeral=True)
-                return False
-            allowed = _rc_categories(interaction.guild, guild_data)
-            if self.rc_channel.category not in allowed:
-                await interaction.response.send_message(
-                    "You can only use dashboard buttons inside RoleChats.",
-                    ephemeral=True,
-                )
-                return False
+
+        is_overseer = _is_overseer(interaction, guild_data)
+        has_channel_access = interaction.channel.permissions_for(interaction.user).read_messages
+
+        if not (is_overseer or has_channel_access):
+            await interaction.response.send_message("⛔ Non hai i permessi per interagire con questa Dashboard.", ephemeral=True)
+            return False
+
         return True
 
-    @discord.ui.button(label="Action", style=discord.ButtonStyle.primary, emoji="📋")
-    async def action_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Usa Abilità", style=discord.ButtonStyle.primary, emoji="✨")
+    async def ability_button(self, interaction: discord.Interaction, button: Button):
         if not await self._guard(interaction):
             return
-        await self.cog.handle_action_button(interaction, self.rc_channel)
+        await self.cog.handle_ability_button(interaction, self.rc_channel)
 
-    @discord.ui.button(label="Visit", style=discord.ButtonStyle.primary, emoji="🚪")
+    @discord.ui.button(label="Abilità ALT", style=discord.ButtonStyle.secondary, emoji="👥")
+    async def alt_info_button(self, interaction: discord.Interaction, button: Button):
+        if not await self._guard(interaction):
+            return
+
+        ch_config = get_channel_config(self.rc_channel.id)
+        alt_id = ch_config.get("linked_alt_channel_id") or ch_config.get("linked_main_channel_id")
+
+        if not alt_id:
+            return await interaction.response.send_message("ℹ️ Nessun ALT collegato a questo canale al momento.", ephemeral=True)
+
+        alt_channel = interaction.guild.get_channel(int(alt_id)) if str(alt_id).isdigit() else None
+        alt_config = get_channel_config(alt_id)
+        alt_name = alt_config.get("role_name", "ALT")
+
+        embed = discord.Embed(
+            title=f"👥 Scheda ALT — {alt_name}",
+            description=f"**Canale Dedicato:** {alt_channel.mention if alt_channel else 'Non trovato o impostato via ID'}\n"
+                        f"**Team:** `{alt_config.get('team', 'N/D')}`",
+            color=discord.Color.purple()
+        )
+
+        passives = alt_config.get("passives", [])
+        if passives:
+            pass_text = "\n".join([f"• **{p['name']}**: {p['desc']}" for p in passives])
+            embed.add_field(name="🛡️ Abilità Passive (ALT)", value=pass_text, inline=False)
+
+        abilities = alt_config.get("abilities", [])
+        if abilities:
+            ab_text = "\n".join([
+                f"• **{a.get('name', a['id'])}** `({a.get('category', 'N/D')})` [Usi: {a.get('uses', 0)}]\n  {a.get('desc', '')}"
+                for a in abilities
+            ])
+            embed.add_field(name="⚡ Abilità Attive (ALT)", value=ab_text, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Visita", style=discord.ButtonStyle.primary, emoji="🚪")
     async def visit_button(self, interaction: discord.Interaction, button: Button):
         if not await self._guard(interaction):
             return
@@ -361,506 +224,859 @@ class DashboardView(View):
     async def preset_button(self, interaction: discord.Interaction, button: Button):
         if not await self._guard(interaction):
             return
-        await self.cog.handle_preset_button(interaction, self.rc_channel)
+        await interaction.response.send_message("🎟️ Funzionalità Preset in arrivo.", ephemeral=True)
 
-    @discord.ui.button(label="Logging", style=discord.ButtonStyle.secondary, emoji="📜")
+    @discord.ui.button(label="Log Azioni", style=discord.ButtonStyle.secondary, emoji="📜")
     async def logging_button(self, interaction: discord.Interaction, button: Button):
         if not await self._guard(interaction):
             return
-        await self.cog.handle_logging_button(interaction, self.rc_channel)
+        await interaction.response.send_message("📜 Registro azioni caricato.", ephemeral=True)
 
 
-# ─────────────────────────────────────────────
-# Dashboard cog
-# ─────────────────────────────────────────────
+# ------------------------------------------------------------------ #
+# Cog Principale: Dashboard
+# ------------------------------------------------------------------ #
 
 class Dashboard(commands.Cog):
-    """Per-role dashboard with visits, abilities, presets and logging."""
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # ------------------------------------------------------------------ #
-    # Admin: settings & template
-    # ------------------------------------------------------------------ #
-
-    @commands.command(name="dashboardtoggle")
-    @commands.has_permissions(administrator=True)
-    async def dashboard_toggle(self, ctx: commands.Context, value: bool):
-        """Enable or disable the dashboard system in this server."""
-        guild_data = load_guild_data(ctx.guild.id)
-        if not guild_data:
-            return await ctx.send("Guild data not loaded.")
-        guild_data["dashboard_enabled"] = bool(value)
-        save_guild_data(ctx.guild.id, guild_data)
-        state = "enabled" if value else "disabled"
-        embed = success_embed(
-            title="Dashboard setting updated",
-            description=f"Player dashboard has been **{state}** for this server.",
-        )
-        await ctx.send(embed=embed)
-
-    @commands.command(name="setrole")
-    @commands.has_permissions(administrator=True)
-    async def setrole(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
-        """
-        Configure a RoleChat using the template.
-
-        Usage:
-          1) Write the template as a message.
-          2) Reply to it with `.setrole` (optionally `.setrole #rolechat`).
-        """
-        rc = _get_rc_channel(ctx, channel)
-        if ctx.message.reference and ctx.message.reference.resolved:
-            template_text = ctx.message.reference.resolved.content
-        else:
-            parts = ctx.message.content.split("\n", 1)
-            if len(parts) < 2:
-                return await ctx.send("Reply to a template message or include the template in the same message.")
-            template_text = parts[1]
-
-        lines = [line.strip() for line in template_text.splitlines() if line.strip()]
-        name = None
-        team = None
-        visits = (0, 0, 0)
-        passives: list[str] = []
-        actives: list[tuple[str, str]] = []
-
-        for line in lines:
-            if (m := TEMPLATE_NAME_RE.match(line)):
-                name = m.group(1).strip()
-                continue
-            if (m := TEMPLATE_TEAM_RE.match(line)):
-                team = m.group(1).strip()
-                continue
-            if (m := TEMPLATE_VISITS_RE.match(line)):
-                visits = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
-                continue
-            if (m := TEMPLATE_PASSIVE_RE.match(line)):
-                passives.append(m.group(1).strip())
-                continue
-            if (m := TEMPLATE_ACTIVE_RE.match(line)):
-                category = m.group(1).strip()
-                desc = m.group(2).strip()
-                actives.append((category, desc))
-                continue
-
-        if not name or not team:
-            return await ctx.send("Template must include at least `Name:` and `Team:`.")
-
-        guild_id = ctx.guild.id
-        channel_id = rc.id
-
-        upsert_role_dashboard(
-            guild_id,
-            channel_id,
-            name=name,
-            team=team,
-            visits_normal=visits[0],
-            visits_forced=visits[1],
-            visits_stealth=visits[2],
-        )
-        replace_passive_abilities(guild_id, channel_id, passives)
-        replace_active_abilities(guild_id, channel_id, actives)
-
-        embed = success_embed(
-            title="Role configured",
-            description=(
-                f"Role dashboard for {rc.mention} has been updated.\n"
-                f"**Name:** {name}\n"
-                f"**Team:** {team}\n"
-                f"**Visits:** normal={visits[0]}, forced={visits[1]}, stealth={visits[2]}"
-            ),
-        )
-        await ctx.send(embed=embed)
-
-    # Ability editing
-
-    @commands.command(name="addpassiveability")
-    @commands.has_permissions(administrator=True)
-    async def add_passive_ability(
-        self,
-        ctx: commands.Context,
-        channel: Optional[discord.TextChannel],
-        index: int,
-        *,
-        description: str,
-    ):
-        """Add or replace a passive ability at the given index."""
-        rc = _get_rc_channel(ctx, channel)
-        try:
-            current = modify_passive_ability(
-                ctx.guild.id,
-                rc.id,
-                index,
-                new_description=description,
-                remove=False,
-            )
-        except IndexError:
-            passives, _ = get_role_abilities(ctx.guild.id, rc.id)
-            if index != len(passives) + 1:
-                return await ctx.send("Invalid index for passive ability.")
-            passives.append(description)
-            replace_passive_abilities(ctx.guild.id, rc.id, passives)
-            current = passives
-
-        embed = success_embed(
-            title="Passive abilities updated",
-            description="\n".join(f"{i+1}. {p}" for i, p in enumerate(current)) or "None",
-        )
-        await ctx.send(embed=embed)
-
-    @commands.command(name="removepassiveability")
-    @commands.has_permissions(administrator=True)
-    async def remove_passive_ability(
-        self,
-        ctx: commands.Context,
-        channel: Optional[discord.TextChannel],
-        index: int,
-    ):
-        """Remove a passive ability at the given index."""
-        rc = _get_rc_channel(ctx, channel)
-        try:
-            current = modify_passive_ability(
-                ctx.guild.id,
-                rc.id,
-                index,
-                remove=True,
-            )
-        except IndexError:
-            return await ctx.send("Invalid index for passive ability.")
-
-        embed = success_embed(
-            title="Passive abilities updated",
-            description="\n".join(f"{i+1}. {p}" for i, p in enumerate(current)) or "None",
-        )
-        await ctx.send(embed=embed)
-
-    @commands.command(name="addactiveability")
-    @commands.has_permissions(administrator=True)
-    async def add_active_ability(
-        self,
-        ctx: commands.Context,
-        channel: Optional[discord.TextChannel],
-        index: int,
-        *,
-        payload: str,
-    ):
-        """
-        Add or replace an active ability at the given index.
-
-        Format: <category>, <description>
-        """
-        rc = _get_rc_channel(ctx, channel)
-        if "," not in payload:
-            return await ctx.send("Active ability format must be: `<category>, <description>`.")
-        category, desc = [p.strip() for p in payload.split(",", 1)]
-        try:
-            current = modify_active_ability(
-                ctx.guild.id,
-                rc.id,
-                index,
-                new_category=category,
-                new_description=desc,
-                remove=False,
-            )
-        except IndexError:
-            _, actives = get_role_abilities(ctx.guild.id, rc.id)
-            if index != len(actives) + 1:
-                return await ctx.send("Invalid index for active ability.")
-            actives.append((category, desc))
-            replace_active_abilities(ctx.guild.id, rc.id, actives)
-            current = actives
-
-        lines = [f"{i+1}. [{cat}] {text}" for i, (cat, text) in enumerate(current)]
-        embed = success_embed(
-            title="Active abilities updated",
-            description="\n".join(lines) or "None",
-        )
-        await ctx.send(embed=embed)
-
-    @commands.command(name="removeactiveability")
-    @commands.has_permissions(administrator=True)
-    async def remove_active_ability(
-        self,
-        ctx: commands.Context,
-        channel: Optional[discord.TextChannel],
-        index: int,
-    ):
-        """Remove an active ability at the given index."""
-        rc = _get_rc_channel(ctx, channel)
-        try:
-            current = modify_active_ability(
-                ctx.guild.id,
-                rc.id,
-                index,
-                remove=True,
-            )
-        except IndexError:
-            return await ctx.send("Invalid index for active ability.")
-
-        lines = [f"{i+1}. [{cat}] {text}" for i, (cat, text) in enumerate(current)]
-        embed = success_embed(
-            title="Active abilities updated",
-            description="\n".join(lines) or "None",
-        )
-        await ctx.send(embed=embed)
-
-    @commands.command(name="vb")
-    @commands.has_permissions(administrator=True)
-    async def visitblock(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
-        """
-        Toggle visit blocking for a RoleChat.
-
-        Usage: .vb #channel  (or just .vb inside the RoleChat)
-        """
-        rc = _get_rc_channel(ctx, channel)
-        dash = get_role_dashboard(ctx.guild.id, rc.id)
-        blocked = not dash["visit_blocked"] if dash else True
-        set_visit_block(ctx.guild.id, rc.id, blocked)
-        state = "blocked" if blocked else "unblocked"
-        await ctx.send(f"Visits for {rc.mention} are now **{state}**.")
-
-    @commands.command(name="checkvb")
-    @commands.has_permissions(administrator=True)
-    async def checkvb(self, ctx: commands.Context, channel: discord.TextChannel):
-        """Check if visit block is active for a rolechat. Usage: .checkvb #channel"""
-        dash = get_role_dashboard(ctx.guild.id, channel.id)
-        if not dash:
-            return await ctx.send(f"No dashboard configured for {channel.mention}.")
-        blocked = dash["visit_blocked"]
-        await ctx.send(f"Visit block for {channel.mention}: **{blocked}**.")
-
-    @commands.command(name="setvisits")
-    @commands.has_permissions(administrator=True)
-    async def setvisits(self, ctx: commands.Context, channel: discord.TextChannel, normal: int, forced: int, stealth: int):
-        """Set absolute visit counts for a rolechat. Usage: .setvisits #channel <normal> <forced> <stealth>"""
-        if normal < 0 or forced < 0 or stealth < 0:
-            return await ctx.send("Visit counts cannot be negative.")
-        ok = set_visits(ctx.guild.id, channel.id, normal=normal, forced=forced, stealth=stealth)
-        if not ok:
-            return await ctx.send(f"No dashboard configured for {channel.mention}. Use .setrole first.")
-        await ctx.send(f"Visits for {channel.mention}: Normal **{normal}**, Forced **{forced}**, Stealth **{stealth}**.")
-
-    @commands.command(name="addvisits")
-    @commands.has_permissions(administrator=True)
-    async def addvisits(self, ctx: commands.Context, channel: discord.TextChannel, normal: int, forced: int, stealth: int):
-        """Add visits to a rolechat. Usage: .addvisits #channel <normal> <forced> <stealth>"""
-        if normal < 0 or forced < 0 or stealth < 0:
-            return await ctx.send("Deltas cannot be negative.")
-        updated = adjust_visits(ctx.guild.id, channel.id, delta_normal=normal, delta_forced=forced, delta_stealth=stealth)
-        if not updated:
-            return await ctx.send(f"No dashboard configured for {channel.mention}. Use .setrole first.")
-        await ctx.send(
-            f"Added visits for {channel.mention}. Now: Normal **{updated['visits_normal']}**, "
-            f"Forced **{updated['visits_forced']}**, Stealth **{updated['visits_stealth']}**."
-        )
-
-    @commands.command(name="removevisits")
-    @commands.has_permissions(administrator=True)
-    async def removevisits(self, ctx: commands.Context, channel: discord.TextChannel, normal: int, forced: int, stealth: int):
-        """Remove visits from a rolechat. Usage: .removevisits #channel <normal> <forced> <stealth>"""
-        if normal < 0 or forced < 0 or stealth < 0:
-            return await ctx.send("Amounts cannot be negative.")
-        updated = adjust_visits(ctx.guild.id, channel.id, delta_normal=-normal, delta_forced=-forced, delta_stealth=-stealth)
-        if not updated:
-            return await ctx.send(f"No dashboard configured for {channel.mention}. Use .setrole first.")
-        await ctx.send(
-            f"Removed visits for {channel.mention}. Now: Normal **{updated['visits_normal']}**, "
-            f"Forced **{updated['visits_forced']}**, Stealth **{updated['visits_stealth']}**."
-        )
-
-    # ------------------------------------------------------------------ #
-    # Dashboard display
-    # ------------------------------------------------------------------ #
-
     @commands.command(name="dashboard")
-    async def dashboard_cmd(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
-        """Open the dashboard for the current RoleChat (or specified one)."""
+    async def dashboard_cmd(self, ctx: commands.Context):
         guild_data = load_guild_data(ctx.guild.id)
-        if not guild_data or not guild_data.get("dashboard_enabled", False):
-            return await ctx.send("Dashboard is not enabled on this server.")
+        ch_config = get_channel_config(ctx.channel.id)
 
-        rc = _get_rc_channel(ctx, channel)
+        if not ch_config:
+            return await ctx.send(f"⚠️ Nessuna configurazione JSON trovata per il canale con ID `{ctx.channel.id}`.")
 
-        if not ctx.author.guild_permissions.administrator:
-            allowed = _rc_categories(ctx.guild, guild_data)
-            if rc.category not in allowed or rc != ctx.channel:
-                return await ctx.send(
-                    "You can only use `.dashboard` inside your own RoleChat.",
-                    delete_after=10,
+        phase = guild_data.get("current_phase", "PAUSE")
+        phase_emoji = {"DAY": "☀️ Diurna", "NIGHT": "🌙 Notturna", "PAUSE": "⏸️ Intermezzo/Pausa"}.get(phase, phase)
+
+        role_name = ch_config.get("role_name", ctx.channel.name)
+        lore = ch_config.get("lore", "Nessuna descrizione del ruolo inserita.")
+
+        embed = discord.Embed(
+            title=f"🎭 Scheda Ruolo — {role_name}",
+            description=f"**Fase Attuale:** `{phase_emoji}`\n\n*{lore}*",
+            color=discord.Color.blue()
+        )
+
+        passives = ch_config.get("passives", [])
+        if passives:
+            p_text = "\n".join([f"• **{p.get('name', 'Passiva')}**: {p.get('desc', '')}" for p in passives])
+            embed.add_field(name="🛡️ Abilità Passive", value=p_text, inline=False)
+
+        abilities = ch_config.get("abilities", [])
+        if abilities:
+            for idx, ab in enumerate(abilities, 1):
+                uses_left = ab.get("uses", 0)
+                cat = ab.get("category", "Generale")
+                desc = ab.get("desc", "Nessuna descrizione")
+                ab_name = ab.get("name", ab.get("id", f"Abilità {idx}"))
+                uses_str = f"♾️ Infiniti" if uses_left < 0 else f"**{uses_left}**"
+                
+                embed.add_field(
+                    name=f"✨ {ab_name} [{cat}] (Utilizzi: {uses_str})",
+                    value=desc,
+                    inline=False
                 )
 
-        dash = get_role_dashboard(ctx.guild.id, rc.id)
-        if not dash:
-            return await ctx.send("No role dashboard is configured for this channel yet.")
+        visits = ch_config.get("visits", {})
+        if visits:
+            v_norm = visits.get("normal", 0)
+            v_forc = visits.get("forced", 0)
+            v_stel = visits.get("stealth", 0)
+            v_day = visits.get("day_visits", 0)
+            
+            v_str = f"Normale: **{v_norm}** | Forzata: **{v_forc}** | Stealth: **{v_stel}**"
+            if v_day > 0:
+                v_str += f" | Diurna: **{v_day}**"
 
-        embed = self._build_dashboard_embed(ctx.guild, rc)
-        view = DashboardView(self, rc_channel=rc, invoker=ctx.author)
+            embed.add_field(
+                name="🚪 Visite Rimanenti",
+                value=v_str,
+                inline=False
+            )
+
+        view = DashboardView(self, ctx.channel)
         await ctx.send(embed=embed, view=view)
 
-    def _build_dashboard_embed(self, guild: discord.Guild, rc: discord.TextChannel) -> discord.Embed:
-        """Build the dashboard embed for a rolechat (visits + abilities)."""
-        dash = get_role_dashboard(guild.id, rc.id)
-        if not dash:
-            return info_embed(title="No dashboard", description="No role configured.")
-        passives, actives = get_role_abilities(guild.id, rc.id)
-        embed = info_embed(
-            title=f"📋 {dash['name']}",
-            description=f"**Team:** {dash['team']}",
+    @commands.command(name="statuss")
+    async def view_or_edit_status(self, ctx: commands.Context, target_channel: discord.TextChannel = None, key: str = None, value: str = None):
+        guild_data = load_guild_data(ctx.guild.id)
+        if not _is_overseer(ctx, guild_data):
+            return await ctx.send("⛔ Solo gli Overseer possono consultare o modificare gli status segreti.")
+
+        rc = target_channel or ctx.channel
+        status_data = get_player_status(rc.id)
+
+        if key and value:
+            val_clean = value.lower() in ["true", "1", "si", "yes"] if value.lower() in ["true", "false", "1", "0", "si", "no"] else value
+            update_player_status(rc.id, key, val_clean)
+            return await ctx.send(f"✅ Status **`{key}`** aggiornato a `{val_clean}` per {rc.mention}.")
+
+        embed = discord.Embed(
+            title=f"🕵️ Controllo Status Riservato — {rc.name}",
+            color=discord.Color.dark_purple()
         )
-        embed.add_field(
-            name="Visits",
-            value=(
-                f"Normal: **{dash['visits_normal']}**\n"
-                f"Forced: **{dash['visits_forced']}**\n"
-                f"Stealth: **{dash['visits_stealth']}**\n"
-                f"Blocked: **{'Yes' if dash['visit_blocked'] else 'No'}**"
-            ),
-            inline=False,
-        )
-        if passives:
-            embed.add_field(
-                name="Passive Abilities",
-                value="\n".join(f"{i+1}. {p}" for i, p in enumerate(passives)),
-                inline=False,
-            )
-        if actives:
-            embed.add_field(
-                name="Active Abilities",
-                value="\n".join(f"{i+1}. [{cat}] {text}" for i, (cat, text) in enumerate(actives)),
-                inline=False,
-            )
-        return embed
+        embed.add_field(name="🛡️ Protetto", value=f"`{status_data.get('protected', False)}`", inline=True)
+        embed.add_field(name="🚫 Visit Bloccato", value=f"`{status_data.get('visit_blocked', False)}`", inline=True)
+        embed.add_field(name="🤐 Role Bloccato", value=f"`{status_data.get('role_blocked', False)}`", inline=True)
+        embed.add_field(name="🩸 Ferito", value=f"`{status_data.get('wounded', False)}`", inline=True)
+        
+        custom_st = status_data.get("custom_status", [])
+        embed.add_field(name="✨ Status Custom", value=", ".join(custom_st) if custom_st else "*Nessuno*", inline=False)
+        
+        embed.set_footer(text="I giocatori non possono vedere questo pannello.")
+        await ctx.send(embed=embed)
 
-    # ------------------------------------------------------------------ #
-    # Button handlers
-    # ------------------------------------------------------------------ #
+    @commands.command(name="unlockability")
+    async def unlock_ability_cmd(self, ctx: commands.Context, target_channel: discord.TextChannel, ab_id: str, ab_name: str, category: str, uses: int, *, desc: str):
+        guild_data = load_guild_data(ctx.guild.id)
+        if not _is_overseer(ctx, guild_data):
+            return await ctx.send("⛔ Solo gli Overseer possono sbloccare nuove abilità.")
 
-    async def handle_action_button(self, interaction: discord.Interaction, rc_channel: discord.TextChannel):
-        """Ask user to reply with their action, then send pending embeds to the log channel and RC."""
-        guild = interaction.guild
-        guild_data = load_guild_data(guild.id)
-        if not guild_data or not guild_data.get("dashboard_enabled", False):
-            return await interaction.response.send_message("Dashboard is not enabled on this server.", ephemeral=True)
-        log_channel = discord.utils.get(guild.text_channels, name=guild_data.get("actions_log_channel_name"))
-        if not log_channel:
-            return await interaction.response.send_message("Actions log channel not configured.", ephemeral=True)
+        ch_config = get_channel_config(target_channel.id)
+        if not ch_config:
+            return await ctx.send("❌ Configurazione per questo canale non trovata.")
 
-        prompt_embed = info_embed(
-            title="Action request",
-            description="Reply to this message with the action you want to execute.",
-        )
-        await interaction.response.send_message(embed=prompt_embed)
-        prompt_message = await interaction.original_response()
+        abilities = ch_config.get("abilities", [])
+        if len(abilities) >= 5 and ch_config.get("role_name") == "MR. HOUSE":
+            return await ctx.send("⚠️ Mr. House ha già raggiunto il limite massimo di 5 abilità sbloccate!")
 
-        def check(m: discord.Message):
-            return (
-                m.channel == rc_channel
-                and m.reference
-                and m.reference.message_id == prompt_message.id
-                and m.author == interaction.user
-            )
-
-        try:
-            reply = await self.bot.wait_for("message", check=check, timeout=300)
-        except asyncio.TimeoutError:
-            return await rc_channel.send("Action request timed out. Reply to the prompt message in time next time.")
-
-        content = (reply.content[:500] + "...") if len(reply.content) > 500 else (reply.content or "*No text*")
-        ts = _fmt_ts(reply.created_at)
-        jump_url = reply.jump_url
-        pinned = await rc_channel.pins()
-        pinned_url = pinned[-1].jump_url if pinned else None
-        jump_link = f"[Jump to Message]({jump_url})"
-        pinned_link = f" | [Jump to Role]({pinned_url})" if pinned_url else ""
-
-        embed_log = discord.Embed(color=EMBED_COLOR_FUCSIA)
-        embed_log.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        embed_log.description = (
-            f"**Message:**\n{content}\n\n"
-            f"**Channel:** {rc_channel.mention}\n"
-            f"**Time:** {ts}\n"
-            f"{jump_link}{pinned_link}"
-        )
-        embed_log.set_footer(text="⏳ Pending...")
-
-        embed_user = discord.Embed(color=EMBED_COLOR_FUCSIA)
-        embed_user.description = (
-            f"**Message:**\n{content}\n\n"
-            f"**Log Channel:** {log_channel.mention}\n"
-            f"**Time:** {ts}\n"
-            f"{jump_link}{pinned_link}"
-        )
-        embed_user.set_footer(text="⏳ Pending...")
-
-        meta = {
-            "guild_id": guild.id,
-            "channel_id": rc_channel.id,
-            "player_id": interaction.user.id,
-            "message": content,
-            "created_at": reply.created_at.replace(tzinfo=timezone.utc),
+        new_ability = {
+            "id": ab_id,
+            "name": ab_name,
+            "category": category,
+            "uses": uses,
+            "desc": desc
         }
+        abilities.append(new_ability)
+        ch_config["abilities"] = abilities
 
-        log_message = await log_channel.send(embed=embed_log)
-        user_message = await rc_channel.send(embed=embed_user)
+        if "status" in ch_config and "unlocked_abilities_count" in ch_config["status"]:
+            ch_config["status"]["unlocked_abilities_count"] += 1
 
-        log_view = ActionButtons(
-            user_embed=user_message,
-            log_embed=log_message,
-            user_embed_obj=embed_user.copy(),
-            log_embed_obj=embed_log.copy(),
-            meta=meta,
+        update_channel_config(target_channel.id, ch_config)
+        await ctx.send(f"✅ Nuova abilità **{ab_name}** (`{ab_id}`) aggiunta con successo a {target_channel.mention}!")
+
+
+    # ------------------------------------------------------------------ #
+    # Gestione Abilità
+    # ------------------------------------------------------------------ #
+
+    async def _commit_ability_usage(self, interaction: discord.Interaction, rc_channel: discord.TextChannel, ability: dict, target_info: str, custom_msg: str):
+        """Metodo unificato per scalare l'utilizzo solo alla conferma effettiva del target e fornire l'unico feedback finale."""
+        guild = interaction.guild
+        now_time = datetime.now(timezone.utc)
+
+        # Riduci gli utilizzi se non infiniti
+        ch_config = get_channel_config(rc_channel.id)
+        for ab in ch_config.get("abilities", []):
+            if ab.get("id") == ability.get("id"):
+                if ab.get("uses", 0) > 0:
+                    ab["uses"] -= 1
+                break
+        update_channel_config(rc_channel.id, ch_config)
+
+        # Inserisci nel registro
+        insert_action_log(
+            guild_id=guild.id, channel_id=rc_channel.id, player_id=interaction.user.id,
+            message=f"✨ [ABILITÀ] {ability.get('id')} ({target_info})",
+            created_at=now_time, marked_at=now_time, marked_by_id=self.bot.user.id
         )
-        user_view = CancelOnlyView(
-            user_embed=user_message,
-            log_embed=log_message,
-            user_embed_obj=embed_user,
-            log_embed_obj=embed_log,
-        )
-        await log_message.edit(view=log_view)
-        await user_message.edit(view=user_view)
 
+        # Invia l'unico feedback corretto (evita i doppi embed inutili originali)
+        if interaction.response.is_done():
+            await interaction.followup.send(custom_msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(custom_msg, ephemeral=True)
+
+
+    async def handle_ability_button(self, interaction: discord.Interaction, rc_channel: discord.TextChannel):
+        guild_data = load_guild_data(interaction.guild.id) or {}
+
+        if guild_data.get("current_phase") == "PAUSE":
+            return await interaction.response.send_message("⏸️ **Gioco in Pausa:** Durante l'intermezzo non puoi compiere azioni.", ephemeral=True)
+
+        status = get_player_status(rc_channel.id)
+        if status.get("role_blocked", False):
+            return await interaction.response.send_message("❌ **Le tue abilità sono attualmente bloccate per questa fase!**", ephemeral=True)
+
+        ch_config = get_channel_config(rc_channel.id)
+        abilities = [ab for ab in ch_config.get("abilities", []) if ab.get("uses", 0) != 0]
+
+        if not abilities:
+            return await interaction.response.send_message("❌ Non hai abilità attive disponibili o hai esaurito gli utilizzi!", ephemeral=True)
+
+        options = []
+        for idx, ab in enumerate(abilities):
+            uses = ab.get("uses", 0)
+            u_str = "♾️" if uses < 0 else f"{uses} rimasti"
+            ab_title = ab.get("name", ab.get("id", f"ab_{idx}"))
+            options.append(discord.SelectOption(
+                label=f"{ab_title} [{ab.get('category')}]",
+                description=f"Usi: {u_str} - {ab.get('desc')[:60]}",
+                value=ab.get("id", str(idx))
+            ))
+
+        ability_select = Select(placeholder="Scegli l'abilità da eseguire...", options=options)
+
+        async def ability_callback(sel_inter: discord.Interaction):
+            chosen_id = ability_select.values[0]
+            chosen_ab = next((a for a in abilities if a.get("id") == chosen_id), None)
+            if chosen_ab:
+                await self._process_ability_usage(sel_inter, rc_channel, chosen_ab)
+
+        ability_select.callback = ability_callback
+        view = View(timeout=60)
+        view.add_item(ability_select)
+
+        await interaction.response.send_message("🧪 **Seleziona un'abilità:**", view=view, ephemeral=True)
+
+    async def _process_ability_usage(self, interaction: discord.Interaction, rc_channel: discord.TextChannel, ability: dict):
+        guild = interaction.guild
+        guild_data = load_guild_data(guild.id) or {}
+        cat_lower = ability.get("category", "").lower()
+        current_phase = guild_data.get("current_phase", "NIGHT")
+
+        is_day_ability = "diurna" in cat_lower or "giorno" in cat_lower
+        if current_phase == "DAY" and not is_day_ability:
+            return await interaction.response.send_message("☀️ Questa abilità può essere usata solo di **Notte**!", ephemeral=True)
+        if current_phase == "NIGHT" and is_day_ability:
+            return await interaction.response.send_message("🌙 Questa abilità può essere usata solo di **Giorno**!", ephemeral=True)
+
+        if "fisica" in cat_lower and "remota" not in cat_lower:
+            my_houses = _get_current_house_names(guild, guild_data, rc_channel)
+            if not my_houses:
+                return await interaction.response.send_message("❌ Le abilità fisiche richiedono di essere all'interno di una Casa!", ephemeral=True)
+            await self._dispatch_ability_logic(interaction, rc_channel, ability, f"Casa {my_houses[0]}")
+        else:
+            await self._dispatch_ability_logic(interaction, rc_channel, ability, "Remoto/Ibrido")
+
+
+    # ------------------------------------------------------------------ #
+    # 🎯 DISPATCHER LOGICHE ABILITÀ
+    # ------------------------------------------------------------------ #
+    async def _dispatch_ability_logic(self, interaction: discord.Interaction, rc_channel: discord.TextChannel, ability: dict, loc_info: str):
+        ab_id = ability.get("id")
+        guild = interaction.guild
+        guild_data = load_guild_data(guild.id) or {}
+        
+        rc_categories = _rc_categories(guild, guild_data)
+        all_rc_channels = []
+        if rc_categories:
+            for cat in rc_categories:
+                all_rc_channels.extend(cat.text_channels)
+        else:
+            all_rc_channels = [c for c in guild.text_channels if c.id != rc_channel.id]
+
+        # === ABILITÀ BOONE (ROLECHAT 3) ===
+        if ab_id == "red_berret":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore da marchiare con Red Berret...", options=options)
+
+            async def red_berret_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                status = get_player_status(rc_channel.id)
+                marked = status.get("marked_targets", [])
+                if target_id not in marked:
+                    marked.append(target_id)
+                    update_player_status(rc_channel.id, "marked_targets", marked)
+
+                msg = f"🎯 **[Red Berret]** Hai marchiato {target_ch.mention if target_ch else 'il bersaglio'}!"
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = red_berret_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🔴 **Seleziona il bersaglio da marchiare:**", view=view, ephemeral=True)
+
+        elif ab_id == "best_sniper_in_vegas":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona la vittima dello Sniping...", options=options)
+
+            async def sniper_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = f"💥 **[Best Sniper in Vegas]** Sparato a {target_ch.mention if target_ch else 'un bersaglio'}!"
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = sniper_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🎯 **Seleziona il bersaglio da eliminare:**", view=view, ephemeral=True)
+
+        elif ab_id == "recon_unit":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore da ricognire...", options=options)
+
+            async def recon_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = f"🔍 **[Recon Unit]** Richiesta inviata per {target_ch.mention if target_ch else 'il giocatore'}."
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = recon_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🕵️ **Seleziona il bersaglio per la ricognizione:**", view=view, ephemeral=True)
+
+        elif ab_id == "i_forgot_to_remember_to_forget":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore da tracciare...", options=options)
+
+            async def forget_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                update_player_status(rc_channel.id, "forget_target", target_id)
+                msg = f"👁️ **[I forgot...]** Monitoraggio attivato su {target_ch.mention if target_ch else 'il bersaglio'}."
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = forget_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🧠 **Seleziona il giocatore da monitorare:**", view=view, ephemeral=True)
+
+        # === ABILITÀ DEAN DOMINO (ROLECHAT 4) & OLOGRAMMA (ALT) ===
+        elif ab_id == "gruzzolo_segreto":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_target = Select(placeholder="Seleziona il destinatario dell'abilità...", options=options)
+
+            buff_options = [
+                discord.SelectOption(label="+1 Utilizzo aggiuntivo", value="extra_use"),
+                discord.SelectOption(label="Abilità Remota (Nome + Posizione)", value="make_remote"),
+                discord.SelectOption(label="Bypassa Status / Manipolazioni / RB", value="bypass_all")
+            ]
+            select_buff = Select(placeholder="Scegli il potenziamento...", options=buff_options)
+
+            view = View(timeout=90)
+            view.add_item(select_target)
+            view.add_item(select_buff)
+
+            state = {"target_id": None, "buff": None}
+
+            async def check_and_send(s_inter: discord.Interaction):
+                if state["target_id"] and state["buff"]:
+                    target_ch = guild.get_channel(int(state["target_id"]))
+                    msg = (f"🎁 **[Gruzzolo Segreto]** Abilità inviata a {target_ch.mention if target_ch else 'giocatore'}.\n"
+                           f"**Potenziamento applicato:** `{state['buff']}`\n"
+                           f"*Comunica agli OS l'abilità del negozio da inviare.*")
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else state['target_id']} Buff: {state['buff']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def target_cb(i: discord.Interaction):
+                state["target_id"] = select_target.values[0]
+                await check_and_send(i)
+                
+            async def buff_cb(i: discord.Interaction):
+                state["buff"] = select_buff.values[0]
+                await check_and_send(i)
+
+            select_target.callback = target_cb
+            select_buff.callback = buff_cb
+
+            return await interaction.response.send_message("💼 **Configura il Gruzzolo Segreto:**", view=view, ephemeral=True)
+
+        elif ab_id in ["istinto_ghoul", "istinto_ghoul_olografico"]:
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_corpse = Select(placeholder="Seleziona il cadavere...", options=options)
+
+            num_options = [discord.SelectOption(label=f"Abilità #{n}", value=str(n)) for n in range(1, 11)]
+            select_num = Select(placeholder="Scegli un numero da 1 a 10...", options=num_options)
+
+            view = View(timeout=90)
+            view.add_item(select_corpse)
+            view.add_item(select_num)
+
+            state = {"corpse_id": None, "num": None}
+
+            async def process_ghoul(s_inter: discord.Interaction):
+                if state["corpse_id"] and state["num"]:
+                    c_ch = guild.get_channel(int(state["corpse_id"]))
+                    msg = (f"🧟 **[Istinto Ghoul]** Analisi inviata per {c_ch.mention if c_ch else 'il cadavere'}.\n"
+                           f"**Numero selezionato:** `{state['num']}`")
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Corpse: {c_ch.name if c_ch else state['corpse_id']} Num: {state['num']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def corpse_cb(i: discord.Interaction):
+                state["corpse_id"] = select_corpse.values[0]
+                await process_ghoul(i)
+
+            async def num_cb(i: discord.Interaction):
+                state["num"] = select_num.values[0]
+                await process_ghoul(i)
+
+            select_corpse.callback = corpse_cb
+            select_num.callback = num_cb
+
+            return await interaction.response.send_message("🧠 **Seleziona il cadavere e l'indice dell'abilità:**", view=view, ephemeral=True)
+
+        elif ab_id == "rinascita_ghoul":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore da marchiare...", options=options)
+
+            async def rinascita_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                status = get_player_status(rc_channel.id)
+                marked = status.get("rinascita_marked", [])
+                if target_id not in marked:
+                    marked.append(target_id)
+                    update_player_status(rc_channel.id, "rinascita_marked", marked)
+
+                msg = f"☣️ **[Rinascita Ghoul]** Marchiato {target_ch.mention if target_ch else 'il bersaglio'}."
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = rinascita_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("☣️ **Seleziona il bersaglio da marchiare:**", view=view, ephemeral=True)
+
+        elif ab_id == "saw_her_yesterday":
+            options1 = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select1 = Select(placeholder="Primo giocatore da legare...", options=options1)
+
+            options2 = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select2 = Select(placeholder="Secondo giocatore da legare...", options=options2)
+
+            view = View(timeout=90)
+            view.add_item(select1)
+            view.add_item(select2)
+
+            state = {"p1": None, "p2": None}
+
+            async def process_link(s_inter: discord.Interaction):
+                if state["p1"] and state["p2"]:
+                    if state["p1"] == state["p2"]:
+                        return await s_inter.response.send_message("❌ Non puoi legare un giocatore a se stesso!", ephemeral=True)
+
+                    ch1 = guild.get_channel(int(state["p1"]))
+                    ch2 = guild.get_channel(int(state["p2"]))
+                    status = get_player_status(rc_channel.id)
+                    links = status.get("saw_her_yesterday_links", [])
+                    links.append({"p1": state["p1"], "p2": state["p2"]})
+                    update_player_status(rc_channel.id, "saw_her_yesterday_links", links)
+
+                    msg = f"🔗 **[Saw Her Yesterday]** Legati {ch1.mention if ch1 else 'P1'} e {ch2.mention if ch2 else 'P2'}!"
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Link: {ch1.name if ch1 else state['p1']} & {ch2.name if ch2 else state['p2']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def p1_cb(i: discord.Interaction):
+                state["p1"] = select1.values[0]
+                await process_link(i)
+
+            async def p2_cb(i: discord.Interaction):
+                state["p2"] = select2.values[0]
+                await process_link(i)
+
+            select1.callback = p1_cb
+            select2.callback = p2_cb
+
+            return await interaction.response.send_message("🔗 **Seleziona i due giocatori da legare:**", view=view, ephemeral=True)
+
+        elif ab_id == "scannerizzazione":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_corpse = Select(placeholder="Seleziona il cadavere da scannerizzare...", options=options)
+
+            async def scan_cb(s_inter: discord.Interaction):
+                target_id = int(select_corpse.values[0])
+                target_ch = guild.get_channel(target_id)
+                status = get_player_status(rc_channel.id)
+                scanned = status.get("scanned_corpses", [])
+
+                if target_id in scanned:
+                    return await s_inter.response.send_message("❌ Questo cadavere è già stato scannerizzato!", ephemeral=True)
+
+                scanned.append(target_id)
+                update_player_status(rc_channel.id, "scanned_corpses", scanned)
+
+                msg = (f"📷 **[Scannerizzazione]** Scannerizzazione inviata per {target_ch.mention if target_ch else 'il cadavere'}.\n"
+                       f"*Comunica agli OS le categorie e il prezzo per il negozio della Sierra Madre.*")
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Corpse: {target_ch.name if target_ch else target_id}", msg)
+
+            select_corpse.callback = scan_cb
+            view = View(timeout=60)
+            view.add_item(select_corpse)
+            return await interaction.response.send_message("📸 **Seleziona il cadavere da scannerizzare:**", view=view, ephemeral=True)
+
+        # === ABILITÀ JULIA FARKAS (ROLECHAT 5) ===
+        elif ab_id == "farmaci_scaduti":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_target = Select(placeholder="Seleziona il giocatore in casa con te...", options=options)
+
+            action_options = [
+                discord.SelectOption(label="Infliggi RoleBlock (RB)", value="inflict_rb"),
+                discord.SelectOption(label="Cura RoleBlock (RB)", value="cure_rb"),
+                discord.SelectOption(label="Infliggi VisitBlock (VB)", value="inflict_vb"),
+                discord.SelectOption(label="Cura VisitBlock (VB)", value="cure_vb")
+            ]
+            select_action = Select(placeholder="Scegli l'azione...", options=action_options)
+
+            view = View(timeout=90)
+            view.add_item(select_target)
+            view.add_item(select_action)
+
+            state = {"target_id": None, "action": None}
+
+            async def process_farmaci(s_inter: discord.Interaction):
+                if state["target_id"] and state["action"]:
+                    target_ch = guild.get_channel(int(state["target_id"]))
+                    status = get_player_status(rc_channel.id)
+                    history = status.get("julia_target_history", [])
+                    if int(state["target_id"]) not in history:
+                        history.append(int(state["target_id"]))
+                        update_player_status(rc_channel.id, "julia_target_history", history)
+
+                    msg = f"💊 **[Farmaci Scaduti]** Azione `{state['action']}` registrata su {target_ch.mention if target_ch else 'giocatore'}."
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else state['target_id']} Act: {state['action']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def ft_cb(i: discord.Interaction):
+                state["target_id"] = select_target.values[0]
+                await process_farmaci(i)
+
+            async def fa_cb(i: discord.Interaction):
+                state["action"] = select_action.values[0]
+                await process_farmaci(i)
+
+            select_target.callback = ft_cb
+            select_action.callback = fa_cb
+
+            return await interaction.response.send_message("🧪 **Seleziona bersaglio e tipo di somministrazione:**", view=view, ephemeral=True)
+
+        elif ab_id == "followers_radio":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore da marchiare...", options=options)
+
+            async def radio_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                
+                status = get_player_status(rc_channel.id)
+                status["radio_marked_target"] = target_id
+                status["radio_teleports_left"] = 2
+                
+                history = status.get("julia_target_history", [])
+                if target_id not in history:
+                    history.append(target_id)
+                status["julia_target_history"] = history
+                update_player_status(rc_channel.id, "status", status)
+
+                msg = f"📻 **[Follower's Radio]** Marchiato {target_ch.mention if target_ch else 'giocatore'}. (Hai 2 trasporti disponibili)"
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = radio_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("📻 **Seleziona il bersaglio da marchiare:**", view=view, ephemeral=True)
+
+        elif ab_id == "peaceful_zone":
+            my_houses = _get_current_house_names(guild, guild_data, rc_channel)
+            if not my_houses:
+                return await interaction.response.send_message("❌ Devi essere all'interno di una Casa per attivare Peaceful Zone!", ephemeral=True)
+
+            house_name = my_houses[0]
+            houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
+            house_channel = next((ch for ch in houses_cat.channels if ch.name == house_name), None) if houses_cat else None
+
+            if house_channel:
+                await house_channel.edit(name=f"🏰-forte-{house_name}")
+                
+            msg = (f"🕊️ **[Peaceful Zone]** La casa **{house_name}** è stata rinominata in **Forte**!\n"
+                   f"• Protezione da abilità remote attiva.\n"
+                   f"• Protezioni personali sospese all'interno.")
+            await self._commit_ability_usage(interaction, rc_channel, ability, f"Forte: {house_name}", msg)
+
+        elif ab_id == "new_vegas_medical_clinic":
+            status = get_player_status(rc_channel.id)
+            history = status.get("julia_target_history", [])
+
+            if not history:
+                return await interaction.response.send_message("❌ Non hai ancora utilizzato alcuna abilità su nessun giocatore!", ephemeral=True)
+
+            valid_channels = [guild.get_channel(cid) for cid in history if guild.get_channel(cid) is not None]
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in valid_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore da rianimare...", options=options)
+
+            async def clinic_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = f"🏥 **[New Vegas Medical Clinic]** Rianimazione inviata agli Overseer per {target_ch.mention if target_ch else 'il giocatore'}."
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = clinic_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("💉 **Seleziona il bersaglio da rianimare:**", view=view, ephemeral=True)
+
+        # === ABILITÀ BENNY (ROLECHAT 6) ===
+        elif ab_id == "cripple_the_legs":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il giocatore a cui rimuovere le visite...", options=options)
+
+            async def cripple_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = f"🦵 **[Cripple the legs]** Azione registrata! {target_ch.mention if target_ch else 'Il bersaglio'} perderà tutte le visite restanti per questa fase."
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = cripple_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🎯 **Seleziona il bersaglio da azzoppare:**", view=view, ephemeral=True)
+
+        elif ab_id == "a_bullet_in_the_head":
+            options_target = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_target = Select(placeholder="Seleziona il giocatore da colpire...", options=options_target)
+
+            num_options = [discord.SelectOption(label=f"Abilità #{n}", value=str(n)) for n in range(1, 11)]
+            select_num = Select(placeholder="Seleziona il numero dell'abilità da depotenziare...", options=num_options)
+
+            view = View(timeout=90)
+            view.add_item(select_target)
+            view.add_item(select_num)
+
+            state = {"target_id": None, "num": None}
+
+            async def process_bullet(s_inter: discord.Interaction):
+                if state["target_id"] and state["num"]:
+                    target_ch = guild.get_channel(int(state["target_id"]))
+                    msg = (f"💥 **[A bullet in the head]** Azione registrata su {target_ch.mention if target_ch else 'giocatore'}.\n"
+                           f"**Numero abilità bersaglio:** #{state['num']}\n"
+                           f"*Se il giocatore possiede meno abilità di quelle indicate, la rimozione dell'utilizzo sarà casuale.*")
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else state['target_id']} Num: {state['num']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def bt_cb(i: discord.Interaction):
+                state["target_id"] = select_target.values[0]
+                await process_bullet(i)
+
+            async def bn_cb(i: discord.Interaction):
+                state["num"] = select_num.values[0]
+                await process_bullet(i)
+
+            select_target.callback = bt_cb
+            select_num.callback = bn_cb
+
+            return await interaction.response.send_message("🔫 **Seleziona bersaglio e numero abilità:**", view=view, ephemeral=True)
+
+        # === ABILITÀ ARCADE GANNON (ROLECHAT 7) ===
+        elif ab_id == "chiamata_dell_enclave":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il bersaglio per la Chiamata dell'Enclave...", options=options)
+
+            async def enclave_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = (f"🚁 **[Chiamata dell'enclave]** Attacco letale programmato contro {target_ch.mention if target_ch else 'il bersaglio'}.\n"
+                       f"*Gli Overseer applicheranno lo stadio effettivo in base al numero di Chat Private attive.*")
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = enclave_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🚁 **Seleziona il bersaglio da eliminare:**", view=view, ephemeral=True)
+
+        elif ab_id == "arcade_followers_radio":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il compagno per la Chat Privata...", options=options)
+
+            async def radio_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = (f"📻 **[Follower's Radio]** Creazione della Chat Privata **'Compagni'** richiesta per {target_ch.mention if target_ch else 'il giocatore'}.\n"
+                       f"*La chat durerà fino al termine della prossima fase diurna.*")
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = radio_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("📻 **Seleziona il compagno da contattare:**", view=view, ephemeral=True)
+
+        elif ab_id == "arcade_peaceful_zone":
+            modal = ArcadePeacefulZoneModal(self, rc_channel, ability)
+            return await interaction.response.send_modal(modal)
+
+        elif ab_id == "down_with_the_autocrats":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona il bersaglio della manipolazione voti...", options=options)
+
+            async def autocrats_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                msg = (f"🏛️ **[Down with the Autocrats]** Manipolazione dei voti della fazione registrata contro {target_ch.mention if target_ch else 'il bersaglio'}.\n"
+                       f"*L'effetto verrà applicato al primo lynch utile (diurno o notturno).*")
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = autocrats_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("🏛️ **Seleziona il bersaglio di un'altra fazione da far votare:**", view=view, ephemeral=True)
+
+        # === ABILITÀ CASSIDY (ROLECHAT 11) & CAROVANA (ALT) ===
+        elif ab_id == "free_market_competition":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select = Select(placeholder="Seleziona la persona da marchiare per la competizione...", options=options)
+
+            async def market_cb(s_inter: discord.Interaction):
+                target_id = int(select.values[0])
+                target_ch = guild.get_channel(target_id)
+                
+                status = get_player_status(rc_channel.id)
+                marked = status.get("free_market_marked", [])
+                if target_id not in marked:
+                    marked.append(target_id)
+                    update_player_status(rc_channel.id, "free_market_marked", marked)
+
+                msg = (f"💀 **[Free Market Competition]** Marchiato {target_ch.mention if target_ch else 'il bersaglio'}.\n"
+                       f"*Se l'ALT Carovana finisce nella stessa casa a fine fase o se il bersaglio poteva acquistare dal negozio dopo Advertising, verrà eliminato.*")
+                await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else target_id}", msg)
+
+            select.callback = market_cb
+            view = View(timeout=60)
+            view.add_item(select)
+            return await interaction.response.send_message("💀 **Seleziona il bersaglio per la competizione spietata:**", view=view, ephemeral=True)
+
+        elif ab_id == "pushy_marketing":
+            options_target = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_target = Select(placeholder="Seleziona il giocatore in casa con te...", options=options_target)
+
+            item_options = [
+                discord.SelectOption(label="Alcool (100 Caps)", value="alcohol"),
+                discord.SelectOption(label="Medicina (350 Caps)", value="medicine"),
+                discord.SelectOption(label="Acqua e Cibo (50 Caps)", value="food_water")
+            ]
+            select_item = Select(placeholder="Seleziona l'oggetto del negozio Carovana...", options=item_options)
+
+            view = View(timeout=90)
+            view.add_item(select_target)
+            view.add_item(select_item)
+
+            state = {"target_id": None, "item": None}
+
+            async def process_pushy(s_inter: discord.Interaction):
+                if state["target_id"] and state["item"]:
+                    target_ch = guild.get_channel(int(state["target_id"]))
+                    msg = (f"📢 **[Pushy Marketing]** Costretto {target_ch.mention if target_ch else 'il giocatore'} ad acquistare/usare `{state['item']}`!\n"
+                           f"*Assicurati che sia tu che l'ALT Carovana siate nella stessa casa col bersaglio.*")
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else state['target_id']} Item: {state['item']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def pt_cb(i: discord.Interaction):
+                state["target_id"] = select_target.values[0]
+                await process_pushy(i)
+
+            async def pi_cb(i: discord.Interaction):
+                state["item"] = select_item.values[0]
+                await process_pushy(i)
+
+            select_target.callback = pt_cb
+            select_item.callback = pi_cb
+
+            return await interaction.response.send_message("📢 **Seleziona il bersaglio e l'oggetto da forzare:**", view=view, ephemeral=True)
+
+        elif ab_id == "how_bout_a_beer":
+            options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in all_rc_channels[:25]]
+            select_target = Select(placeholder="Seleziona il giocatore...", options=options)
+
+            mode_options = [
+                discord.SelectOption(label="Remoto (Posizione) -> Infliggi VB", value="remote_vb"),
+                discord.SelectOption(label="Fisico (Stessa Casa) -> +1 Bersaglio Extra", value="physical_extra_target")
+            ]
+            select_mode = Select(placeholder="Seleziona la modalità d'uso...", options=mode_options)
+
+            view = View(timeout=90)
+            view.add_item(select_target)
+            view.add_item(select_mode)
+
+            state = {"target_id": None, "mode": None}
+
+            async def process_beer(s_inter: discord.Interaction):
+                if state["target_id"] and state["mode"]:
+                    target_ch = guild.get_channel(int(state["target_id"]))
+                    mode_text = "VB inflitto (Remoto)" if state["mode"] == "remote_vb" else "+1 Bersaglio Extra assegnato (Fisico)"
+                    msg = (f"🍺 **[How 'bout a beer?]** Azione usata su {target_ch.mention if target_ch else 'il giocatore'}.\n"
+                           f"**Effetto:** `{mode_text}`")
+                    await self._commit_ability_usage(s_inter, rc_channel, ability, f"Target: {target_ch.name if target_ch else state['target_id']} Mode: {state['mode']}", msg)
+                else:
+                    await s_inter.response.defer()
+
+            async def ht_cb(i: discord.Interaction):
+                state["target_id"] = select_target.values[0]
+                await process_beer(i)
+
+            async def hm_cb(i: discord.Interaction):
+                state["mode"] = select_mode.values[0]
+                await process_beer(i)
+
+            select_target.callback = ht_cb
+            select_mode.callback = hm_cb
+
+            return await interaction.response.send_message("🍺 **Seleziona il bersaglio e la modalità d'attivazione:**", view=view, ephemeral=True)
+
+        elif ab_id == "advertising":
+            my_houses = _get_current_house_names(guild, guild_data, rc_channel)
+            curr_loc = f"Casa {my_houses[0]}" if my_houses else "Posizione sconosciuta"
+
+            msg = (f"📣 **[Advertising]** Annuncio della Carovana inviato agli Overseer!\n"
+                   f"• **Posizione del tuo ALT:** `{curr_loc}`\n"
+                   f"• **Incentivo vendita attivo per Free Market Competition.**")
+            await self._commit_ability_usage(interaction, rc_channel, ability, f"Loc: {curr_loc}", msg)
+
+        # === FALLBACK PER ABILITÀ DINAMICHE / ACQUISTATE (ES. MR. HOUSE) ===
+        else:
+            msg = (f"✨ **[{ability.get('name', ab_id)}]** Uso dell'abilità registrato con successo!\n"
+                   f"*Notifica inviata agli Overseer per la risoluzione manuale o custom.*")
+            await self._commit_ability_usage(interaction, rc_channel, ability, loc_info, msg)
+
+
+    # --- VISITE ---
     async def handle_visit_button(self, interaction: discord.Interaction, rc_channel: discord.TextChannel):
         guild = interaction.guild
-        guild_data = load_guild_data(guild.id)
-        if not guild_data or not guild_data.get("dashboard_enabled", False):
-            return await interaction.response.send_message("Dashboard is not enabled on this server.", ephemeral=True)
+        guild_data = load_guild_data(guild.id) or {}
 
-        dash = get_role_dashboard(guild.id, rc_channel.id)
-        if dash and dash["visit_blocked"]:
-            return await interaction.response.send_message("Visits are currently blocked for this role.", ephemeral=True)
+        if guild_data.get("current_phase") == "PAUSE":
+            return await interaction.response.send_message("⏸️ **Gioco in Pausa:** Durante l'intermezzo non puoi effettuare visite.", ephemeral=True)
 
-        if not interaction.user.guild_permissions.administrator:
-            allowed = _rc_categories(guild, guild_data)
-            if rc_channel.category not in allowed:
-                return await interaction.response.send_message(
-                    "You can only use visits from RoleChats.",
-                    ephemeral=True,
-                )
+        status = get_player_status(rc_channel.id)
+        if status.get("visit_blocked", False):
+            return await interaction.response.send_message("❌ **Le tue visite sono attualmente bloccate!**", ephemeral=True)
+
+        ch_config = get_channel_config(rc_channel.id)
+        visits = ch_config.get("visits", {})
+        current_phase = guild_data.get("current_phase", "NIGHT")
 
         visit_options = []
-        if dash:
-            if dash["visits_normal"] > 0:
-                visit_options.append(discord.SelectOption(label="Normal visit", value="normal", description="Use a normal (knock) visit"))
-            if dash["visits_forced"] > 0:
-                visit_options.append(discord.SelectOption(label="Forced visit", value="forced", description="Use a forced move visit"))
-            if dash["visits_stealth"] > 0:
-                visit_options.append(discord.SelectOption(label="Stealth visit", value="stealth", description="Move stealthily (no narration)"))
+        if current_phase == "NIGHT":
+            if visits.get("normal", 0) > 0:
+                visit_options.append(discord.SelectOption(label=f"Visita Normale (Bussa) - Restanti: {visits['normal']}", value="normal"))
+            if visits.get("forced", 0) > 0:
+                visit_options.append(discord.SelectOption(label=f"Visita Forzata (Entra) - Restanti: {visits['forced']}", value="forced"))
+            if visits.get("stealth", 0) > 0:
+                visit_options.append(discord.SelectOption(label=f"Visita Stealth - Restanti: {visits['stealth']}", value="stealth"))
+        elif current_phase == "DAY":
+            if visits.get("day_visits", 0) > 0:
+                visit_options.append(discord.SelectOption(label=f"Visita Diurna - Restanti: {visits['day_visits']}", value="day_visits"))
+
         if not visit_options:
-            visit_options = [
-                discord.SelectOption(label="Normal visit", value="normal"),
-                discord.SelectOption(label="Forced visit", value="forced"),
-                discord.SelectOption(label="Stealth visit", value="stealth"),
-            ]
+            return await interaction.response.send_message("❌ Hai esaurito le visite disponibili per la fase attuale!", ephemeral=True)
 
         houselist = guild_data.get("houselist") or []
-        if not houselist:
-            return await interaction.response.send_message("No houselist configured for this guild.", ephemeral=True)
+        if not houselist and guild_data.get("houses_category_name"):
+            houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
+            if houses_cat:
+                houselist = [ch.name for ch in houses_cat.channels]
 
-        type_select = Select(placeholder="Choose visit type", options=visit_options, min_values=1, max_values=1)
-        house_options = [discord.SelectOption(label=name, value=name) for name in houselist[:25]]
-        house_select = Select(placeholder="Choose house to visit", options=house_options, min_values=1, max_values=1)
+        type_select = Select(placeholder="Tipo di visita...", options=visit_options)
+        house_select = Select(placeholder="Casa destinazione...", options=[discord.SelectOption(label=h, value=h) for h in houselist[:25]])
 
         view = View(timeout=120)
         view.add_item(type_select)
@@ -868,298 +1084,79 @@ class Dashboard(commands.Cog):
 
         state = {"type": None, "house": None}
 
-        async def maybe_execute(sel_inter: discord.Interaction):
+        async def check_and_run(sel_inter: discord.Interaction):
             if state["type"] and state["house"]:
-                from_names = _get_current_house_names(guild, guild_data, rc_channel)
-                await self._execute_visit(sel_inter, rc_channel, state["type"], state["house"], from_house_names=from_names)
+                await self._execute_visit(sel_inter, rc_channel, state["type"], state["house"])
+            else:
+                await sel_inter.response.defer()
 
-        async def on_type(sel_inter: discord.Interaction):
-            if sel_inter.user != interaction.user:
-                return await sel_inter.response.send_message("This menu isn't yours.", ephemeral=True)
-            state["type"] = sel_inter.data["values"][0]
-            await sel_inter.response.defer()
-            await maybe_execute(sel_inter)
+        async def vt_cb(i: discord.Interaction):
+            state["type"] = type_select.values[0]
+            await check_and_run(i)
+            
+        async def vh_cb(i: discord.Interaction):
+            state["house"] = house_select.values[0]
+            await check_and_run(i)
 
-        async def on_house(sel_inter: discord.Interaction):
-            if sel_inter.user != interaction.user:
-                return await sel_inter.response.send_message("This menu isn't yours.", ephemeral=True)
-            state["house"] = sel_inter.data["values"][0]
-            await sel_inter.response.defer()
-            await maybe_execute(sel_inter)
+        type_select.callback = vt_cb
+        house_select.callback = vh_cb
 
-        type_select.callback = on_type
-        house_select.callback = on_house
+        await interaction.response.send_message("🚪 **Configura la tua Visita:**", view=view, ephemeral=True)
 
-        await interaction.response.send_message("Select visit type and target house:", view=view, ephemeral=True)
-
-    async def _execute_visit(
-        self,
-        interaction: discord.Interaction,
-        rc_channel: discord.TextChannel,
-        visit_type: str,
-        house_name: str,
-        *,
-        from_house_names: list[str] | None = None,
-    ):
-        """After the player chooses visit type and house, create a pending visit request in the actions log channel."""
+    async def _execute_visit(self, interaction: discord.Interaction, rc_channel: discord.TextChannel, visit_type: str, house_name: str):
         guild = interaction.guild
         guild_data = load_guild_data(guild.id)
-        if not guild_data:
-            return await interaction.followup.send("Guild data not loaded.", ephemeral=True)
+        now_time = datetime.now(timezone.utc)
 
-        houses_category = discord.utils.get(guild.categories, name=guild_data["houses_category_name"])
-        target_channel = None
-        if houses_category:
-            for ch in houses_category.channels:
-                if ch.name == house_name:
-                    target_channel = ch
-                    break
+        houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
+        target_channel = next((ch for ch in houses_cat.channels if ch.name == house_name), None) if houses_cat else None
+
         if not target_channel:
-            return await interaction.followup.send("House channel not found.", ephemeral=True)
+            if interaction.response.is_done():
+                return await interaction.followup.send("❌ Casa non trovata.", ephemeral=True)
+            return await interaction.response.send_message("❌ Casa non trovata.", ephemeral=True)
 
-        log_channel = discord.utils.get(
-            guild.text_channels,
-            name=guild_data.get("actions_log_channel_name"),
-        )
-        if not log_channel:
-            return await interaction.followup.send(
-                "Actions log channel not configured; cannot request visit.",
-                ephemeral=True,
-            )
+        ch_config = get_channel_config(rc_channel.id)
+        if "visits" in ch_config and visit_type in ch_config["visits"]:
+            if ch_config["visits"][visit_type] > 0:
+                ch_config["visits"][visit_type] -= 1
+                update_channel_config(rc_channel.id, ch_config)
 
-        if from_house_names is None:
-            from_house_names = _get_current_house_names(guild, guild_data, rc_channel)
-        from_str = ", ".join(from_house_names) if from_house_names else "—"
+        moving_cog = self.bot.get_cog("Moving")
+        
+        # Facciamo il defer qui: l'onere di rispondere senza bug e col messaggio corretto sarà delegato a process_knock / process_move
+        await interaction.response.defer(ephemeral=True)
 
-        visit_label = {
-            "normal": "Normal visit",
-            "forced": "Forced visit",
-            "stealth": "Stealth visit",
-        }.get(visit_type, visit_type)
+        if moving_cog:
+            ctx = await self.bot.get_context(interaction.message)
+            ctx.channel = rc_channel
+            ctx.author = interaction.user
 
-        desc_log = (
-            f"{interaction.user.mention} requests a **{visit_label}**\n"
-            f"**From:** {from_str}\n"
-            f"**To:** {target_channel.mention} (`{house_name}`)\n\n"
-            "An Overseer must press **Allow visit** to execute this move."
-        )
-        desc_rc = (
-            f"**{visit_label}** request to **{house_name}**\n"
-            f"**From:** {from_str}\n"
-            f"**Log:** {log_channel.mention}\n\n"
-            "⏳ Pending approval..."
-        )
-
-        embed_log = discord.Embed(
-            title="🚪 Visit Request",
-            description=desc_log,
-            color=EMBED_COLOR_FUCSIA,
-        )
-        embed_log.set_footer(text="Pending approval...")
-
-        embed_rc = discord.Embed(
-            title="🚪 Visit Request",
-            description=desc_rc,
-            color=EMBED_COLOR_FUCSIA,
-        )
-        embed_rc.set_footer(text="⏳ Pending...")
-
-        view = VisitApprovalView(
-            dashboard_cog=self,
-            guild_id=guild.id,
-            rc_channel_id=rc_channel.id,
-            target_channel_id=target_channel.id,
-            requester_id=interaction.user.id,
-            visit_type=visit_type,
-            house_name=house_name,
-            rc_pending_message=None,
-        )
-
-        log_message = await log_channel.send(embed=embed_log, view=view)
-        rc_pending_message = await rc_channel.send(embed=embed_rc)
-        view.rc_pending_message = rc_pending_message
-        view.message_id = log_message.id
-
-        await interaction.followup.send(
-            f"Your visit request has been sent to the Overseers in {log_channel.mention}.",
-            ephemeral=True,
-        )
-
-    async def handle_preset_button(self, interaction: discord.Interaction, rc_channel: discord.TextChannel):
-        presets_cog = self.bot.get_cog("Presets")
-        if not presets_cog:
-            return await interaction.response.send_message("Presets system not loaded.", ephemeral=True)
-        try:
-            await presets_cog.open_presets_for_interaction(interaction, rc_channel)
-        except AttributeError:
-            await interaction.response.send_message(
-                "Presets view not integrated yet. Use `.preset` in this channel.",
-                ephemeral=True,
-            )
-
-    async def handle_logging_button(self, interaction: discord.Interaction, rc_channel: discord.TextChannel):
-        logs = get_actions_for_channel(interaction.guild.id, rc_channel.id, limit=200, offset=0)
-        if not logs:
-            return await interaction.response.send_message("No logged actions for this channel yet.", ephemeral=True)
-
-        def _shorten_visit_msg(text: str) -> str:
-            if not text or "visit" not in text.lower():
-                return text[:200] + ("..." if len(text) > 200 else "")
-            m = re.search(
-                r"(?:from|From:?)\s*(?:#?\S+\s*`?\[?([^\]`#]+)\]?`?|.+?)\s*(?:to|To:?)\s*(?:#?\S+\s*`?\[?([^\]`#]+)\]?`?|.+?)(?:\s|$)",
-                text,
-                re.IGNORECASE | re.DOTALL,
-            )
-            if m:
-                return f"visit from {m.group(1).strip()} to {m.group(2).strip()}"
-            if "Removed From:" in text and "Added To:" in text:
-                parts = text.split("Added To:")
-                from_part = parts[0].replace("Removed From:", "").strip()
-                to_part = parts[1].strip() if len(parts) > 1 else ""
-                from_name = re.sub(r"`?\[?([^\]#`]+)\]?`?", r"\1", from_part).strip()[:50]
-                to_name = re.sub(r"`?\[?([^\]#`]+)\]?`?", r"\1", to_part).strip()[:50]
-                return f"visit from {from_name} to {to_name}"
-            return text[:200] + ("..." if len(text) > 200 else "")
-
-        per_page = 10
-        pages: list[str] = []
-        for i in range(0, len(logs), per_page):
-            chunk = logs[i: i + per_page]
-            lines: list[str] = []
-            for entry in chunk:
-                created_ts = _fmt_ts(entry["created_at"])
-                marked_ts = _fmt_ts(entry["marked_at"])
-                text = _shorten_visit_msg(entry["message"])
-                lines.append(
-                    f"• **Asked:** `{created_ts}`\n"
-                    f"  **Done:**  `{marked_ts}`\n"
-                    f"  {text}"
+            if visit_type == "normal":
+                insert_action_log(
+                    guild_id=guild.id, channel_id=rc_channel.id, player_id=interaction.user.id,
+                    message=f"🚪 [BUSSATA] Ha bussato alla porta di {target_channel.name}",
+                    created_at=now_time, marked_at=now_time, marked_by_id=self.bot.user.id
                 )
-            pages.append("\n\n".join(lines))
-
-        page_index = 0
-
-        def build_log_embed() -> discord.Embed:
-            emb = discord.Embed(
-                title="📜 Logged Actions",
-                description=pages[page_index],
-                color=EMBED_COLOR_FUCSIA,
-            )
-            emb.set_footer(text=f"Page {page_index + 1}/{len(pages)}")
-            return emb
-
-        log_embed = build_log_embed()
-
-        view = View(timeout=120)
-        btn_prev = Button(emoji="⬅️", style=discord.ButtonStyle.secondary)
-        btn_next = Button(emoji="➡️", style=discord.ButtonStyle.secondary)
-        btn_back = Button(label="Back to Dashboard", style=discord.ButtonStyle.secondary)
-
-        async def refresh(inter: discord.Interaction):
-            if inter.user != interaction.user:
-                return await inter.response.send_message("This menu isn't yours.", ephemeral=True)
-            await inter.response.edit_message(embed=build_log_embed(), view=view)
-
-        async def on_prev(inter: discord.Interaction):
-            nonlocal page_index
-            if page_index > 0:
-                page_index -= 1
-            await refresh(inter)
-
-        async def on_next(inter: discord.Interaction):
-            nonlocal page_index
-            if page_index < len(pages) - 1:
-                page_index += 1
-            await refresh(inter)
-
-        async def on_back(inter: discord.Interaction):
-            if inter.user != interaction.user:
-                return await inter.response.send_message("This menu isn't yours.", ephemeral=True)
-            dash_embed = self._build_dashboard_embed(inter.guild, rc_channel)
-            back_view = DashboardView(self, rc_channel=rc_channel, invoker=interaction.user)
-            await inter.response.edit_message(embed=dash_embed, view=back_view)
-
-        btn_prev.callback = on_prev
-        btn_next.callback = on_next
-        btn_back.callback = on_back
-
-        if len(pages) > 1:
-            view.add_item(btn_prev)
-            view.add_item(btn_next)
-        view.add_item(btn_back)
-
-        await interaction.response.edit_message(embed=log_embed, view=view)
-
-    # ------------------------------------------------------------------ #
-    # Admin: action log command
-    # ------------------------------------------------------------------ #
-
-    @commands.command(name="actionlog")
-    @commands.has_permissions(administrator=True)
-    async def actionlog(self, ctx: commands.Context, channel: discord.TextChannel, limit: int = 20):
-        """Show recent logged actions for a rolechat without opening the dashboard.
-
-        Usage: .actionlog #channel [limit=20]
-        """
-        limit = max(1, min(limit, 100))
-        logs = get_actions_for_channel(ctx.guild.id, channel.id, limit=limit, offset=0)
-        if not logs:
-            return await ctx.send(f"No logged actions for {channel.mention}.")
-
-        per_page = 10
-        pages: list[str] = []
-        for i in range(0, len(logs), per_page):
-            chunk = logs[i: i + per_page]
-            lines: list[str] = []
-            for entry in chunk:
-                created_ts = _fmt_ts(entry["created_at"])
-                marked_ts = _fmt_ts(entry["marked_at"])
-                msg = (entry["message"] or "")[:200]
-                lines.append(
-                    f"• **Asked:** `{created_ts}`  **Done:** `{marked_ts}`\n  {msg}"
+                if hasattr(moving_cog, "process_knock"):
+                    await moving_cog.process_knock(ctx, target_channel, guild_data)
+                
+                # Feedback effimero transitorio (solo per confermare l'invio alla dashboard e chiudere silenziosamente)
+                await interaction.followup.send(f"🔔 **Azione di visita inviata per {house_name}.**", ephemeral=True)
+            else:
+                is_stealth = (visit_type == "stealth")
+                if hasattr(moving_cog, "process_move"):
+                    await moving_cog.process_move(ctx, target_channel, is_stealth=is_stealth, read_only=False)
+                
+                insert_action_log(
+                    guild_id=guild.id, channel_id=rc_channel.id, player_id=interaction.user.id,
+                    message=f"🚪 [INGRESSO DIRECT] Entrato in {target_channel.name} ({visit_type})",
+                    created_at=now_time, marked_at=now_time, marked_by_id=self.bot.user.id
                 )
-            pages.append("\n\n".join(lines))
-
-        page_index = 0
-
-        def build_embed() -> discord.Embed:
-            emb = discord.Embed(
-                title=f"📜 Action Log — #{channel.name}",
-                description=pages[page_index],
-                color=EMBED_COLOR_FUCSIA,
-            )
-            emb.set_footer(text=f"Page {page_index + 1}/{len(pages)} • showing last {limit} entries")
-            return emb
-
-        view = View(timeout=120)
-        btn_prev = Button(emoji="⬅️", style=discord.ButtonStyle.secondary)
-        btn_next = Button(emoji="➡️", style=discord.ButtonStyle.secondary)
-
-        async def on_prev(inter: discord.Interaction):
-            nonlocal page_index
-            if inter.user != ctx.author:
-                return await inter.response.send_message("This menu isn't yours.", ephemeral=True)
-            if page_index > 0:
-                page_index -= 1
-            await inter.response.edit_message(embed=build_embed(), view=view)
-
-        async def on_next(inter: discord.Interaction):
-            nonlocal page_index
-            if inter.user != ctx.author:
-                return await inter.response.send_message("This menu isn't yours.", ephemeral=True)
-            if page_index < len(pages) - 1:
-                page_index += 1
-            await inter.response.edit_message(embed=build_embed(), view=view)
-
-        btn_prev.callback = on_prev
-        btn_next.callback = on_next
-
-        if len(pages) > 1:
-            view.add_item(btn_prev)
-            view.add_item(btn_next)
-
-        await ctx.send(embed=build_embed(), view=view if len(pages) > 1 else None)
-
+                # Feedback effimero transitorio silenzioso (le stampe verranno fatte dal cog Moving)
+                await interaction.followup.send(f"✅ **Azione di ingresso inviata per {house_name}.**", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Errore: Il sistema di movimento del bot è momentaneamente offline.", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Dashboard(bot))
