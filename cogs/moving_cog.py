@@ -3,7 +3,7 @@ import discord
 import asyncio
 from datetime import datetime, timedelta, timezone
 from discord.ext import commands
-from cogs.data_utils import load_guild_data
+from cogs.data_utils import load_guild_data, save_guild_data
 from cogs.surveillance_cog import after_movement_update
 from utils.bot_db import get_role_dashboard
 from utils.embeds import info_embed, warning_embed, error_embed
@@ -11,6 +11,7 @@ from cogs.status_cog import (
     check_move_warning,
     check_knock_warning,
     check_visitblock_warning,
+    check_locked_house_warning,
     StatusWarningConfirmView,
     check_channel_warning,
 )
@@ -234,6 +235,15 @@ class Moving(commands.Cog):
                 if new_channel is not None:
                     stealth = 'stealth' in args
                     read_only = 'read' in args
+                    # ── Locked house warning ──
+                    _lh_text, _lh_hit = check_channel_warning(guild_data, new_channel.id, check_locked_house_warning)
+                    if _lh_hit:
+                        _lh_embed = warning_embed(title="⚠ Locked House", description=_lh_text)
+                        _lh_view = StatusWarningConfirmView(ctx.author.id)
+                        await self._send_warning(ctx, _lh_embed, _lh_view)
+                        await _lh_view.wait()
+                        if not _lh_view.confirmed:
+                            return
                     # ── Visitblock warning ──
                     _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
                     if _vb_hit:
@@ -271,6 +281,15 @@ class Moving(commands.Cog):
                 if new_channel is not None:
                     stealth = 'stealth' in args
                     read_only = 'read' in args
+                    # ── Locked house warning ──
+                    _lh_text, _lh_hit = check_channel_warning(guild_data, new_channel.id, check_locked_house_warning)
+                    if _lh_hit:
+                        _lh_embed = warning_embed(title="⚠ Locked House", description=_lh_text)
+                        _lh_view = StatusWarningConfirmView(ctx.author.id)
+                        await self._send_warning(ctx, _lh_embed, _lh_view)
+                        await _lh_view.wait()
+                        if not _lh_view.confirmed:
+                            return
                     # ── Visitblock warning ──
                     _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
                     if _vb_hit:
@@ -392,6 +411,15 @@ class Moving(commands.Cog):
                 channel_name = f'{guild_data["house_prefix"]}{channel_str}'
                 new_channel = discord.utils.get(category.channels, name=channel_name)
                 if new_channel is not None:
+                    # ── Locked house warning ──
+                    _lh_text, _lh_hit = check_channel_warning(guild_data, new_channel.id, check_locked_house_warning)
+                    if _lh_hit:
+                        _lh_embed = warning_embed(title="⚠ Locked House", description=_lh_text)
+                        _lh_view = StatusWarningConfirmView(ctx.author.id)
+                        await self._send_warning(ctx, _lh_embed, _lh_view)
+                        await _lh_view.wait()
+                        if not _lh_view.confirmed:
+                            return
                     await self.process_knock(ctx, new_channel, guild_data)
                 else:
                     await ctx.send("Channel not found")
@@ -406,6 +434,16 @@ class Moving(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
+                # ── Locked house warning ──
+                if new_channel is not None:
+                    _lh_text, _lh_hit = check_channel_warning(guild_data, new_channel.id, check_locked_house_warning)
+                    if _lh_hit:
+                        _lh_embed = warning_embed(title="⚠ Locked House", description=_lh_text)
+                        _lh_view = StatusWarningConfirmView(ctx.author.id)
+                        await self._send_warning(ctx, _lh_embed, _lh_view)
+                        await _lh_view.wait()
+                        if not _lh_view.confirmed:
+                            return
                 # ── Visitblock warning ──
                 _vb_text, _vb_hit = check_channel_warning(guild_data, ctx.channel.id, check_visitblock_warning)
                 if _vb_hit:
@@ -434,11 +472,14 @@ class Moving(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
-    OWNER_IDS = (450772749829537793, 691180618402234399)
+    OWNER_IDS = (450772749829537793, 691180618402234399)  # Bidet, Asfro
 
     @commands.command(aliases=["pendingknocks", "showknocks", "knocks"])
     async def pendingknock(self, ctx, *args):
         """Check if any knocks are pending and show the oldest pending knock age."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command")
+            return
         scan_all = "restart" in [a.lower() for a in args]
         if scan_all and ctx.author.id not in self.OWNER_IDS:
             await ctx.send("Only the bot owners can scan all servers.")
@@ -902,6 +943,84 @@ class Moving(commands.Cog):
                 pass  # message was deleted externally, nothing to do
             except Exception as e:
                 print(f"[Moving] Error handling knock timeout: {e}")
+
+    @commands.command(name="movehouse")
+    async def movehouse(self, ctx, src_channel: discord.TextChannel, dest_channel: discord.TextChannel):
+        """Bulk-move all residents from one house to another. Admin only."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houselist = guild_data.get("houselist") or []
+        if not isinstance(houselist, list):
+            houselist = []
+        if src_channel.name not in houselist or dest_channel.name not in houselist:
+            await ctx.send("Both channels must be registered houses.")
+            return
+        if src_channel.id == dest_channel.id:
+            await ctx.send("Source and destination cannot be the same house.")
+            return
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+        members_in_src = [
+            m for m in src_channel.members
+            if src_channel.permissions_for(m).send_messages
+            and (alive_role in m.roles or alt_role in m.roles or sponsor_role in m.roles)
+        ]
+        if not members_in_src:
+            await ctx.send("No residents to move.")
+            return
+        names = ", ".join(m.mention for m in members_in_src)
+        confirm_msg = await ctx.send(
+            f"Move all residents from {src_channel.mention} → {dest_channel.mention}?\n"
+            f"This affects: {names}\n"
+            f"Reply **yes** to confirm, anything else to cancel."
+        )
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
+        try:
+            response = await self.bot.wait_for("message", timeout=60, check=check)
+        except asyncio.TimeoutError:
+            await confirm_msg.edit(content="Timed out. Action cancelled.")
+            return
+        if response.content.lower() != "yes":
+            await confirm_msg.edit(content="Action cancelled.")
+            return
+        moved = []
+        for member in members_in_src:
+            await src_channel.set_permissions(member, overwrite=None)
+            await dest_channel.set_permissions(member, read_messages=True, send_messages=True)
+            current = guild_data.setdefault("current_houses", {})
+            house_list = current.setdefault(str(member.id), [])
+            if src_channel.id in house_list:
+                house_list.remove(src_channel.id)
+            if dest_channel.id not in house_list:
+                house_list.append(dest_channel.id)
+            current[str(member.id)] = house_list
+            if str(member.id) in guild_data["member_homes"]:
+                if guild_data["member_homes"][str(member.id)] == str(src_channel.id):
+                    guild_data["member_homes"][str(member.id)] = str(dest_channel.id)
+            moved.append(member.display_name)
+        save_guild_data(ctx.guild.id, guild_data)
+        color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+        narration = discord.Embed(
+            description=(
+                "The call echoes through the old dwelling.\n"
+                "Every soul stirs and follows.\n"
+                "A great migration begins."
+            ),
+            color=color
+        )
+        await src_channel.send(embed=narration)
+        moved_str = ", ".join(f"**{n}**" for n in moved)
+        await ctx.send(
+            f"🏠 Moved to {dest_channel.mention} — {len(moved)} resident{'s' if len(moved) != 1 else ''} relocated.\n"
+            f"Moved: {moved_str}"
+        )
 
 
 async def setup(bot):

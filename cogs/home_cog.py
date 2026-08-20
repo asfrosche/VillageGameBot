@@ -10,6 +10,7 @@ from cogs.surveillance_cog import after_movement_update
 from cogs.status_cog import (
     check_move_warning,
     check_visitblock_warning,
+    check_locked_house_warning,
     StatusWarningConfirmView,
     check_channel_warning,
 )
@@ -110,11 +111,32 @@ class Home(commands.Cog):
                         if not _st_view.confirmed:
                             return
                 # ── End status warning ──
+                # ── Locked house check ──
+                locked_homes = []
+                category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+                if not category:
+                    await ctx.send("Houses category not found")
+                    return
+                members = ctx.channel.members
+                for member in members:
+                    home_id = guild_data["member_homes"].get(str(member.id))
+                    if home_id:
+                        home_channel = discord.utils.get(category.channels, id=int(home_id))
+                        if home_channel:
+                            _lh_text, _lh_hit = check_channel_warning(guild_data, home_channel.id, check_locked_house_warning)
+                            if _lh_hit:
+                                locked_homes.append(home_channel.name)
+                if locked_homes:
+                    unique_locked = ", ".join(f"`{h}`" for h in dict.fromkeys(locked_homes))
+                    _lh_embed = warning_embed(title="⚠ Locked House", description=f"The following homes are locked: {unique_locked}")
+                    _lh_view = StatusWarningConfirmView(ctx.author.id)
+                    await self._send_warning(ctx, _lh_embed, _lh_view)
+                    await _lh_view.wait()
+                    if not _lh_view.confirmed:
+                        return
                 alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
                 sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
                 alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
-                category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
-                members = ctx.channel.members
                 if not category:
                     await ctx.send("Houses category not found")
                     return
@@ -392,6 +414,27 @@ class Home(commands.Cog):
                 async def confirm_callback(interaction):
                     if interaction.user == ctx.author:
                         await interaction.message.delete()
+                        # ── Locked house check ──
+                        category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+                        locked_homes = []
+                        if category:
+                            for member_id, channel_id in guild_data["member_homes"].items():
+                                channel = ctx.guild.get_channel(int(channel_id))
+                                if channel:
+                                    _lh_text, _lh_hit = check_channel_warning(guild_data, channel.id, check_locked_house_warning)
+                                    if _lh_hit:
+                                        locked_homes.append(channel.name)
+                        if locked_homes:
+                            unique_locked = ", ".join(f"`{h}`" for h in dict.fromkeys(locked_homes))
+                            _lh_embed = warning_embed(title="⚠ Locked House", description=f"The following homes are locked: {unique_locked}")
+                            _lh_view = StatusWarningConfirmView(ctx.author.id)
+                            await self._send_warning(ctx, _lh_embed, _lh_view)
+                            await _lh_view.wait()
+                            if not _lh_view.confirmed:
+                                embedn = discord.Embed(title="Canceled", description="Home return command was canceled", color=discord.Color.red(), timestamp=datetime.now())
+                                embedn.set_footer(text="Village Game")
+                                await ctx.send(embed=embedn)
+                                return
                         loading = await ctx.send("Bringing everyone home...")
                         await self.bring_everyone_home(ctx, guild_data)
                         await loading.delete()
