@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import difflib
 import wcwidth
 import discord
 import asyncio
@@ -46,6 +47,7 @@ COMMAND_INDEX = [
     (".pcadd #PC", "Add player to PC/renamed house", "Moving", ["pc", "add", "private"]),
     (".pcremove #PC", "Remove from PC/renamed house", "Moving", ["pc", "remove", "private"]),
     (".addhere #RC", "Add RC's player to this channel", "Moving", ["rc", "add", "channel"]),
+    (".movehouse #src #dest", "Bulk-move all residents from one house to another", "Moving", ["movehouse", "bulk", "move", "relocate"]),
     (".follow @player [stealth]", "Make players in this RC follow @target", "Surveillance", ["follow", "track", "stalk", "move"]),
     (".unfollow @player", "Stop following @player", "Surveillance", ["unfollow", "stop", "track"]),
     (".followlist", "Show all active follow pairs", "Surveillance", ["follow", "list", "pairs"]),
@@ -94,6 +96,7 @@ COMMAND_INDEX = [
     (".ospresetsort", "Reorder preset display categories", "Presets", ["preset", "sort", "order", "admin"]),
     (".ospresetcategories", "Add or remove custom preset categories", "Presets", ["preset", "category", "custom", "admin"]),
     (".vote @player", "Vote or change your vote", "Voting", ["vote", "cast", "change"]),
+    (".patibolo @player", "Start a public execution vote (admin/Overseer)", "Voting", ["execution", "patibolo", "vote", "gallows", "execute"]),
     (".abstain", "Abstain from voting", "Voting", ["abstain", "skip", "vote"]),
     (".manipulate @target @vote", "Force @target's vote to @vote (admin)", "Voting", ["manipulate", "control", "force"]),
     (".removevote @player", "Remove a player's vote", "Voting", ["remove", "vote", "clear"]),
@@ -119,7 +122,8 @@ COMMAND_INDEX = [
     (".setuphouselist", "Init houselist from existing houses", "Lists", ["house", "list", "init", "admin"]),
     (".houselistadd #house", "Add a house to the list", "Lists", ["house", "list", "add", "admin"]),
     (".houselistremove #house", "Remove a house from list", "Lists", ["house", "list", "remove", "admin"]),
-    (".deadlist add @player <team> <role>", "Add to deadlist", "Lists", ["dead", "list", "add", "admin"]),
+    (".deadlist add @player <team> <role> [slot]", "Add to deadlist (optional slot 1-5)", "Lists", ["dead", "list", "add", "admin"]),
+    (".roleslots", "Show all players organized by team slot", "Lists", ["roleslots", "slots", "teams"]),
     (".deadlist remove @player", "Remove from deadlist", "Lists", ["dead", "list", "remove", "admin"]),
     (".deadlist edit @player <team> <role>", "Edit deadlist entry", "Lists", ["dead", "list", "edit", "admin"]),
     (".settarget <channel_id>", "Set target channel (ID, not mention)", "Send Role", ["target", "channel", "set"]),
@@ -136,6 +140,8 @@ COMMAND_INDEX = [
     (".deadrole", "Mark dead, remove house, pin corpse (use in RC)", "Utility", ["dead", "role", "mark", "corpse"]),
     (".deadc", "Move RC to Dead (admin)", "Utility", ["dead", "rc", "admin"]),
     (".corpselist", "List all corpse locations (admin)", "Utility", ["corpse", "list", "dead", "locations"]),
+    (".kill @player [killer]", "Log kill attribution (overseer only, no narration)", "Utility", ["kill", "log", "overseer"]),
+    (".killlog [@player]", "View kill log (admin only, ephemeral)", "Utility", ["kill", "log", "view", "ephemeral"]),
     (".addrole @role @users...", "Give role to members", "Utility", ["role", "add", "give", "admin"]),
     (".removerole <role> <member>", "Remove role (admin)", "Utility", ["role", "remove", "admin"]),
     (".addcategoryperms @role <cat> <perm>", "R=Read, S=Send", "Utility", ["perm", "category", "read", "send", "admin"]),
@@ -157,7 +163,12 @@ COMMAND_INDEX = [
     (".who #ch", "List players in a channel", "Other", ["who", "list", "players", "channel"]),
     (".where #RC", "Show a player's current location", "Other", ["where", "location", "find"]),
     (".map", "Show the game map", "Other", ["map", "game", "overview"]),
-    (".role /.firstpin", "Show first pinned in RC", "Other", ["role", "pinned", "first", "pin"]),
+    (".role", "Show the registered role package (paginated; role card excluded)", "Other", ["role", "package", "pinned", "first", "card"]),
+    (".role register <1-4>", "Register pinned messages as a Role Package", "Other", ["role", "package", "register"]),
+    (".role registercard [message_id]", "Register a Role Card message", "Other", ["role", "card", "register"]),
+    (".role card", "Show the registered Role Card (images included)", "Other", ["role", "card", "image"]),
+    (".role help", "Explain the Role Package workflow", "Other", ["role", "package", "help", "guide", "how"]),
+    ("`/reveal`", "Reveal Role Card ephemerally (overseer/admin, slash only)", "Other", ["reveal", "card", "ephemeral"]),
     (".firstmsg [#ch]", "Show first message in current channel (#ch needs admin)", "Other", ["first", "message", "jump", "oldest"]),
     (".roll @role <n>", "Random players from a role", "Other", ["roll", "random", "pick"]),
     (".ping", "Bot online check", "Other", ["ping", "bot", "online", "check"]),
@@ -246,6 +257,8 @@ COMMAND_INDEX = [
     (".removeactiveability <name>", "Remove active", "Dashboard", ["ability", "active", "remove", "admin"]),
     (".vb", "Toggle visit blocking for a RoleChat (admin)", "Dashboard", ["visit", "block", "vb", "admin"]),
     (".checkvb #channel", "Check if visit blocking is active for a RoleChat (admin)", "Dashboard", ["visit", "block", "check", "admin"]),
+    (".lockhouse #house", "Lock a house (blocks moves/knocks)", "Dashboard", ["house", "lock", "admin"]),
+    (".unlockhouse #house", "Unlock a previously locked house", "Dashboard", ["house", "unlock", "admin"]),
     (".setvisits @user <amt>", "Set visit count", "Dashboard", ["visit", "set", "admin"]),
     (".addvisits @user <amt>", "Add visits", "Dashboard", ["visit", "add", "admin"]),
     (".removevisits @user <amt>", "Remove visits", "Dashboard", ["visit", "remove", "admin"]),
@@ -271,6 +284,15 @@ COMMAND_INDEX = [
     (".lib setwin <#> <team>", "Set winning team", "Library & Stats", ["library", "win", "set", "admin"]),
     (".lib search <term>", "Search by name or player", "Library & Stats", ["library", "search", "find"]),
     (".lib searchdisc <query>", "Search role descriptions & text", "Library & Stats", ["library", "search", "description", "text", "disc"]),
+    (".publishroles", "Build and review a Role Package publishing draft", "Library & Stats", ["roles", "publish", "archive"]),
+    (".resolveplayers", "Show unresolved Role Package players", "Library & Stats", ["roles", "resolve", "players"]),
+    (".resolveplayer #channel @player", "Resolve a Role Chat player", "Library & Stats", ["roles", "resolve", "player"]),
+    (".resolveteam #channel <team>", "Resolve a Role Chat team", "Library & Stats", ["roles", "resolve", "team"]),
+    (".resolvesponsor #channel @sponsor", "Choose the Library Sponsor", "Library & Stats", ["roles", "resolve", "sponsor"]),
+    (".reviewroles", "Review the role publishing draft", "Library & Stats", ["roles", "review", "publish"]),
+    (".reviewteams", "Review role teams in the publishing draft", "Library & Stats", ["roles", "teams", "review"]),
+    (".approvepublish", "Approve and publish the role archive", "Library & Stats", ["roles", "approve", "publish"]),
+    (".libimport", "Import the approved draft into the library", "Library & Stats", ["library", "import", "roles"]),
     (".lib searchos <name or @ping>", "Search games by overseer", "Library & Stats", ["library", "search", "overseer", "host"]),
     (".lib idsearch <id>", "Search by game ID", "Library & Stats", ["library", "search", "id"]),
     (".lib migrateaccount", "Move stats to new account", "Library & Stats", ["library", "migrate", "account"]),
@@ -489,6 +511,45 @@ class ConfirmDeleteView(discord.ui.View):
 class Other(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        """Suggest a correction when a misspelled command is attempted."""
+        if not isinstance(error, commands.CommandNotFound) or ctx.author.bot:
+            return
+        suggestions = self._suggest_commands(ctx.invoked_with)
+        if not suggestions:
+            return
+        prefix = ctx.prefix or "."
+        if len(suggestions) == 1:
+            await ctx.send(f"Did you mean **`{prefix}{suggestions[0]}`**?")
+        else:
+            listed = ", ".join(f"`{prefix}{name}`" for name in suggestions)
+            await ctx.send(f"Did you mean one of: {listed}?")
+
+    def _suggest_commands(self, attempted):
+        """Fuzzy-match an attempted command against all known commands/aliases."""
+        if not attempted:
+            return []
+        attempted_l = attempted.lower()
+        candidates = {}
+        for command in self.bot.walk_commands():
+            for name in {command.name, *command.aliases}:
+                candidates.setdefault(name.lower(), command.qualified_name)
+        cutoff = 0.6 if len(attempted_l) > 4 else 0.75
+        matches = difflib.get_close_matches(attempted_l, list(candidates.keys()), n=3, cutoff=cutoff)
+        results = []
+        for match in matches:
+            if match == attempted_l:
+                continue
+            if match[0] != attempted_l[0]:
+                ratio = difflib.SequenceMatcher(None, attempted_l, match).ratio()
+                if ratio < 0.9:
+                    continue
+            display = candidates[match]
+            if display not in results:
+                results.append(display)
+        return results
 
     @commands.command()
     async def who(self, ctx, channel: discord.TextChannel = None):
@@ -1082,20 +1143,35 @@ class Other(commands.Cog):
         mention_list = ' '.join(user.mention for user in mentions)
         await ctx.send(mention_list, allowed_mentions=AllowedMentions(users=False, roles=False))
         
-    @commands.command(name="firstpin", aliases=["role"])
+    @commands.command(name="firstpin")
     async def firstpin(self, ctx, channel: discord.TextChannel = None):
         """Show the oldest pinned message in a channel."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded")
             return
-        spectator_role = discord.utils.get(ctx.guild.roles, name=guild_data["spectator_role_name"])
-        if not ctx.author.guild_permissions.administrator and channel:
-            if not spectator_role in ctx.author.roles:
-                await ctx.send("You do not have permission to use this command.")
-                return
         if channel is None:
             channel = ctx.channel
+        if not ctx.author.guild_permissions.administrator:
+            role_names = (
+                guild_data.get("alive_role_name"),
+                guild_data.get("dead_role_name"),
+                guild_data.get("alt_role_name"),
+            )
+            player_candidates = []
+            for member in channel.members:
+                if member.bot or member.guild_permissions.administrator:
+                    continue
+                if not any(
+                    role_name and discord.utils.get(ctx.guild.roles, name=role_name) in member.roles
+                    for role_name in role_names
+                ):
+                    continue
+                if channel.permissions_for(member).send_messages:
+                    player_candidates.append(member)
+            if len(player_candidates) != 1 or player_candidates[0].id != ctx.author.id:
+                await ctx.send("You can only view your own Role Chat role.")
+                return
         pins = await channel.pins()
         if not pins:
             await ctx.send("No pinned messages were found in that channel.")
@@ -1650,7 +1726,9 @@ class Other(commands.Cog):
             "**`.who #ch`** ─ List players in a channel\n"
             "**`.where #RC`** ─ Show a player's current location\n"
             "**`.map`** ─ Show the game map\n"
-            "**`.role`/`.firstpinned`** ─ Show first pinned in RC\n"
+            "**`.role`/`.firstpin`** ─ Show registered package or first pinned message\n"
+            "**`.role register <1-4>`** ─ Register a Role Package\n"
+            "**`.role registercard [message_id]`** ─ Register a Role Card\n"
             "**`.firstmsg [#ch]`** ─ Show first message in current channel (#ch needs admin)\n"
             "**`.roll @role <n>`** ─ Random players from a role\n"
             "━━━━━━━━━━━━━━━━\n"
@@ -1797,6 +1875,8 @@ class Other(commands.Cog):
             "━━━━━━━━━━━━━━━━\n"
             "**`.vb`** ─ Toggle visit blocking for a RoleChat\n"
             "**`.checkvb #channel`** ─ Check visit block status\n"
+            "**`.lockhouse #house`** ─ Lock a house (blocks moves/knocks)\n"
+            "**`.unlockhouse #house`** ─ Unlock a previously locked house\n"
             "**`.setvisits #ch <normal> <forced> <stealth>`** ─ Set absolute visit counts\n"
             "**`.addvisits #ch <normal> <forced> <stealth>`** ─ Add visits to counts\n"
             "**`.removevisits #ch <normal> <forced> <stealth>`** ─ Remove from visit counts\n"
@@ -1823,7 +1903,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_gamemanager)
 
     async def help_library(self, ctx):
-        embed = discord.Embed(title="📚 Library & Stats commands", description="21 commands", color=0xff3fb9)
+        embed = discord.Embed(title="📚 Library & Stats commands", description="30 commands", color=0xff3fb9)
         embed.add_field(name="Stats", value=(
             "**`.stats [@player]`** ─ View player statistics\n"
             "**`.winrate`** ─ Winrate stats by team\n"
@@ -1841,6 +1921,17 @@ class Other(commands.Cog):
             "**`.lib searchdisc <query>`** ─ Search role descriptions & text\n"
             "**`.lib searchos <name>`** ─ Search games by overseer\n"
             "**`.lib idsearch <id>`** ─ Search by game ID"
+        ), inline=False)
+        embed.add_field(name="Role Packages & Publishing", value=(
+            "**`.publishroles`** ─ Build a publishing draft\n"
+            "**`.resolveplayers`** ─ Show unresolved players\n"
+            "**`.resolveplayer #ch @player`** ─ Resolve a player\n"
+            "**`.resolveteam #ch <team>`** ─ Resolve a team\n"
+            "**`.resolvesponsor #ch @sponsor`** ─ Choose a Library Sponsor\n"
+            "**`.reviewroles`** ─ Review roles\n"
+            "**`.reviewteams`** ─ Review teams\n"
+            "**`.approvepublish`** ─ Publish the archive\n"
+            "**`.libimport`** ─ Import approved roles into the library"
         ), inline=False)
         embed.add_field(name="Library — Account & Help", value=(
             "**`.lib migrateaccount`** ─ Move stats to new account\n"
