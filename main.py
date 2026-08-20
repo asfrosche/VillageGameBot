@@ -39,6 +39,7 @@ from cogs.meetupmatrix import Meetup
 from cogs.moving_cog import Moving
 from cogs.nominations_cog import Nominations
 from cogs.help_misc_cog import Other
+from cogs.role_package_cog import RolePackageCog
 from cogs.presets_cog import Presets
 from cogs.privatecommands_cog import Privatecommands
 from cogs.send_role import SendRole
@@ -676,6 +677,7 @@ async def startcog():
     await bot.add_cog(Nominations(bot))
     await bot.add_cog(Utility(bot))
     await bot.add_cog(Other(bot))
+    await bot.add_cog(RolePackageCog(bot))
     await bot.add_cog(Privatecommands(bot))
     await bot.add_cog(MessageTracker(bot))
     await bot.add_cog(LocationManager(bot))
@@ -708,6 +710,11 @@ async def startcog():
 
     from cogs.library_admin_cog import GameLibraryAdmin
     await bot.add_cog(GameLibraryAdmin(bot))
+
+    try:
+        await bot.tree.sync()
+    except Exception as e:
+        print(f"Error syncing slash commands: {e}")
 
 
 asyncio.run(startcog())
