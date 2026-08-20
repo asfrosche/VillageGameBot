@@ -1,5 +1,6 @@
 import discord
 import datetime
+import random
 from datetime import datetime
 from discord.ext import commands
 from cogs.data_utils import load_guild_data, save_guild_data, add_player, remove_player, get_team_players
@@ -47,6 +48,36 @@ def _deadlist_usage(action: str) -> str:
         action,
         "❌ **Usage:** `.deadlist add @player <team> <role>` | `.deadlist remove @player` | `.deadlist edit @player <team> <role>`",
     )
+
+
+    def _resolve_name_to_id(self, ctx, player_str: str) -> int | None:
+        """Resolve a player string to a Discord user ID.
+
+        Handles discord.Member mentions (<@id>, <@!id>), raw user IDs, and plain text.
+        Returns the member's id if resolved, otherwise None.
+        """
+        if not player_str:
+            return None
+        raw = player_str.strip()
+        if raw.startswith("<@") and raw.endswith(">"):
+            raw = raw.lstrip("<!@").rstrip(">")
+        try:
+            member = ctx.guild.get_member(int(raw))
+            if member is not None:
+                return member.id
+        except (ValueError, TypeError):
+            pass
+        return None
+
+    def _get_role_from_deadlist(self, player_name: str, guild_id: int) -> tuple[str, str] | None:
+        """Return (team, role) for a player name from the deadlist, or None."""
+        teams = ["village", "evil", "neutral", "rk", "corrupted"]
+        for t in teams:
+            results = get_team_players(t, guild_id)
+            for row in results:
+                if row[0].lower() == player_name.lower():
+                    return (t, row[1])
+        return None
 
 
 def _resolve_player_name(ctx, player_str: str) -> str:
@@ -196,9 +227,58 @@ class Lists(commands.Cog):
         else:
             await ctx.send(f"House list not found")
 
+    @commands.command(aliases=["rh"])
+    async def rollhouses(self, ctx, num_houses: str = "1"):
+        """Randomly select one or more houses from the houselist."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+
+        houselist = guild_data.get("houselist", [])
+        if not houselist:
+            await ctx.send("No registered houses in the server.")
+            return
+
+        if num_houses.lower() == "all":
+            num = len(houselist)
+        else:
+            try:
+                num = int(num_houses)
+            except ValueError:
+                await ctx.send("Insert a valid number or `all`.")
+                return
+
+        if num <= 0:
+            await ctx.send("Insert a valid number.")
+            return
+        if len(houselist) < num:
+            await ctx.send(f"Not enough houses in the houselist (only {len(houselist)} available).")
+            return
+
+        picked = random.sample(houselist, num)
+
+        if num == 1:
+            embed = discord.Embed(
+                title="🎲 House",
+                description=f"**{picked[0]}**",
+                color=0xff3fb9,
+            )
+            embed.set_footer(text=f"Rolled 1 / {len(houselist)} houses")
+        else:
+            houses_str = "\n".join(f"`{i}.` **{h}**" for i, h in enumerate(picked, 1))
+            embed = discord.Embed(
+                title=f"🎲 Houses",
+                description=houses_str,
+                color=0xff3fb9,
+            )
+            embed.set_footer(text=f"Rolled {num} / {len(houselist)} houses")
+
+        await ctx.send(embed=embed)
+
     @commands.command(aliases=["d"])
-    async def deadlist(self, ctx, action: str = None, player: str = None, team: str = None, *, role: str = None):
-        """Show list of dead players along with their roles."""
+    async def deadlist(self, ctx, action: str = None, player: str = None, team: str = None, slot: int = None, *, role: str = None):
+        """Show list of dead players along with their roles. Use .deadlist add @player <team> <role> [slot] to assign a slot."""
         if action is None:
             embed = discord.Embed(title="Deadlist", color=0xff3fb9, timestamp=datetime.now())
             embed.set_footer(text="Village Game")
@@ -222,7 +302,18 @@ class Lists(commands.Cog):
                     )
                     return
                 add_player(player, canonical, role, ctx.guild.id)
-                await ctx.send(f"{player} added to Deadlist")
+                if slot is not None:
+                    guild_data = load_guild_data(ctx.guild.id)
+                    player_slots = guild_data.setdefault("player_slots", {})
+                    mentions = ctx.message.mentions
+                    if mentions:
+                        player_slots[str(mentions[0].id)] = slot
+                    else:
+                        player_id = self._resolve_name_to_id(ctx, player)
+                        if player_id:
+                            player_slots[str(player_id)] = slot
+                    save_guild_data(ctx.guild.id, guild_data)
+                await ctx.send(f"{player} added to Deadlist" + (f" (Slot {slot})" if slot else ""))
             else:
                 await ctx.send(_deadlist_usage("add"))
         elif action == "remove":
@@ -250,9 +341,70 @@ class Lists(commands.Cog):
                     await ctx.send("Invalid team. Use Village, Evil, Neutral, Rk or Corrupted.")
                     return
                 add_player(resolved, canonical, role, ctx.guild.id)
-                await ctx.send(f"{resolved} edited in deadlist.")
+                if slot is not None:
+                    guild_data = load_guild_data(ctx.guild.id)
+                    player_slots = guild_data.setdefault("player_slots", {})
+                    mentions = ctx.message.mentions
+                    if mentions:
+                        player_slots[str(mentions[0].id)] = slot
+                    else:
+                        player_id = self._resolve_name_to_id(ctx, player)
+                        if player_id:
+                            player_slots[str(player_id)] = slot
+                    save_guild_data(ctx.guild.id, guild_data)
+                await ctx.send(f"{resolved} edited in deadlist." + (f" (Slot {slot})" if slot else ""))
             else:
                 await ctx.send("You have to fill all inputs: player, team, role.")
+
+    @commands.command(name="roleslots")
+    async def roleslots(self, ctx):
+        """Show all players organized by team slot. Admin only."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        player_slots = guild_data.get("player_slots", {})
+        slot_players: dict[int, list[tuple]] = {1: [], 2: [], 3: [], 4: [], 5: []}
+        unassigned = []
+        for player_id_str, slot in player_slots.items():
+            member = ctx.guild.get_member(int(player_id_str))
+            if member:
+                name = member.display_name
+            else:
+                name = f"Unknown ({player_id_str})"
+            role_info = self._get_role_from_deadlist(name, ctx.guild.id)
+            if role_info:
+                team, role = role_info
+                entry = (name, role, team)
+            else:
+                entry = (name, "Unknown", "Unknown")
+            if slot in slot_players:
+                slot_players[slot].append(entry)
+            else:
+                unassigned.append(entry)
+        slot_names = {
+            1: "The Vanguard",
+            2: "The Protectors",
+            3: "The Shadows",
+            4: "Slot 4",
+            5: "Slot 5",
+        }
+        embed = discord.Embed(title="🎴 Role Slots", color=0xff3fb9, timestamp=datetime.now())
+        embed.set_footer(text="Village Game")
+        for slot_num in range(1, 6):
+            players = slot_players[slot_num]
+            if players:
+                lines = [f"• **{p[0]}** — {p[1]} ({p[2].capitalize()})" for p in players]
+                embed.add_field(name=f"Slot {slot_num} — {slot_names[slot_num]}", value="\n".join(lines), inline=False)
+            else:
+                embed.add_field(name=f"Slot {slot_num} — {slot_names[slot_num]}", value="*[Empty]*", inline=False)
+        if unassigned:
+            lines = [f"• **{p[0]}** — {p[1]} ({p[2].capitalize()})" for p in unassigned]
+            embed.add_field(name="[Unassigned]", value="\n".join(lines), inline=False)
+        await ctx.send(embed=embed)
 
     @commands.command(name='map')
     async def map_command(self, ctx):
