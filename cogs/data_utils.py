@@ -78,6 +78,8 @@ base_variables = {
     "player_follows": {},
     "player_stalks": {},
     "channel_statuses": {},
+    "locked_houses": {},
+    "player_slots": {},
 }
 
 def load_guild_data(guild_id):

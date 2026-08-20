@@ -113,6 +113,14 @@ def check_visitblock_warning(guild_data, channel_id):
     return None
 
 
+def check_locked_house_warning(guild_data, channel_id):
+    locked = guild_data.get("locked_houses", {})
+    if channel_id in locked:
+        ts = locked[channel_id].get("timestamp", 0)
+        return f"🔒 Locked House\nLocked <t:{ts}:t>"
+    return None
+
+
 # ── Logging helper ────────────────────────────────────────────────────────────
 
 async def _log_status_change(guild, channel_id, action, status_label, moderator):

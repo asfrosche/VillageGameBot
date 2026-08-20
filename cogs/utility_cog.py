@@ -299,13 +299,20 @@ class Utility(commands.Cog):
         return team, role_name.strip()
 
     async def _remove_member_from_side_channels(self, member, category):
+        errors = []
         if not category:
-            return
+            return errors
         for channel in category.channels:
             permissions = channel.permissions_for(member)
             if permissions.send_messages:
-                await channel.set_permissions(member, overwrite=None)
-                await channel.send(f"{member.mention} Leaves")
+                try:
+                    await channel.set_permissions(member, overwrite=None)
+                    await channel.send(f"{member.mention} Leaves")
+                except discord.Forbidden:
+                    errors.append(f"Cannot edit permissions in {channel.mention} — Missing Manage Permissions")
+                except Exception as e:
+                    errors.append(f"Error in {channel.mention}: {e}")
+        return errors
 
     async def _cleanup_follows_on_death(self, guild_id, guild_data, member_id):
         """Remove all follow pairs where member_id is the target (on death)."""
@@ -374,10 +381,12 @@ class Utility(commands.Cog):
         async def confirm_cb(interaction):
             if interaction.user == ctx.author:
                 confirmed["value"] = True
+                confirm_view.stop()
                 await interaction.response.edit_message(content="🧹 Sweeping...", view=None)
 
         async def cancel_cb(interaction):
             if interaction.user == ctx.author:
+                confirm_view.stop()
                 await interaction.response.edit_message(content="Cancelled.", view=None)
 
         confirm_btn = Button(label="✔ Sweep", style=discord.ButtonStyle.green)
@@ -810,7 +819,14 @@ class Utility(commands.Cog):
                         return
                 # ── End status warning ──
                 old_house = None
-                await ctx.channel.edit(category=dead_category)
+                try:
+                    await ctx.channel.edit(category=dead_category)
+                except discord.HTTPException as e:
+                    if e.code == 50035:
+                        await ctx.send("❌ Maximum number of channels reached in the Dead category. Cannot move more RCs to Dead.")
+                    else:
+                        await ctx.send(f"❌ Failed to move channel to Dead category: {e}")
+                    return
                 for member in members:
                     if alive_role in member.roles:
                         current_houses_ids = []
@@ -884,6 +900,15 @@ class Utility(commands.Cog):
                         await self._cleanup_follows_on_death(ctx.guild.id, guild_data, member.id)
                 save_guild_data(ctx.guild.id, guild_data)
                 await ctx.send('Done')
+                os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+                os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+                if os_disc and os_role:
+                    alive_members = [m for m in members if alive_role in m.roles]
+                    if alive_members:
+                        await os_disc.send(
+                            f"{os_role.mention} An RC was moved to Dead. "
+                            "Use `.kill @player [killer]` to log the kill attribution."
+                        )
                 estate_cog = self.bot.get_cog('Estate')
                 if estate_cog:
                     await estate_cog.update_estate_map(ctx.guild)
@@ -908,7 +933,14 @@ class Utility(commands.Cog):
                 channel = ctx.channel
                 members = channel.members
                 old_house = None
-                await ctx.channel.edit(category=dead_category)
+                try:
+                    await ctx.channel.edit(category=dead_category)
+                except discord.HTTPException as e:
+                    if e.code == 50035:
+                        await ctx.send("❌ Maximum number of channels reached in the Dead category. Cannot move more RCs to Dead.")
+                    else:
+                        await ctx.send(f"❌ Failed to move channel to Dead category: {e}")
+                    return
                 for member in members:
                     if alive_role in member.roles:
                         if houses_category:
@@ -1051,32 +1083,57 @@ class Utility(commands.Cog):
             if selected_house is False:
                 return
 
+        errors = []
+
         if str(target_member.id) in guild_data["member_homes"]:
             del guild_data["member_homes"][str(target_member.id)]
             save_guild_data(ctx.guild.id, guild_data)
             await ctx.send(f"{target_member.mention} is now homeless")
 
         if selected_house and guild_data.get("auto_pin_corpse", True):
-            corpse_message = await selected_house.send(f"{target_member.mention} corpse is here")
-            await corpse_message.pin()
+            try:
+                corpse_message = await selected_house.send(f"{target_member.mention} corpse is here")
+                await corpse_message.pin()
+            except discord.Forbidden:
+                errors.append(f"Cannot pin corpse in {selected_house.mention} — Missing Manage Messages")
+            except Exception as e:
+                errors.append(f"Pin error in {selected_house.mention}: {e}")
 
-        await self._remove_member_from_side_channels(target_member, privc_category)
-        await self._remove_member_from_side_channels(target_member, publc_category)
+        privc_errors = await self._remove_member_from_side_channels(target_member, privc_category)
+        publc_errors = await self._remove_member_from_side_channels(target_member, publc_category)
+        errors.extend(privc_errors)
+        errors.extend(publc_errors)
 
         if alive_member:
-            await alive_member.remove_roles(alive_role)
-            await alive_member.add_roles(dead_role)
-            await ctx.send(f"{alive_member.display_name} is now {dead_role.mention}.")
+            try:
+                await alive_member.remove_roles(alive_role)
+                await alive_member.add_roles(dead_role)
+                await ctx.send(f"{alive_member.display_name} is now {dead_role.mention}.")
+            except discord.Forbidden:
+                errors.append(f"Cannot update roles for {alive_member.display_name} — Missing Manage Roles or role is higher than bot")
+            except Exception as e:
+                errors.append(f"Role update error for {alive_member.display_name}: {e}")
         if sponsor_member:
-            await sponsor_member.remove_roles(sponsor_role)
-            await sponsor_member.add_roles(dead_role)
-            await ctx.send(f"{sponsor_member.display_name} is now {dead_role.mention}.")
+            try:
+                await sponsor_member.remove_roles(sponsor_role)
+                await sponsor_member.add_roles(dead_role)
+                await ctx.send(f"{sponsor_member.display_name} is now {dead_role.mention}.")
+            except discord.Forbidden:
+                errors.append(f"Cannot update roles for {sponsor_member.display_name} — Missing Manage Roles or role is higher than bot")
+            except Exception as e:
+                errors.append(f"Role update error for {sponsor_member.display_name}: {e}")
 
         # Clean up follow pairs where dead member was the target
         if alive_member:
             await self._cleanup_follows_on_death(ctx.guild.id, guild_data, target_member.id)
         elif sponsor_member:
             await self._cleanup_follows_on_death(ctx.guild.id, guild_data, target_member.id)
+
+        # Report all errors at the end
+        if errors:
+            await ctx.send("⚠️ **Errors encountered:**")
+            for err in errors:
+                await ctx.send(f"  • {err}")
 
         team = None
         role = None
@@ -1343,6 +1400,162 @@ class Utility(commands.Cog):
             view=view
         )
 
-        await ctx.send(
-            f"Skip-night vote started in {announcements_channel.mention}."
+    @commands.command(name="lockhouse")
+    async def lockhouse(self, ctx, channel: discord.TextChannel):
+        """Lock a house so no moves or knocks are allowed into it."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houselist = guild_data.get("houselist") or []
+        if not isinstance(houselist, list):
+            houselist = []
+        if channel.name not in houselist:
+            await ctx.send(f"❌ {channel.mention} is not a registered house.")
+            return
+        locked = guild_data.setdefault("locked_houses", {})
+        if channel.id in locked:
+            await ctx.send(f"🔒 {channel.mention} is already locked.")
+            return
+        locked[channel.id] = {"timestamp": int(datetime.now(timezone.utc).timestamp())}
+        save_guild_data(ctx.guild.id, guild_data)
+        guild_data = load_guild_data(ctx.guild.id)
+        color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+        embed = discord.Embed(
+            description=(
+                "The doors to this dwelling groan and seal shut.\n"
+                "No one enters. No one leaves.\n"
+                "The house holds its breath."
+            ),
+            color=color
         )
+        await channel.send(embed=embed)
+        await ctx.send(f"🔒 {channel.mention} has been locked.")
+
+    @commands.command(name="unlockhouse")
+    async def unlockhouse(self, ctx, channel: discord.TextChannel):
+        """Unlock a previously locked house."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houselist = guild_data.get("houselist") or []
+        if not isinstance(houselist, list):
+            houselist = []
+        if channel.name not in houselist:
+            await ctx.send(f"❌ {channel.mention} is not a registered house.")
+            return
+        locked = guild_data.get("locked_houses", {})
+        if channel.id not in locked:
+            await ctx.send(f"🔓 {channel.mention} is not locked.")
+            return
+        del guild_data["locked_houses"][channel.id]
+        save_guild_data(ctx.guild.id, guild_data)
+        guild_data = load_guild_data(ctx.guild.id)
+        color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+        embed = discord.Embed(
+            description=(
+                "A key turns in the lock.\n"
+                "The doors ease open.\n"
+                "The house breathes again."
+            ),
+            color=color
+        )
+        await channel.send(embed=embed)
+        await ctx.send(f"🔓 {channel.mention} has been unlocked.")
+
+    @commands.command(name="kill")
+    async def kill(self, ctx, member: discord.Member, *, killer_text: str = None):
+        """Log a kill attribution. Overseer only — pure log, no role changes or narration."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+        if os_role not in ctx.author.roles and not ctx.author.guild_permissions.administrator:
+            await ctx.send("Only overseers or admins can use this command.")
+            return
+        kill_log = guild_data.setdefault("kill_log", {})
+        resolved_killer = None
+        resolved_killer_id = None
+        if killer_text:
+            mentions = [m for m in ctx.message.mentions if m.id != member.id]
+            if mentions:
+                resolved_killer = mentions[0].display_name
+                resolved_killer_id = mentions[0].id
+            else:
+                resolved_killer = killer_text.strip()
+                resolved_killer_id = None
+        else:
+            resolved_killer = ctx.author.display_name
+            resolved_killer_id = ctx.author.id
+        kill_log[str(member.id)] = {
+            "name": member.display_name,
+            "killed_by": resolved_killer,
+            "killed_by_id": str(resolved_killer_id) if resolved_killer_id else None,
+            "logged_by": ctx.author.id,
+            "logged_at": datetime.now(timezone.utc).isoformat(),
+        }
+        save_guild_data(ctx.guild.id, guild_data)
+        await ctx.send(f"☠️ Logged: **{member.display_name}** was killed by **{resolved_killer}**.", ephemeral=True)
+
+    @commands.command(name="killlog")
+    async def killlog(self, ctx, *, member: discord.Member = None):
+        """View kill log. Admin only, ephemeral output."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("Only administrators can use this command.")
+            return
+        kill_log = guild_data.get("kill_log", {})
+        if member:
+            entry = kill_log.get(str(member.id))
+            if not entry:
+                await ctx.send(f"No kill log entry found for **{member.display_name}**.", ephemeral=True)
+                return
+            ts = entry.get("logged_at", "")
+            try:
+                dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
+                age = f"<t:{int(dt.timestamp())}:R>"
+            except Exception:
+                age = "unknown"
+            embed = discord.Embed(
+                title=f"☠️ Kill Log — {entry['name']}",
+                description=(
+                    f"**Killed by:** {entry['killed_by']}\n"
+                    f"**Logged by:** <@{entry['logged_by']}>\n"
+                    f"**When:** {age}"
+                ),
+                color=0xdc143c
+            )
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            if not kill_log:
+                await ctx.send("No kills logged yet.", ephemeral=True)
+                return
+            lines = []
+            for pid, entry in kill_log.items():
+                ts = entry.get("logged_at", "")
+                try:
+                    dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
+                    age = f"<t:{int(dt.timestamp())}:R>"
+                except Exception:
+                    age = "unknown"
+                lines.append(
+                    f"💀 **{entry['name']}** — Killed by: {entry['killed_by']}\n"
+                    f"   Logged by: <@{entry['logged_by']}> · {age}"
+                )
+            embed = discord.Embed(
+                title="☠️ Kill Log",
+                description="\n\n".join(lines) if lines else "No kills logged yet.",
+                color=0xdc143c
+            )
+            await ctx.send(embed=embed, ephemeral=True)
