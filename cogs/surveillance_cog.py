@@ -181,10 +181,11 @@ class Surveillance(commands.Cog):
 
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
         sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+        alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
 
         followers_to_set = []
         for member in ctx.channel.members:
-            if alive_role in member.roles or sponsor_role in member.roles:
+            if alive_role in member.roles or sponsor_role in member.roles or alt_role in member.roles:
                 followers_to_set.append(member)
 
         if not followers_to_set:
