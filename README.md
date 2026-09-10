@@ -1,150 +1,222 @@
 # Village Game Bot 🏡
 
-Welcome to the **Village Game Bot** repository! This is a production-grade, highly-modular Discord bot designed from the ground up to host, automate, and manage large-scale **Discord Mafia & Social Deduction** games. 
+Welcome to the **Village Game Bot** repository! This is a production-grade, highly-modular Discord bot designed to host, automate, and manage large-scale **Discord Mafia & Social Deduction** games (30–40 players). It is built on `discord.py` and ships with several complete sub-systems: a community-simulation (World Cup) engine, a full **Blood on the Clocktower** toolkit, an economy, a live analytics pipeline, and a web dashboard.
 
-Rather than relying on manual moderation, this bot transforms a Discord server into a living "map." Players physically navigate channels (rooms), interact with items, lock/unlock doors, whisper, and participate in a rigid phase structure, while the Game Masters (Overseers) have complete, centralized control.
-
----
-
-## 🧩 Complete System Architecture & Modules (Cogs)
-
-The bot is constructed using a robust, cog-based architecture (`discord.ext.commands.Cog`). Each cog handles a completely isolated aspect of the game mechanics, ensuring a scalable and maintainable codebase.
-
-Here is the complete, comprehensive list of all cogs driving the Village Game Bot:
-
-### 1. `setup_cog.py` (The Foundation)
-Responsible for initializing the game framework.
-* **Role & Channel Binding:** Links server categories, specific roles (Alive, Dead, Alt, Spectator), and log channels to the bot's internal database.
-* **Game Rules Engine:** Configures rules like whether dead players count towards room limits, whether whispers are anonymous, and auto-join knock mechanics.
-* **Configuration:** Exposes commands like `.setup`, `.roleset`, `.categoryset`, and `.settings`.
-
-### 2. `moving_cog.py` (Navigation Engine)
-The heart of the player experience. Transforms channels into a physical map.
-* **Locomotion:** Players use `.move <house>` to transfer between rooms. The bot dynamically strips read/write permissions from the old room and grants them to the new room.
-* **Knocking System:** If a room is closed, players can `.knock`. Those inside are prompted to type `open` or `refuse`. Refusals can optionally leak who is inside based on game settings.
-* **Stealth Mode:** Appending `stealth` to commands allows movement without triggering automated "Player joined/left" announcements.
-
-### 3. `home_cog.py` (Spawn & Reset Logic)
-Manages the "base" states of the players.
-* **Random Initialization:** Automatically assigns players to randomized houses and private RoleChats at the start of a game.
-* **Phase Resets:** With a single command (`.home return`), Overseers can snap every player out of their current locations and instantly teleport them back to their assigned homes.
-
-### 4. `handling_cog.py` (Dynamic World Building)
-Manages the physical destruction and creation of the map in real-time.
-* **Map Events:** Use `.destroy` to simulate an explosion or map collapse—it removes everyone, moves the channel to an inaccessible category, and broadcasts a global event. Use `.rebuild` to bring it back.
-* **Private Chats:** Overseers can dynamically spin up temporary rooms using `.newpc` and assign an owner using `.setowner`. The owner can later `.end` the chat to kick everyone out.
-
-### 5. `voting_cog.py` (Core Social Deduction)
-Handles the primary mechanics of Mafia (voting and lynching).
-* **Vote Tracking:** A robust system allowing players to `.vote`, `.abstain`, or `.removevote`.
-* **Abilities:** Supports ability-driven interactions like `.manipulate` (forcing a player's vote elsewhere secretly).
-* **Tallying:** Generates comprehensive vote tallies (`.votelist`) and allows resetting after the execution.
-
-### 6. `nominations_cog.py` (Economy & Trials)
-An advanced variant of voting tied to an economy system.
-* **Token Economy:** Players are granted tokens (`.addtokens`, `.tokens`).
-* **Trial System:** Players spend tokens to `.accuse` someone. This spins up a dedicated text channel for the trial.
-* **Interventions:** Other players can spend tokens to `.intervene` and inject messages into the trial channel. Overseers can halt trials with `.stopvotes`.
-
-### 7. `item_drop_cog.py` (Interactive Drops)
-A fully persistent, SQLite-backed interactive game system.
-* **Interactive Spawning:** Overseers use `.dropitem` to spawn a rich UI embed inside a room representing an item (e.g., "Wooden Key").
-* **Atomic Concurrency:** Uses `discord.ui.View` persistent buttons and atomic database transactions to ensure race conditions (two people clicking at the exact same millisecond) never result in duplicate item claims.
-* **Expiration Engine:** Runs a continuous `tasks.loop` to monitor drops, disabling buttons automatically when the expiration time hits.
-
-### 8. `utility_cog.py` (Game Master Tools)
-A suite of commands designed to keep the game flowing.
-* **Phase Shifts:** `.day` and `.night` instantly bulk-modify permissions across the server, locking or unlocking the map.
-* **Sweeping & Logging:** `.broom` bulk-deletes messages while preserving pins. `.log` takes a full transcript of a channel and outputs it cleanly to the Overseer channel.
-* **Death Handling:** `.deadrole` executes a player—revoking access, appending them to the graveyard, moving their chat, and pinning a customized "corpse" message in the room they died in.
-
-### 9. `meetupmatrix.py` (The Meetup Matrix)
-A highly requested feature for social deduction hosts.
-* **Passive Tracking:** Silently records every time two players exist in the same room simultaneously during a specific phase.
-* **Generation:** Spits out a visual "Meetup Matrix" showing exactly who interacted with whom, drastically cutting down manual host labor.
-
-### 10. `lists_cog.py` & `infos_cog.py` (Information Displays)
-* **Lists:** Maintains the `.houselist` (which rooms are currently open), the `.playerlist` (who is currently alive), and the `.deadlist` (graveyard with roles).
-* **Infos:** Allows hosts to append text descriptions to channels (e.g., "The kitchen smells like gas") via `.info`.
-
-### 11. `other_cog.py` (The Hub)
-Contains global commands that don't fit into specific mechanics.
-* **Locators:** `.where` finds a specific player's exact channel. `.who` lists everyone in the current channel. `.loc` dumps a global view of all populated rooms.
-* **Fun & Timing:** Contains `.ping`, global `.narrate`, random `.roll`, and asynchronous countdown `.timer` commands.
-* **Help System:** Houses the dynamic, dropdown-based UI for `.help`.
+Rather than relying on manual moderation, this bot turns a Discord server into a living "map." Players physically navigate channels (rooms), interact with items, knock on doors, whisper, and take part in a rigid Day/Night phase structure, while Game Masters (Overseers) get complete, centralized control.
 
 ---
 
-## 🔍 Additional Sub-Systems & Specialty Cogs
+## ✨ Features at a glance
 
-These modules handle specific subset features, minigames, or behind-the-scenes logging.
-
-### 12. `actions_logging_cog.py` (Bot Mentions Interceptor)
-* **Approval Logging:** Intercepts bot/role mentions inside private player channels, sending them to a central GM log.
-* **Interactive Controls:** Embeds `Done` and `Cancel` buttons allowing Game Masters to track and mark player actions as complete in real-time.
-
-### 13. `library_cog.py` (Game Codex & Searching)
-* **Role/Rule Directory:** Hosts a massive embedded archive of game roles, definitions, rules, and alignment lists.
-* **Safe Formatting:** Utilizes character limits split safely across multiple fields to prevent Discord API characters overflow errors.
-
-### 14. `meeting_cog.py` (Meeting Room Scheduler)
-* **Scheduled Collisions:** Allows hosts to lock and unlock designated meeting locations, controlling when group discussions can occur.
-
-### 15. `overseer_cog.py` (GM Override Panels)
-* **Admin Controls:** Gives Game Masters special tools to directly override player permissions, edit stats, manually force move updates, and oversee the entire game flow.
-
-### 16. `estate_cog.py` (Estate Mapping & Coordinates)
-* **Large Property Attributes:** Manages player ownership of estates, coordinates, dynamic mapping, and room permissions for larger properties outside the standard home layout.
-
-### 17. `send_role.py` (Confident Role Dispatcher)
-* **Target Channels:** Allows hosts to set a private destination channel using `.settarget` and dispatch encrypted or plain-text role files dynamically with `.sendrole` or `.sr`.
-
-### 18. `tracker_cog.py` (Activity Metrics)
-* **Stat Tracker:** Keeps metrics on message counts across specified channels. Enables commands like `.statss`, `.start_tracking`, and `.stop_tracking`.
-
-### 19. `privatecommands_cog.py` (Developer & Fun Triggers)
-* **Guild Diagnostics:** Gives the developer (Bidet) commands to list guilds, generate invitations, leave servers, and simulate user webhooks (`.fake`).
-* **Interaction Commands:** Includes playful triggers like `.amore` and `.fart`.
-
-### 20. `aux_battle.py` (Combat & Battle Engine)
-* **Conflict Resolution:** Helper algorithms and commands to roll, resolve, and output battlefield states or user fights during physical conflicts in the game.
-
-### 21. `senet_cog.py` & `soldati_cog.py` (Interactive Minigames)
-* **Senet Game:** Features a fully playable implementation of the ancient board game Senet directly in Discord using interactive views.
-* **Soldati Game:** Handles the special "Soldati" minigame or combat scenario to decide outcomes dynamically.
-
-### 22. `bday.py` (Birthday Reminders)
-* **Birthday tracker:** Simple utilities to register and announce player birthdays.
-
-### 23. `location_manager.py` & `game_manager.py` (Core Coordinators)
-* Background manager systems tracking channel transitions and player mappings in memory.
+- 🗺️ **Living map** — channels are physical rooms; players move, knock, sneak and get moved around.
+- 🗳️ **Voting & lynching** — classic social-deduction votes plus a token-based accusation/trial system.
+- 🪙 **Economy & items** — shop, wallet/RC balances, inventories, trading and interactive item drops.
+- 🛎️ **Role packages** — register pinned-message role packages, role cards, and publish archives.
+- 🕵️ **Surveillance** — follow/track/stalk relationships for hosts and over-informing roles.
+- 📊 **Analytics** — every command execution is recorded, exposed via `.failures`/`.analytics` and a FastAPI dashboard.
+- 🕰️ **Scheduling** — EN/IT game calendars, meeting-room scheduler, meetup matrix, birthday reminders.
+- 📌 **Sticky messages** — silent, cooldown-based re-pinned messages per channel.
 
 ---
 
-## 🛠️ Technology Stack
+## 🧩 Architecture
 
-* **Language:** Python 3.12+
-* **Framework:** `discord.py` 2.x
-* **Databases:** 
-  * `item_drops.db` (SQLite3) for persistent, transactional item drops.
-  * Local JSON datastores for guild configurations and volatile phase data.
-* **Async Engine:** Heavy utilization of `asyncio` for simultaneous background expiration checking and dynamic UI updating without blocking the command execution stream.
+The bot is constructed using a robust, cog-based architecture (`discord.ext.commands.Cog`). Every cog handles an isolated aspect of the game. All cogs live under `cogs/`, are registered in `main.py` (`startcog()`), and some heavy ones (`library_cog`, `library_it_cog`, `meeting_cog`, `os_info_cog`) are loaded dynamically via `bot.load_extension` on `on_ready`.
+
+Persistence is **SQLite-first** through `utils/bot_db.py` (guild settings, invites, deadlist, players, and dedicated per-feature DBs), with legacy JSON data auto-migrated on first run. A background **analytics pipeline** (`utils/analytics/`) writes every command execution to `data/analytics.db`.
 
 ---
 
-## 🚀 Deployment & Installation
+## 📦 Cog reference
 
-The bot is designed to run in modern asynchronous environments (e.g., local host, Pterodactyl Panel, Docker).
+### A. Core game loop
 
-1. Clone the repository to your host.
-2. Install the necessary packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Set up your `.env` or configuration file with the bot token.
-4. Run the main initialization script:
-   ```bash
-   python main.py
-   ```
-5. Once the bot is in your server, assign it the **Administrator** permission.
-6. The host must run `.setup` to map the server categories to the bot's datastore.
+| Cog file | Class | What it does |
+|---|---|---|
+| `setup_cog.py` | `Setup` | Foundation. Maps categories/roles/channels (Alive, Sponsor, Dead, Alt, log channels…) to the datastore. `.setup`, `.roleset`, `.channelset`, `.categoryset`, `.settings`. |
+| `moving_cog.py` | `Moving` | The player navigation engine. `.move`, `.knock`, `.renmove`, `.pendingknock`, `.movehouse`, plus force-move host tools. Stealth mode suppresses join/leave messages. |
+| `home_cog.py` | `Home` | Spawn & reset logic. `.home`, `.home return`, `.owner`, `.rolechat initialize`, `.home set/mset/list/delete`. |
+| `handling_cog.py` | `Handling` | Dynamic world building. `.destroy`, `.rebuild`, `.decay`, `.newpc`, `.mergepc`, `.close`, `.setowner`, `.end`, `.public`/`.private`. |
+| `voting_cog.py` | `Voting` | Core lynching. `.vote`, `.abstain`, `.manipulate`, `.removevote`, `.remvote`, `.skipnight`, `.patibolo`, `.votelist`, `.resetvotes`. |
+| `nominations_cog.py` | `Nominations` | Token economy + trials. `.addtokens`, `.accuse`, `.intervene`, `.voten`, `.stopvotes`, `.clearvotes`. |
+| `utility_cog.py` | `Utility` | Game Master toolbox. `.day`/`.night` phase shifts, `.broom`/`.fbroom` sweeping, `.log` transcripts, `.deadrole`/`.dead`, kill logs, role management, `.endgame`. |
+| `status_cog.py` | `Status` | Per-channel **Status Manager** (protection, roleblock, visitblock, immunity, stealth, untargetable + custom statuses). Integrated movement warnings. `/status`, `.statuslist`. |
+
+### B. Economy, items & abilities
+
+| Cog file | Class | What it does |
+|---|---|---|
+| `economy_cog.py` | `Economy` | RC balances/wallets, shop, `.buy`/`.sell`, inventories, `.trade`, `.collect`, `.leaderboard`. |
+| `item_drop_cog.py` | `ItemDrop` | Interactive, SQLite-backed item drops on persistent buttons with atomic claim guarantees and an expiration loop. |
+| `dashboard_cog.py` | `Dashboard` | Player-facing role sheet/abilities UI (`.dashboard`), active/passive abilities, visit blocking (`.vb`), action log, house locks. |
+| `presets_cog.py` | `Presets` | Ability preset management with categories (`.preset`, `.ospreset`). |
+
+### C. Surveillance, intel & logging
+
+| Cog file | Class | What it does |
+|---|---|---|
+| `surveillance_cog.py` | `Surveillance` | Follow/track/stalk relationships; hooks into movement for automated updates. |
+| `os_info_cog.py` | `Overseer` | The **Overseer Intelligence Board** (own `db/overseer.db`): per-player effect cards, `.setboard`, `.addcard`, `.refreshcards`. |
+| `actions_logging_cog.py` | `ActionsLogging` | Central action log channel; intercepts role/bot mentions and tracks player actions with approval buttons. |
+| `tracker_cog.py` | `MessageTracker` | Message-count metrics (`.statss`, `.serverstats`, `.start_tracking`). |
+
+### D. Communication & navigation helpers
+
+| Cog file | Class | What it does |
+|---|---|---|
+| `help_misc_cog.py` | `Other` | The hub: dynamic dropdown-based `.help`, `.sh` search, `.who`, `.where`, `.map`, `.narrate`, `.timer`, `.roll`, `.revive`, `.loc`, `.timestamp`. |
+| `meetupmatrix.py` | `Meetup` | Passive **who-met-whom** adjacency matrix (`.meetupmatrix`, `.allmeets`). |
+| `meeting_cog.py` | `MeetingCog` | Meeting-room scheduler — requests, cooldowns, blocked users, archives (`.meeting`, `.endmeeting`, `.meetingconfig`). Integrates with `Meetup`. |
+| `channel_cog.py` | `ChannelMap` | Visual PC/public maps (`.channels`, `.publicmap`, `.privatemap`). |
+| `location_manager.py` | `LocationManager` | Timezone/location features (`.mysetloc`, `.localtime`, `.near`, `.mapp`, `.mapheat`) via `timezonefinder`/`geopy`. |
+
+### E. Game library & stat archives
+
+| Cog file | Class | What it does |
+|---|---|---|
+| `library_cog.py` | `GameLibrary` | English game/role codex (`lib`/`libit` group): add/search/edit games, `stats`, `winrate`, `relations`, `missingids`. |
+| `library_it_cog.py` | `GameLibraryIT` | Italian library (`libit` group) sharing the EN database & views. |
+| `library_admin_cog.py` | `GameLibraryAdmin` | Interactive admin browser for the library (`libadmin`). |
+| `role_package_cog.py` | `RolePackageCog` | Registers pinned-message role packages, role cards/teams, and the full publishing pipeline (`.publishroles`, `.reviewroles`, `.approvepublish`, `.libimport`). `/reveal` slash command. |
+| `send_role.py` | `SendRole` | Forwards replied messages to a configured target channel (`.settarget`, `.sendrole`/`.sr`), plus `.teamroll`. |
+
+### F. Scheduling, misc & developer tools
+
+| Cog file | Class | What it does |
+|---|---|---|
+| `game_manager.py` | `GameManager` | Legacy lobby/sign-up system with persistent buttons (`.startgame`, `.addplayer`, `.closegame`). |
+| `game_manager_en.py` / `game_manager_it.py` | `GameManagerEn` / `GameManagerIt` | **Heartside Calendar** (EN `.calendar`) and **Calendario** (IT `.calendario`) game-scheduling wizards, each with its own SQLite DB. |
+| `vg_intro.py` | `VgIntro` | Paginated intro to the Village Games (EN/IT) — `.vgintro`/`.vgintro_it`, `/vgi`. |
+| `bday.py` | `Birthday` | Birthday registry + background announcement loop (`.birthdays`, `.birthday add`). |
+| `infos_cog.py` | `Infos` | Free-text notes attached to channels (`.info`). |
+| `lists_cog.py` | `Lists` | `.playerlist`, `.sponsorlist`, `.houselist`, `.deadlist`, `.rollhouses`. |
+| `estate_cog.py` | `Estate` | Estate mapping & room-coordinate management for larger properties. |
+| `sticky_cog.py` | `StickyCog` | **Sticky messages** — silent, cooldown-based re-pinning (`.sticky set/remove/cooldown/list`). |
+| `aux_battle.py` | `AuxBattle` | Auxiliary battle/tournament engine. |
+| `privatecommands_cog.py` | `Privatecommands` | Developer-only diagnostics (guild list, invites, `.fake`) + lighthearted triggers. |
+| `analytics_cog.py` | `AnalyticsCog` | Discord-facing analytics: `.analytics`, `.failures`, `.analyticsexport`, `.analyticsreset`. |
+
+---
+
+## 🎯 Specialized sub-systems
+
+### Blood on the Clocktower (`BOTC/`)
+A complete BOTC implementation as its own cog namespace: role, jinx, fabled, night-order, scripts and help cogs plus a game engine. Uses `botc*`-aliased prefix commands and `/role`, `/help` etc. slash commands to avoid collisions.
+
+### FIFA World Cup simulator (`fifa_data/`)
+Community-draft + match simulation engine:
+- `DraftCog` (`.draftstart`, `.myteam`, `.draftpoints`, `.scoutingboard`, `.topplayers`)
+- `BracketCog` (`.bracket` renders the bracket as PNG)
+- Multi-generation match simulators (`.simulate` with V1–V5 tactical models), live standings, trends and heatmaps.
+- Data is ingested from online providers (`fifa_data/data/`) with a `provider_cache` for responsiveness.
+
+### Analytics & web dashboard (`utils/analytics/`, `analytics_dashboard/`)
+Two faces of the same SQLite `AnalyticsDB`:
+1. **In-bot**: every `before_invoke`/`after_invoke`/error is captured by `utils/analytics/instrumentation.py` and queried via `AnalyticsCog`.
+2. **Web**: a FastAPI single-page dashboard (`analytics_dashboard/`) reads the same DB through REST endpoints and is opened via `main.py`'s `start_dashboard()` (optional; disabled by default).
+
+---
+
+## 🧹 Legacy / dormant modules
+
+Some files exist in the repo but are **not loaded** by the running bot. They are kept for reference or are leftovers:
+
+| File | Status |
+|---|---|
+| `cogs/other_cog.py` | 100% commented-out legacy copy of `help_misc_cog`. Not loaded. |
+| `cogs/auto_visit_cog.py` | Feature-complete auto-visit scheduling cog (`AutoVisit`). **Not loaded** in `main.py`. |
+| `cogs/track_stalk_utils.py` | Orphaned utility; tests assert it should not exist. |
+| `.senet` / `.soldiers` | Advertised in the help index but the cog modules are not present in this release. |
+
+---
+
+## 🛠️ Technology stack
+
+| Layer | Choice |
+|---|---|
+| Language | Python 3.12+ |
+| Framework | `discord.py` 2.x (2.5+) |
+| Storage | SQLite3 (via `utils/bot_db.py` + per-feature DBs), no external DB server required |
+| Async | `asyncio`, `tasks.loop`, persistent `discord.ui` views/buttons |
+| Analytics | Custom SQLite analytics service; optional **PostHog** provider; FastAPI + uvicorn dashboard |
+| Geo/location | `timezonefinder`, `geopy`, `pycountry_convert`, `pytz` |
+| Data/plotting | `numpy`, `pandas`, `matplotlib`, `folium`, `playwright` (charts/maps) |
+| Config | `python-dotenv` + env vars |
+
+---
+
+## 🚀 Deployment & installation
+
+The bot runs in any modern async Python environment (local host, VPS, Pterodactyl, Docker).
+
+```bash
+# 1. Clone & enter the repository
+git clone <repo-url>
+cd Village_Game_sept
+
+# 2. (Recommended) create a virtual environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate    # Linux/macOS
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment (see table below)
+#    Copy the needed keys into a `.env` file next to config.py
+
+# 5. Run
+python main.py
+```
+
+1. Add the bot to your server with **Administrator** permission.
+2. The host runs `.setup <num_houses>` to bind roles, channels and categories.
+3. Use `.help` and `.help {category}` to explore, or `.sh <keyword>` to search commands.
+
+### Environment variables (`.env`)
+
+| Variable | Purpose |
+|---|---|
+| `DISCORD_TOKEN` (or legacy `TOKEN`) | The bot token. **Required.** |
+| `COMMAND_PREFIX` | Command prefix (default `.`). |
+| `DATA_DIRECTORY` | Runtime data folder (default `./data`). |
+| `ANALYTICS_DASHBOARD_PASSWORD` | Password protecting the web dashboard. |
+| `ANALYTICS_DB_PATH` | Override analytics DB location. |
+| `POSTHOG_API_KEY` | Optional PostHog analytics key. |
+
+> ⚠️ Never commit `analytics_secrets.py` or your `.env` — both are git-ignored.
+
+---
+
+## 📁 Project layout
+
+```
+.
+├── main.py                 # Bootstrap: cogs, events, analytics, commands
+├── config.py               # Env-based configuration
+├── requirements.txt
+├── cogs/                   # All game cogs (see reference above)
+├── BOTC/                   # Blood on the Clocktower implementation
+├── fifa_data/              # World Cup draft/simulation engine
+├── utils/
+│   ├── bot_db.py           # SQLite storage layer
+│   ├── embeds.py           # Embed factories
+│   └── analytics/          # Analytics service, providers, instrumentation
+├── analytics_dashboard/    # FastAPI web dashboard
+├── data/                   # Runtime data (git-ignored)
+├── db/                     # SQLite databases (git-ignored)
+├── testing/                # Auto-generated test suite
+└── assets/                 # Static images
+```
+
+---
+
+## 🧪 Tests
+
+Auto-generated command-metadata tests live in `cogs/tests/` and `testing/tests/` and run with `pytest` (`pip install pytest`, then `pytest` from the repo root).
+
+---
+
+## 📌 Contributing
+
+This is a solo/closed project, but PRs are welcome. Keep new features as isolated cogs, register them in `main.py`, add a `setup(bot)` function, and document commands in `help_misc_cog.py`'s `COMMAND_INDEX` and category pages if they should appear in `.help`.
