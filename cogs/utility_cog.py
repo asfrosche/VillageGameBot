@@ -1,0 +1,1871 @@
+import os
+import discord
+import asyncio
+import datetime
+import tempfile
+import re
+from datetime import datetime, timezone, timedelta
+from discord.ext import commands
+from discord.ui import View, Button
+from utils.embeds import warning_embed
+from cogs.data_utils import load_guild_data, save_guild_data, add_player
+from cogs.status_cog import (
+    check_dead_warning,
+    StatusWarningConfirmView,
+    check_channel_warning,
+)
+
+class SkipNightView(discord.ui.View):
+
+    def __init__(self, session, title="🌙 Vote to Skip the Night", message_id=None, guild_id=None):
+        super().__init__(timeout=None)
+        self.session = session
+        self.title = title
+        self.message_id = message_id
+        self.guild_id = guild_id
+
+    def _sync_to_guild_data(self):
+        if self.message_id and self.guild_id:
+            guild_data = load_guild_data(self.guild_id)
+            if guild_data:
+                sessions = guild_data.setdefault("skipnight_sessions", {})
+                sessions[str(self.message_id)] = {
+                    "required": self.session["required"],
+                    "voters": list(self.session["voters"]),
+                    "pinged": self.session["pinged"],
+                    "title": self.title,
+                }
+                save_guild_data(self.guild_id, guild_data)
+
+    def is_alive(self, member, guild_data):
+        alive_role = discord.utils.get(
+            member.guild.roles,
+            name=guild_data["alive_role_name"]
+        )
+
+        return alive_role in member.roles if alive_role else False
+
+    async def refresh_embed(self, interaction):
+
+        guild_data = load_guild_data(interaction.guild.id)
+
+        alive_role = discord.utils.get(
+            interaction.guild.roles,
+            name=guild_data["alive_role_name"]
+        )
+
+        alive_count = len([
+            m for m in interaction.guild.members
+            if alive_role in m.roles
+        ]) if alive_role else 0
+
+        current_votes = len(self.session["voters"])
+        required_votes = self.session["required"]
+
+        progress = (
+            "🟩" * current_votes
+            + "⬛" * max(0, alive_count - current_votes)
+        )
+
+        embed = discord.Embed(
+            title=self.title,
+            description=(
+                f"{progress}\n\n"
+                f"**{current_votes}/{required_votes}** votes needed\n"
+                f"👥 {alive_count} alive players"
+            ),
+            color=0xff3fb9,
+            timestamp=datetime.now()
+        )
+
+        embed.set_footer(text="Votes are anonymous • Village Game")
+
+        await interaction.message.edit(embed=embed, view=self)
+
+    @discord.ui.button(
+        label="✅ Vote",
+        style=discord.ButtonStyle.success
+    )
+    async def vote(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        guild_data = load_guild_data(interaction.guild.id)
+
+        if not self.is_alive(interaction.user, guild_data):
+            return await interaction.response.send_message(
+                "Only Alive players can vote.",
+                ephemeral=True
+            )
+
+        uid = interaction.user.id
+
+        if uid in self.session["voters"]:
+            return await interaction.response.send_message(
+                "You already voted.",
+                ephemeral=True
+            )
+
+        self.session["voters"].add(uid)
+        self._sync_to_guild_data()
+
+        await interaction.response.send_message(
+            "Vote cast anonymously. ✅",
+            ephemeral=True
+        )
+
+        await self.refresh_embed(interaction)
+
+        current = len(self.session["voters"])
+
+        if (
+            current >= self.session["required"]
+            and not self.session.get("pinged")
+        ):
+
+            self.session["pinged"] = True
+            self._sync_to_guild_data()
+
+            os_role = discord.utils.get(
+                interaction.guild.roles,
+                name=guild_data["overseer_role_name"]
+            )
+
+            if os_role:
+                await interaction.channel.send(
+                    f"{os_role.mention} Skip-night vote threshold reached."
+                )
+
+    @discord.ui.button(
+        label="❌ Unvote",
+        style=discord.ButtonStyle.danger
+    )
+    async def unvote(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        guild_data = load_guild_data(interaction.guild.id)
+
+        if not self.is_alive(interaction.user, guild_data):
+            return await interaction.response.send_message(
+                "Only Alive players can interact.",
+                ephemeral=True
+            )
+
+        uid = interaction.user.id
+
+        if uid not in self.session["voters"]:
+            return await interaction.response.send_message(
+                "You have not voted yet.",
+                ephemeral=True
+            )
+
+        self.session["voters"].discard(uid)
+        self._sync_to_guild_data()
+
+        await interaction.response.send_message(
+            "Vote removed. ❌",
+            ephemeral=True
+        )
+
+        await self.refresh_embed(interaction)
+
+        
+class Utility(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def _send_warning(self, ctx, embed, view):
+        os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+        if os_disc:
+            msg = await os_disc.send(embed=embed, view=view)
+            await ctx.send("⚠ Check **overseer-discussion** for status details.")
+        else:
+            msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        return msg
+
+    def _extract_channel_from_arg(self, ctx, value):
+        if not value:
+            return None
+        match = re.fullmatch(r"<#(\d+)>", value.strip())
+        if not match:
+            return None
+        return ctx.guild.get_channel(int(match.group(1)))
+
+    def _normalize_team(self, team_value):
+        if team_value is None:
+            return None
+        normalized = str(team_value).strip().lower()
+        team_map = {
+            "1": "village",
+            "vill": "village",
+            "village": "village",
+            "v": "village",
+            "good": "village",
+            "2": "evil",
+            "evil": "evil",
+            "e": "evil",
+            "bad": "evil",
+            "3": "neutral",
+            "neutral": "neutral",
+            "n": "neutral",
+            "4": "rk",
+            "rk": "rk",
+            "solo": "rk",
+            "5": "corrupted",
+            "corrupted": "corrupted",
+            "corr": "corrupted",
+        }
+        return team_map.get(normalized)
+
+    def _format_log_message(self, message):
+        timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        content = message.content.replace("\n", " ").strip()
+        attachments = " ".join(attachment.url for attachment in message.attachments)
+        if attachments:
+            content = f"{content} {attachments}".strip()
+        if not content:
+            content = "[No text content]"
+        return f"{timestamp} - {message.author}: {content}"
+
+    async def _write_and_send_log(self, send_channel, source_channel, messages):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt", encoding="utf-8") as temp_log:
+            for message in messages:
+                temp_log.write(f"{self._format_log_message(message)}\n")
+            temp_log_name = temp_log.name
+        try:
+            await send_channel.send(
+                f"Here is the log from {source_channel.mention}",
+                file=discord.File(temp_log_name, filename=f"log_{source_channel.name}.txt"),
+            )
+        finally:
+            os.remove(temp_log_name)
+
+    async def _choose_house_for_corpse(self, ctx, member, houses):
+        if not houses:
+            return None
+        if len(houses) == 1:
+            return houses[0]
+        house_lines = [f"{index}. {house.mention}" for index, house in enumerate(houses, start=1)]
+        await ctx.send(
+            f"{member.mention} is in multiple houses. Reply with the house number, mention, or exact name for the corpse:\n"
+            + "\n".join(house_lines)
+        )
+
+        def check(message):
+            return message.author == ctx.author and message.channel == ctx.channel
+
+        try:
+            reply = await self.bot.wait_for("message", timeout=60, check=check)
+        except asyncio.TimeoutError:
+            await ctx.send("Timed out while waiting for the corpse house selection.")
+            return False
+
+        choice = reply.content.strip()
+        if choice.isdigit():
+            index = int(choice) - 1
+            if 0 <= index < len(houses):
+                return houses[index]
+
+        selected_channel = self._extract_channel_from_arg(ctx, choice)
+        if selected_channel in houses:
+            return selected_channel
+
+        lowered_choice = choice.lower()
+        for house in houses:
+            if house.name.lower() == lowered_choice:
+                return house
+
+        await ctx.send("That house selection was not recognized.")
+        return False
+
+    async def _prompt_deadrole_details(self, ctx):
+        await ctx.send(
+            "Please reply with the player's **Role Name** and **Team Number**:\n"
+            "`1` - Villager 🟢\n"
+            "`2` - Evil 🔴\n"
+            "`3` - Neutral 🟡\n"
+            "`4` - RK 🟣\n"
+            "`5` - Corrupted ⚙️\n"
+            "*(Example: `Doctor 1`)*"
+        )
+
+        def check(message):
+            return message.author == ctx.author and message.channel == ctx.channel
+
+        try:
+            reply = await self.bot.wait_for("message", timeout=120, check=check)
+        except asyncio.TimeoutError:
+            await ctx.send("Timed out while waiting for the deadlist details.")
+            return None, None
+
+        parts = reply.content.strip().rsplit(" ", 1)
+        if len(parts) != 2:
+            await ctx.send("Invalid format. Please use `Role Name TeamNumber`, like `Doctor 1`.")
+            return None, None
+
+        role_name, team_value = parts
+        team = self._normalize_team(team_value)
+        if not team or not role_name.strip():
+            await ctx.send("Invalid role or team. Please use a valid team number from 1 to 5.")
+            return None, None
+        return team, role_name.strip()
+
+    async def _remove_member_from_side_channels(self, member, category):
+        errors = []
+        if not category:
+            return errors
+        for channel in category.channels:
+            permissions = channel.permissions_for(member)
+            if permissions.send_messages:
+                try:
+                    await channel.set_permissions(member, overwrite=None)
+                    await channel.send(f"{member.mention} Leaves")
+                except discord.Forbidden:
+                    errors.append(f"Cannot edit permissions in {channel.mention} — Missing Manage Permissions")
+                except Exception as e:
+                    errors.append(f"Error in {channel.mention}: {e}")
+        return errors
+
+    async def _cleanup_follows_on_death(self, guild_id, guild_data, member_id):
+        """Remove all follow pairs where member_id is the target (on death)."""
+        follows = guild_data.get("player_follows", {})
+        removed = []
+        for k, v in list(follows.items()):
+            if isinstance(v, dict) and v.get("target") == str(member_id):
+                removed.append(k)
+        if removed:
+            for k in removed:
+                del follows[k]
+            guild_data["player_follows"] = follows
+            save_guild_data(guild_id, guild_data)
+
+    @commands.command(aliases=['purge'])
+    async def broom(self, ctx, from_id: int = None, to_id: int = None):
+        """Delete the replied-to message and log it."""
+        if not ctx.author.guild_permissions.manage_messages:
+            return await ctx.send("You need Manage Messages permission to use this command.")
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        broom_channel_name = guild_data.get("edit_del_logs")
+        broom_channel = discord.utils.get(ctx.guild.text_channels, name=broom_channel_name)
+        if not broom_channel:
+            return await ctx.send("Broom log channel not found. Set it with `.channelset editdellogs <#channel>`.")
+        messages_to_delete = []
+        if from_id and to_id:
+            try:
+                from_msg = await ctx.channel.fetch_message(from_id)
+                to_msg = await ctx.channel.fetch_message(to_id)
+            except discord.NotFound:
+                return await ctx.send("One or both message IDs not found.")
+            start_msg, end_msg = sorted([from_msg, to_msg], key=lambda m: m.created_at)
+            async for message in ctx.channel.history(after=start_msg, before=end_msg, oldest_first=True):
+                if not message.pinned:
+                    messages_to_delete.append(message)
+            if not from_msg.pinned:
+                messages_to_delete.insert(0, from_msg)
+            if not to_msg.pinned:
+                messages_to_delete.append(to_msg)
+        elif ctx.message.reference:
+            try:
+                replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+            except discord.NotFound:
+                return await ctx.send("The replied-to message could not be found.")
+            async for message in ctx.channel.history(after=replied_message, limit=None):
+                if not message.pinned:
+                    messages_to_delete.append(message)
+            if not replied_message.pinned:
+                messages_to_delete.insert(0, replied_message)
+        else:
+            return await ctx.send("Please reply to a message or provide `from_id` and `to_id`.")
+        if not messages_to_delete:
+            return await ctx.send("No messages to delete in the specified range.")
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        recent = [m for m in messages_to_delete if m.created_at >= cutoff]
+        old = [m for m in messages_to_delete if m.created_at < cutoff]
+
+        summary = f"🧹 **{len(recent)}** recent messages will be bulk deleted."
+        if old:
+            summary += f"\n⚠️ **{len(old)}** messages older than 14 days will be deleted individually (max 50)."
+        summary += "\n\nAre you sure?"
+
+        confirm_view = View(timeout=30)
+        confirmed = {"value": False}
+
+        async def confirm_cb(interaction):
+            if interaction.user != ctx.author:
+                return await interaction.response.send_message("These buttons aren't yours.", ephemeral=True)
+            confirmed["value"] = True
+            confirm_view.stop()
+            try:
+                await interaction.response.edit_message(content="🧹 Sweeping...", view=None)
+            except (discord.NotFound, discord.InteractionResponded):
+                pass
+
+        async def cancel_cb(interaction):
+            if interaction.user != ctx.author:
+                return await interaction.response.send_message("These buttons aren't yours.", ephemeral=True)
+            confirm_view.stop()
+            try:
+                await interaction.response.edit_message(content="Cancelled.", view=None)
+            except (discord.NotFound, discord.InteractionResponded):
+                pass
+
+        confirm_btn = Button(label="✔ Sweep", style=discord.ButtonStyle.green)
+        confirm_btn.callback = confirm_cb
+        cancel_btn = Button(label="❌ Cancel", style=discord.ButtonStyle.red)
+        cancel_btn.callback = cancel_cb
+        confirm_view.add_item(confirm_btn)
+        confirm_view.add_item(cancel_btn)
+
+        confirm_msg = await ctx.send(summary, view=confirm_view)
+        await confirm_view.wait()
+
+        if not confirmed["value"]:
+            return
+
+        await self.broom_delete(ctx, messages_to_delete, old_count=len(old))
+        await confirm_msg.delete()
+
+    @commands.command(name="fbroom")
+    async def fbroom(self, ctx, *args):
+        """Force-delete messages including pinned ones. Logs to broom channel.
+        Use `.fbroom f` to skip the confirmation prompt."""
+        if not ctx.author.guild_permissions.manage_messages:
+            return await ctx.send("You need Manage Messages permission to use this command.")
+        skip_confirm = any(str(a).lower() == "f" for a in args)
+        number_args = []
+        for a in args:
+            if str(a).lower() == "f":
+                continue
+            try:
+                number_args.append(int(a))
+            except (TypeError, ValueError):
+                return await ctx.send("Invalid arguments. Use `.fbroom [from_id] [to_id]` or `.fbroom f`.")
+        from_id = number_args[0] if len(number_args) > 0 else None
+        to_id = number_args[1] if len(number_args) > 1 else None
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        broom_channel_name = guild_data.get("edit_del_logs")
+        broom_channel = discord.utils.get(ctx.guild.text_channels, name=broom_channel_name)
+        if not broom_channel:
+            return await ctx.send("Broom log channel not found. Set it with `.channelset editdellogs <#channel>`.")
+        messages_to_delete = []
+        if from_id and to_id:
+            try:
+                from_msg = await ctx.channel.fetch_message(from_id)
+                to_msg = await ctx.channel.fetch_message(to_id)
+            except discord.NotFound:
+                return await ctx.send("One or both message IDs not found.")
+            start_msg, end_msg = sorted([from_msg, to_msg], key=lambda m: m.created_at)
+            async for message in ctx.channel.history(after=start_msg, before=end_msg, oldest_first=True):
+                messages_to_delete.append(message)
+            messages_to_delete.insert(0, from_msg)
+            if from_msg != to_msg:
+                messages_to_delete.append(to_msg)
+        elif ctx.message.reference:
+            try:
+                replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+            except discord.NotFound:
+                return await ctx.send("The replied-to message could not be found.")
+            async for message in ctx.channel.history(after=replied_message, limit=None):
+                messages_to_delete.append(message)
+            messages_to_delete.insert(0, replied_message)
+        else:
+            return await ctx.send("Please reply to a message or provide `from_id` and `to_id`.")
+        if not messages_to_delete:
+            return await ctx.send("No messages to delete in the specified range.")
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        recent = [m for m in messages_to_delete if m.created_at >= cutoff]
+        old = [m for m in messages_to_delete if m.created_at < cutoff]
+
+        summary = f"🧹 **{len(recent)}** recent messages will be bulk deleted."
+        if old:
+            summary += f"\n⚠️ **{len(old)}** messages older than 14 days will be deleted individually (max 50)."
+        summary += "\n⚠️ **This includes pinned messages.**"
+        confirm_msg = None
+
+        if not skip_confirm:
+            summary += "\n\nAre you sure?"
+
+            confirm_view = View(timeout=30)
+            confirmed = {"value": False}
+
+            async def confirm_cb(interaction):
+                if interaction.user != ctx.author:
+                    return await interaction.response.send_message("These buttons aren't yours.", ephemeral=True)
+                confirmed["value"] = True
+                confirm_view.stop()
+                try:
+                    await interaction.response.edit_message(content="🧹 Sweeping...", view=None)
+                except (discord.NotFound, discord.InteractionResponded):
+                    pass
+
+            async def cancel_cb(interaction):
+                if interaction.user != ctx.author:
+                    return await interaction.response.send_message("These buttons aren't yours.", ephemeral=True)
+                confirm_view.stop()
+                try:
+                    await interaction.response.edit_message(content="Cancelled.", view=None)
+                except (discord.NotFound, discord.InteractionResponded):
+                    pass
+
+            confirm_btn = Button(label="✔ Sweep", style=discord.ButtonStyle.green)
+            confirm_btn.callback = confirm_cb
+            cancel_btn = Button(label="❌ Cancel", style=discord.ButtonStyle.red)
+            cancel_btn.callback = cancel_cb
+            confirm_view.add_item(confirm_btn)
+            confirm_view.add_item(cancel_btn)
+
+            confirm_msg = await ctx.send(summary, view=confirm_view)
+            await confirm_view.wait()
+
+            if not confirmed["value"]:
+                return
+
+        await self.broom_delete(ctx, messages_to_delete, old_count=len(old))
+        if confirm_msg is not None:
+            await confirm_msg.delete()
+
+    async def broom_delete(self, ctx, messages_to_delete, old_count=None):
+        """Delete messages and log to broom channel (shared by .broom and shop broom)."""
+        guild_data = load_guild_data(ctx.guild.id)
+        broom_channel_name = guild_data.get("edit_del_logs")
+        broom_channel = discord.utils.get(ctx.guild.text_channels, name=broom_channel_name)
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
+            for message in messages_to_delete:
+                timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                content = message.content.replace('\n', ' ')[:1000]
+                temp_log.write(f"{timestamp} - {message.author}: {content}\n")
+            temp_log_name = temp_log.name
+
+        if old_count is None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+            recent = [m for m in messages_to_delete if m.created_at >= cutoff]
+            old = [m for m in messages_to_delete if m.created_at < cutoff]
+        else:
+            old = messages_to_delete[-old_count:] if old_count else []
+            recent = messages_to_delete[:-old_count] if old_count else messages_to_delete
+
+        MAX_INDIVIDUAL = 50
+        deleted = 0
+        skipped = 0
+        batch_fallbacks = 0
+
+        for i in range(0, len(recent), 100):
+            batch = recent[i:i + 100]
+            try:
+                await ctx.channel.delete_messages(batch)
+                deleted += len(batch)
+            except discord.HTTPException:
+                batch_fallbacks += 1
+                for msg in batch:
+                    try:
+                        await msg.delete()
+                        deleted += 1
+                        await asyncio.sleep(1.05)
+                    except discord.NotFound:
+                        pass
+                    except discord.HTTPException:
+                        pass
+
+        for msg in old[:MAX_INDIVIDUAL]:
+            try:
+                await msg.delete()
+                deleted += 1
+                await asyncio.sleep(1.05)
+            except discord.NotFound:
+                pass
+            except discord.HTTPException:
+                pass
+
+        if len(old) > MAX_INDIVIDUAL:
+            skipped = len(old) - MAX_INDIVIDUAL
+
+        if broom_channel:
+            await broom_channel.send(f'🧹 **{ctx.author}** used a broom in {ctx.channel.mention}')
+            await broom_channel.send(file=discord.File(temp_log_name))
+        os.remove(temp_log_name)
+
+        msg = f"🧹 Broom swept away **{deleted}** messages."
+        if batch_fallbacks:
+            msg += f"\n⚠️ {batch_fallbacks} batch(es) deleted one-by-one (bulk delete limit / pinned messages)."
+        if skipped:
+            msg += f"\n⚠️ Skipped **{skipped}** messages older than 14 days (limit: {MAX_INDIVIDUAL})."
+        await ctx.send(msg, delete_after=5)
+
+    @commands.command()
+    async def housecheck(self, ctx, hours: int = 24):
+        """List house channels with no messages in the given hours (default 24)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        if hours <= 0:
+            return await ctx.send("Hours must be greater than 0.")
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+        if not houses_category:
+            return await ctx.send("Houses category not found.")
+        now = discord.utils.utcnow()
+        cutoff = now - timedelta(hours=hours)
+        inactive = []
+        for channel in houses_category.text_channels:
+            last = None
+            async for message in channel.history(limit=1, oldest_first=False):
+                last = message.created_at
+                break
+            if last is None:
+                inactive.append(f"{channel.mention} -> No messages ever")
+                continue
+            if last < cutoff:
+                delta = now - last
+                total_secs = int(delta.total_seconds())
+                h, remainder = divmod(total_secs, 3600)
+                m = remainder // 60
+                inactive.append(f"{channel.mention} -> {h:02d}:{m:02d} hours")
+        if inactive:
+            embed = discord.Embed(title=f"🏠 Inactive Houses ({hours}h+)", description="\n".join(inactive), color=0xff3fb9, timestamp=datetime.now())
+            embed.set_footer(text="Village Game")
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(f"All house channels have had messages within the last {hours} hours.")
+
+    @commands.command()
+    async def log(self, ctx, arg1: str = None, arg2: str = None, arg3: str = None):
+        """Log a range of messages (by count, source channel, or send to channel)."""
+        args = [arg for arg in [arg1, arg2, arg3] if arg is not None]
+        send_channel = ctx.channel
+        source_channel = ctx.channel
+
+        if ctx.message.reference:
+            if len(args) > 1:
+                return await ctx.send("When replying, `.log` accepts at most one channel mention for where to send the file.")
+            if args:
+                send_channel = self._extract_channel_from_arg(ctx, args[0])
+                if send_channel is None:
+                    return await ctx.send("Invalid channel mention.")
+            try:
+                start_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+            except discord.NotFound:
+                return await ctx.send("The replied-to message could not be found.")
+
+            messages_to_log = [start_message]
+            try:
+                async for message in ctx.channel.history(after=start_message, before=ctx.message, oldest_first=True):
+                    messages_to_log.append(message)
+            except (discord.Forbidden, discord.HTTPException):
+                return await ctx.send("Could not read the message history in this channel.")
+
+            if not messages_to_log:
+                return await ctx.send("No messages found in that range.")
+
+            await self._write_and_send_log(send_channel, ctx.channel, messages_to_log)
+            if send_channel != ctx.channel:
+                await ctx.send(f"Log generated and sent to {send_channel.mention}.")
+            return
+
+        if not args:
+            return await ctx.send(
+                "Usage:\n"
+                "`.log 25`\n"
+                "`.log 25 #source-channel`\n"
+                "`.log 25 #source-channel #send-channel`\n"
+                "`.log #source-channel 25`"
+            )
+
+        if args[0].isdigit():
+            count = int(args[0])
+            if count <= 0:
+                return await ctx.send("Message count must be greater than 0.")
+            if len(args) >= 2:
+                parsed_channel = self._extract_channel_from_arg(ctx, args[1])
+                if parsed_channel is None:
+                    return await ctx.send("Invalid source channel mention.")
+                source_channel = parsed_channel
+            if len(args) == 3:
+                parsed_channel = self._extract_channel_from_arg(ctx, args[2])
+                if parsed_channel is None:
+                    return await ctx.send("Invalid destination channel mention.")
+                send_channel = parsed_channel
+            if len(args) > 3:
+                return await ctx.send("Too many arguments for `.log`.")
+        else:
+            source_channel = self._extract_channel_from_arg(ctx, args[0])
+            if source_channel is None or len(args) != 2 or not args[1].isdigit():
+                return await ctx.send("Invalid arguments. Example: `.log #house-5 25`.")
+            count = int(args[1])
+            if count <= 0:
+                return await ctx.send("Message count must be greater than 0.")
+
+        permissions = source_channel.permissions_for(ctx.author)
+        if not permissions.read_messages:
+            return await ctx.send("You do not have permission to read messages in that channel.")
+
+        messages_to_log = [message async for message in source_channel.history(limit=count, oldest_first=True)]
+        if not messages_to_log:
+            return await ctx.send("No messages found to log.")
+
+        await self._write_and_send_log(send_channel, source_channel, messages_to_log)
+        if send_channel != ctx.channel:
+            await ctx.send(f"Log generated and sent to {send_channel.mention}.")
+        else:
+            await ctx.send("Log generated.")
+
+    @commands.command()
+    async def day(self, ctx):
+        """Unlock all day-phase channels."""
+        self.bot.dispatch("phase_change", "day", ctx.guild)
+        await self._manage_channels(ctx, True)
+        guild_data = load_guild_data(ctx.guild.id)
+        if guild_data and "peep_holes" in guild_data:
+            del guild_data["peep_holes"]
+            save_guild_data(ctx.guild.id, guild_data)
+
+    @commands.command()
+    async def night(self, ctx):
+        """Lock all day-phase channels."""
+        self.bot.dispatch("phase_change", "night", ctx.guild)
+        await self._manage_channels(ctx, False)
+
+    def _build_stats_embed(self, guild_data, guild):
+        """Build the message stats embed from current tracking data."""
+        counts = guild_data.get("tracked_message_counts") or {}
+        if not counts:
+            return None
+        sorted_counts = sorted(counts.items(), key=lambda x: int(x[1]), reverse=True)
+        list_str = []
+        for user_id_str, count in sorted_counts:
+            user = guild.get_member(int(user_id_str))
+            user_name = user.display_name if user else f"User {user_id_str}"
+            list_str.append(f"**{user_name}:** {count}")
+        embed = discord.Embed(title="📊 Message Stats", color=0xff3fb9, timestamp=datetime.now())
+        embed.description = "\n".join(list_str)
+        embed.set_footer(text="Village Game")
+        return embed
+
+    def _build_votelist_embeds(self, guild_data, guild):
+        """Build votelist embeds from current vote data."""
+        votes_sessions = {
+            "LYNCH SESSION 1": guild_data.get("lynch_votes1", {}),
+            "LYNCH SESSION 2": guild_data.get("lynch_votes2", {}),
+            "LEADER ELECTION": guild_data.get("leader_votes", {}),
+        }
+        embeds = []
+        for session, votes in votes_sessions.items():
+            if not votes:
+                continue
+            session_votes = {}
+            for voter_id, voted_id in votes.items():
+                voted_user = guild.get_member(voted_id)
+                voter_user = guild.get_member(int(voter_id))
+                if voted_user and voter_user:
+                    if voted_user.display_name not in session_votes:
+                        session_votes[voted_user.display_name] = []
+                    session_votes[voted_user.display_name].append(voter_user.display_name)
+            if not session_votes:
+                continue
+            description = ""
+            for voted, voters in session_votes.items():
+                vote_count = len(voters)
+                vote_text = "vote" if vote_count == 1 else "votes"
+                description += f"**{voted} ({vote_count} {vote_text}):**\n" + "\n".join(voters) + "\n\n"
+            embed = discord.Embed(title=session, description=description, color=0xff3fb9, timestamp=datetime.now())
+            embed.set_footer(text="Village Game")
+            embeds.append(embed)
+        return embeds
+
+    async def _manage_channels(self, ctx, allow_messages):
+        guild_data = load_guild_data(ctx.guild.id)
+        if guild_data:
+            os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+            if os_role in ctx.author.roles or ctx.author.guild_permissions.administrator:
+                guild = ctx.guild
+                alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+                sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+                nightembed = discord.Embed(title="DAY ENDS", color=0xff3fb9, timestamp=datetime.now())
+                nightembed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTZjMDliOTUyc2x4MWg1ajU1dmVvbjhlcnU1cmRncHI1ZTZmeXNvb3RrZ3BnNGJ2YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SirUFDS5F83Go/giphy.gif")
+                nightembed.set_footer(text="Village Game")
+                dayembed = discord.Embed(title="DAY STARTS", color=0xff3fb9, timestamp=datetime.now())
+                dayembed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExYzhpcTRsZXpuZ2RtcTl2c2hoMms4cmc4YmFsbDE1Mnl5emM1c3NrZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VDGOdvmp1bpc3PcCry/giphy.gif")
+                dayembed.set_footer(text="Village Game")
+                annnightembed = discord.Embed(title="DAY ENDS", color=0xff3fb9, timestamp=datetime.now())
+                annnightembed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTZjMDliOTUyc2x4MWg1ajU1dmVvbjhlcnU1cmRncHI1ZTZmeXNvb3RrZ3BnNGJ2YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SirUFDS5F83Go/giphy.gif")
+                annnightembed.set_footer(text="Village Game")
+                anndayembed = discord.Embed(title="DAY STARTS", color=0xff3fb9, timestamp=datetime.now())
+                anndayembed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExYzhpcTRsZXpuZ2RtcTl2c2hoMms4cmc4YmFsbDE1Mnl5emM1c3NrZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VDGOdvmp1bpc3PcCry/giphy.gif")
+                anndayembed.set_footer(text="Village Game")
+                await ctx.send(f'{"Locking" if not allow_messages else "Unlocking"} channels')
+                daychat = discord.utils.get(guild.channels, name=guild_data["daydiscussion_channel_name"])
+                megaphone = discord.utils.get(guild.channels, name=guild_data["megaphone_channel_name"])
+                announcements_channel = discord.utils.get(guild.channels, name=guild_data["announcements_channel_name"])
+                lynch_channel1 = discord.utils.get(guild.channels, name=guild_data["lynch_channel_name1"])
+                lynch_channel2 = discord.utils.get(guild.channels, name=guild_data["lynch_channel_name2"])
+                leader_channel = discord.utils.get(guild.channels, name=guild_data["leader_channel_name"])
+                daychat_channels = [daychat, megaphone]
+                voting_channels = [lynch_channel1, lynch_channel2, leader_channel]
+
+                if allow_messages:
+                    # --- DAY START: reset votes and restart message tracking ---
+                    guild_data["lynch_votes1"] = {}
+                    guild_data["lynch_votes2"] = {}
+                    guild_data["leader_votes"] = {}
+                    guild_data["tracked_message_counts"] = {}
+                    guild_data["message_tracking_enabled"] = True
+                    save_guild_data(ctx.guild.id, guild_data)
+                    # Refresh the live vote-count display via the Voting cog
+                    voting_cog = self.bot.get_cog("Voting")
+                    if voting_cog:
+                        await voting_cog.aggiorna_risultati(ctx)
+
+                if announcements_channel:
+                    await announcements_channel.send(f'{alive_role.mention} {sponsor_role.mention}', embed=annnightembed if not allow_messages else anndayembed)
+                    if not allow_messages:
+                        # --- NIGHT START: post stats and votelist into announcements ---
+                        stats_embed = self._build_stats_embed(guild_data, guild)
+                        if stats_embed:
+                            await announcements_channel.send(embed=stats_embed)
+                        vote_embeds = self._build_votelist_embeds(guild_data, guild)
+                        for ve in vote_embeds:
+                            await announcements_channel.send(embed=ve)
+                        # Stop tracking for the night
+                        guild_data["message_tracking_enabled"] = False
+                        save_guild_data(ctx.guild.id, guild_data)
+
+                for channel in daychat_channels:
+                    if channel:
+                    	await channel.set_permissions(alive_role, view_channel=True, send_messages=allow_messages)
+                    	await channel.set_permissions(sponsor_role, view_channel=True, send_messages=allow_messages)
+                    	await channel.send(embed=nightembed if not allow_messages else dayembed)
+                for channel in voting_channels:
+                    if channel:
+                        await channel.set_permissions(alive_role, view_channel=True, send_messages=allow_messages)
+                        await channel.set_permissions(sponsor_role, view_channel=True, send_messages=False)
+                        await channel.send(embed=nightembed if not allow_messages else dayembed)
+                meetings_channel = discord.utils.get(guild.channels, name="👥│meetings")
+                if meetings_channel:
+                    await meetings_channel.set_permissions(alive_role, view_channel=True, send_messages=allow_messages)
+                    await meetings_channel.send(embed=nightembed if not allow_messages else dayembed)
+                await ctx.send('Done')
+            else:
+                await ctx.send("You don't have enough perms to use this command")
+        else:
+            await ctx.send("Guild data not loaded.")
+
+    @commands.command()
+    async def whisper(self, ctx, receiver_channel: discord.TextChannel, *, message: str):
+        """Send an anonymous whisper to a channel."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        if not receiver_channel:
+            await ctx.send("Channel not found")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        whisper_logs_channel = discord.utils.get(ctx.guild.channels, name=guild_data["whisper_logs_channel_name"])
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        if not alive_role:
+            await ctx.send("Alive role not found on this server.")
+            return
+        sender = None
+        for member in ctx.channel.members:
+            if alive_role in member.roles:
+                sender = member
+                break
+        receiver = None
+        for member in receiver_channel.members:
+            if alive_role in member.roles:
+                receiver = member
+                break
+        embed = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
+        if guild_data["showwhispersender"] and sender:
+            embed.add_field(name=f"{sender.mention} `[{sender.display_name}]` sent you a whisper:", value=f'{message}', inline=False)
+        else:
+            embed.add_field(name="Someone sent you a whisper:", value=f'{message}', inline=False)
+        embed.set_footer(text="Village Game")
+        if receiver:
+            await receiver_channel.send(f"{receiver.mention}")
+            eout2 = receiver.mention
+        else:
+            eout2 = receiver_channel.mention
+        await receiver_channel.send(embed=embed)
+        embedlog = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
+        if sender:
+            eout1 = sender.mention
+        else:
+            eout1 = ctx.channel.mention
+        embedlog.add_field(name=f"{eout1} sent a whisper to {eout2}:", value=f'{message}\n\n{receiver_channel.mention}', inline=False)
+        embedlog.set_footer(text="Village Game")
+        if whisper_logs_channel:
+            await whisper_logs_channel.send(embed=embedlog)
+        await ctx.send(f"Whisper sent to {receiver_channel.mention}", mention_author=False)
+
+    @commands.command()
+    async def switch(self, ctx):
+        """Toggle between Player and Sponsor roles."""
+        if ctx.author.guild_permissions.administrator:
+            guild_data = load_guild_data(ctx.guild.id)
+            if guild_data:
+                alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+                sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+                channel = ctx.channel
+                members = channel.members
+                for member in members:
+                    if sponsor_role in member.roles:
+                        await member.remove_roles(sponsor_role)
+                        await member.add_roles(alive_role)
+                        await ctx.send(f'{member.mention} is now {alive_role.mention}')
+                    elif alive_role in member.roles:
+                        await member.remove_roles(alive_role)
+                        await member.add_roles(sponsor_role)
+                        await ctx.send(f'{member.mention} is now {sponsor_role.mention}')
+            else:
+                await ctx.send("Guild data not loaded.")
+        else:
+            await ctx.send("You don't have enough perms to use this command")
+
+    # Comando dead
+    @commands.command()
+    async def dead(self, ctx):
+        """Move the current channel's RC to the Dead category."""
+        if ctx.author.guild_permissions.administrator:
+            guild_data = load_guild_data(ctx.guild.id)
+            if guild_data:
+                rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
+                alt_category = discord.utils.get(ctx.guild.categories, name=guild_data["alt_category_name"])
+                if ctx.channel.category not in [rc_category, alt_category]:
+                    await ctx.send("This command only works in RoleChannels and ALTs RoleChannels.")
+                    return
+                alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+                sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+                houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+                privc_category = discord.utils.get(ctx.guild.categories, name=guild_data["privc_category_name"])
+                publc_category = discord.utils.get(ctx.guild.categories, name=guild_data["publc_category_name"])
+                dead_category = discord.utils.get(ctx.guild.categories, name=guild_data["dead_rc_category_name"])
+                channel = ctx.channel
+                members = channel.members
+                # ── Status warning ──
+                _wt, _hw = check_channel_warning(guild_data, ctx.channel.id, check_dead_warning)
+                if _hw:
+                    _embed = warning_embed(
+                        title="⚠ This player currently has:",
+                        description=_wt,
+                    )
+                    _warn_view = StatusWarningConfirmView(ctx.author.id)
+                    await self._send_warning(ctx, _embed, _warn_view)
+                    await _warn_view.wait()
+                    if not _warn_view.confirmed:
+                        return
+                # ── End status warning ──
+                old_house = None
+                try:
+                    await ctx.channel.edit(category=dead_category)
+                except discord.HTTPException as e:
+                    if e.code == 50035:
+                        await ctx.send("❌ Maximum number of channels reached in the Dead category. Cannot move more RCs to Dead.")
+                    else:
+                        await ctx.send(f"❌ Failed to move channel to Dead category: {e}")
+                    return
+                for member in members:
+                    if alive_role in member.roles:
+                        current_houses_ids = []
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    current_houses_ids.append(house_channel.id)
+                        if current_houses_ids:
+                            guild_data.setdefault("current_houses", {})[str(member.id)] = current_houses_ids
+                            save_guild_data(ctx.guild.id, guild_data)
+                        if str(member.id) in guild_data["member_homes"]:
+                            old_house_id = guild_data["member_homes"].get(str(member.id))
+                            old_house = ctx.guild.get_channel(old_house_id)
+                            del guild_data["member_homes"][str(member.id)]
+                            await ctx.send(f'{member.mention} is now homeless')
+                            save_guild_data(ctx.guild.id, guild_data)
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await house_channel.set_permissions(member, overwrite=None)    
+                                    await house_channel.send(f'{member.mention} Leaves')
+                        if old_house:
+                            homeless_message = await old_house.send(f"{member.mention} doesn't live here anymore")
+                            await homeless_message.pin()
+                        if privc_category:
+                            for priv_channel in privc_category.channels:
+                                permissions = priv_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await priv_channel.set_permissions(member, overwrite=None)
+                                    await priv_channel.send(f'{member.mention} Leaves')
+                        if publc_category:
+                            for publ_channel in publc_category.channels:
+                                permissions = publ_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await publ_channel.set_permissions(member, overwrite=None)
+                                    await publ_channel.send(f'{member.mention} Leaves')
+                    elif sponsor_role in member.roles:
+                        current_houses_ids = []
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    current_houses_ids.append(house_channel.id)
+                        if current_houses_ids:
+                            guild_data.setdefault("current_houses", {})[str(member.id)] = current_houses_ids
+                            save_guild_data(ctx.guild.id, guild_data)
+                        if str(member.id) in guild_data["member_homes"]:
+                            del guild_data["member_homes"][str(member.id)]
+                            await ctx.send(f'{member.mention} is now homeless')
+                            save_guild_data(ctx.guild.id, guild_data)
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await house_channel.set_permissions(member, overwrite=None)
+                        if privc_category:
+                            for priv_channel in privc_category.channels:
+                                permissions = priv_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await priv_channel.set_permissions(member, overwrite=None)
+                        if publc_category:
+                            for publ_channel in publc_category.channels:
+                                permissions = publ_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await publ_channel.set_permissions(member, overwrite=None)
+                # Clean up follow pairs where dead member was the target
+                for member in members:
+                    if alive_role in member.roles or sponsor_role in member.roles:
+                        await self._cleanup_follows_on_death(ctx.guild.id, guild_data, member.id)
+
+                # ── Vote cleanup ──
+                alive_members = [m for m in members if alive_role in m.roles]
+                if alive_members:
+                    dead_ids = {str(m.id) for m in alive_members}
+                    vote_lines = []
+                    removed_votes = []
+                    for vote_dict in [guild_data.get("lynch_votes1", {}), guild_data.get("lynch_votes2", {}), guild_data.get("leader_votes", {})]:
+                        for voter_id, target_id in list(vote_dict.items()):
+                            if voter_id in dead_ids or str(target_id) in dead_ids:
+                                voter = ctx.guild.get_member(int(voter_id))
+                                target = ctx.guild.get_member(int(target_id))
+                                voter_name = voter.display_name if voter else f"ID {voter_id}"
+                                target_name = target.display_name if target else f"ID {target_id}"
+                                vote_lines.append(f"• {voter_name} → {target_name}")
+                                removed_votes.append((vote_dict, voter_id))
+
+                    skipnight_lines = []
+                    skipnight_sessions = guild_data.get("skipnight_sessions") or {}
+                    for msg_id, sess in list(skipnight_sessions.items()):
+                        remaining = []
+                        removed_skipnight = 0
+                        for vid in sess.get("voters", []):
+                            if vid in dead_ids:
+                                voter = ctx.guild.get_member(int(vid))
+                                voter_name = voter.display_name if voter else f"ID {vid}"
+                                skipnight_lines.append(f"• {voter_name} → SKIPNIGHT ({sess.get('title', '?')})")
+                                removed_skipnight += 1
+                            else:
+                                remaining.append(vid)
+                        if removed_skipnight:
+                            sess["voters"] = remaining
+                            removed_votes.append(("skipnight", msg_id))
+                            vote_lines.append(f"[Skipnight {msg_id}] {removed_skipnight} vote(s) removed")
+
+                    if vote_lines or skipnight_lines:
+                        os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+                        if os_disc:
+                            all_lines = vote_lines + skipnight_lines
+                            summary = "\n".join(all_lines)
+                            remvote_commands = " ".join(f"`.remvote {m.mention}`" for m in alive_members)
+                            embed = discord.Embed(
+                                title="🗳️ Vote Cleanup Reminder",
+                                description=f"RC moved to Dead. **{len([v for v in removed_votes if v[0] != 'skipnight'])}** lynch/leader vote(s) and **{len([v for v in removed_votes if v[0] == 'skipnight'])}** skipnight session(s) affected.",
+                                color=0xDC143C,
+                            )
+                            if summary:
+                                embed.add_field(name="Removed Votes", value=summary[:1024], inline=False)
+                            embed.add_field(
+                                name="Use `.remvote` to clean lynch/leader votes:",
+                                value=f"{remvote_commands}" if remvote_commands else "None",
+                                inline=False,
+                            )
+                            if skipnight_sessions:
+                                embed.add_field(
+                                    name="Skipnight sessions (use `.skipnightvoters <id>` to check):",
+                                    value="\n".join(f"`{k}` — {v.get('title', '?')} ({len(v.get('voters', []))} votes)" for k, v in skipnight_sessions.items()),
+                                    inline=False,
+                                )
+                            await os_disc.send(embed=embed)
+                # ── End vote cleanup ──
+
+                save_guild_data(ctx.guild.id, guild_data)
+                await ctx.send('Done')
+                os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
+                os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+                if os_disc and os_role:
+                    if alive_members:
+                        await os_disc.send(
+                            f"{os_role.mention} An RC was moved to Dead. "
+                            "Use `.kill @player [killer]` to log the kill attribution."
+                        )
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
+            else:
+                await ctx.send("Guild data not loaded.")
+        else:
+            await ctx.send("You don't have enough perms to use this command")
+
+    # Comando dead
+    @commands.command()
+    async def deadc(self, ctx, current_house: discord.TextChannel = None):
+        """Move an RC to the Dead category (admin only)."""
+        if ctx.author.guild_permissions.administrator:
+            guild_data = load_guild_data(ctx.guild.id)
+            if guild_data:
+                alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+                sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+                houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
+                privc_category = discord.utils.get(ctx.guild.categories, name=guild_data["privc_category_name"])
+                publc_category = discord.utils.get(ctx.guild.categories, name=guild_data["publc_category_name"])
+                dead_category = discord.utils.get(ctx.guild.categories, name=guild_data["dead_rc_category_name"])
+                channel = ctx.channel
+                members = channel.members
+                old_house = None
+                try:
+                    await ctx.channel.edit(category=dead_category)
+                except discord.HTTPException as e:
+                    if e.code == 50035:
+                        await ctx.send("❌ Maximum number of channels reached in the Dead category. Cannot move more RCs to Dead.")
+                    else:
+                        await ctx.send(f"❌ Failed to move channel to Dead category: {e}")
+                    return
+                for member in members:
+                    if alive_role in member.roles:
+                        if houses_category:
+                            houses = []
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    houses.append(house_channel)
+                            if current_house:
+                                for houses_channel in houses:
+                                    await houses_channel.set_permissions(member, overwrite=None)
+                                    if houses_channel == current_house:
+                                        if guild_data.get("auto_pin_corpse", True):
+                                            corpse_message = await houses_channel.send(f'{member.mention} corpse is here')
+                                            await corpse_message.pin()
+                                    else:
+                                        await houses_channel.send(f'{member.mention} Leaves')
+                            elif len(houses) > 1:
+                                await ctx.send(f"{member.mention} is currently in more than one house. Specify the house of the death in the command.")
+                                return
+                            elif len(houses) == 1:
+                                for houses_channel in houses:
+                                    await houses_channel.set_permissions(member, overwrite=None)
+                                    if guild_data.get("auto_pin_corpse", True):
+                                        corpse_message = await houses_channel.send(f'{member.mention} corpse is here')
+                                        await corpse_message.pin()
+                        if str(member.id) in guild_data["member_homes"]:
+                            old_house_id = guild_data["member_homes"].get(str(member.id))
+                            old_house = ctx.guild.get_channel(old_house_id)
+                            del guild_data["member_homes"][str(member.id)]
+                            await ctx.send(f'{member.mention} is now homeless')
+                            save_guild_data(ctx.guild.id, guild_data)
+                            if old_house:
+                                homeless_message = await old_house.send(f"{member.mention} doesn't live here anymore")
+                                await homeless_message.pin()
+                        if privc_category:
+                            for priv_channel in privc_category.channels:
+                                permissions = priv_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await priv_channel.set_permissions(member, overwrite=None)
+                                    await priv_channel.send(f'{member.mention} Leaves')
+                        if publc_category:
+                            for publ_channel in publc_category.channels:
+                                permissions = publ_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await publ_channel.set_permissions(member, overwrite=None)
+                                    await publ_channel.send(f'{member.mention} Leaves')
+                    elif sponsor_role in member.roles:
+                        if str(member.id) in guild_data["member_homes"]:
+                            del guild_data["member_homes"][str(member.id)]
+                            await ctx.send(f'{member.mention} is now homeless')
+                            save_guild_data(ctx.guild.id, guild_data)
+                        if houses_category:
+                            for house_channel in houses_category.channels:
+                                permissions = house_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await house_channel.set_permissions(member, overwrite=None)
+                        if privc_category:
+                            for priv_channel in privc_category.channels:
+                                permissions = priv_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await priv_channel.set_permissions(member, overwrite=None)
+                        if publc_category:
+                            for publ_channel in publc_category.channels:
+                                permissions = publ_channel.permissions_for(member)
+                                if permissions.send_messages:
+                                    await publ_channel.set_permissions(member, overwrite=None)
+                # Clean up follow pairs where dead member was the target
+                for member in members:
+                    if alive_role in member.roles or sponsor_role in member.roles:
+                        await self._cleanup_follows_on_death(ctx.guild.id, guild_data, member.id)
+                save_guild_data(ctx.guild.id, guild_data)
+                await ctx.send('Done')
+                estate_cog = self.bot.get_cog('Estate')
+                if estate_cog:
+                    await estate_cog.update_estate_map(ctx.guild)
+            else:
+                await ctx.send("Guild data not loaded.")
+        else:
+            await ctx.send("You don't have enough perms to use this command")
+
+    # Comando deadrole
+    @commands.command()
+    async def deadrole(self, ctx, *args):
+        """Mark a player as dead, remove their house, and pin a corpse message."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        dead_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("dead_role_name"))
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
+        privc_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("privc_category_name"))
+        publc_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("publc_category_name"))
+        if not dead_role:
+            await ctx.send("Dead role not found")
+            return
+        if not alive_role and not sponsor_role:
+            await ctx.send("Alive nor Sponsor roles not found")
+            return
+        alive_member = None
+        sponsor_member = None
+        for member in ctx.channel.members:
+            if alive_role and alive_role in member.roles and alive_member is None:
+                alive_member = member
+            if sponsor_role and sponsor_role in member.roles and sponsor_member is None:
+                sponsor_member = member
+
+        target_member = alive_member or sponsor_member
+        if target_member is None:
+            await ctx.send("No alive player or sponsor was found in this channel.")
+            return
+
+        stored_houses = guild_data.setdefault("current_houses", {}).get(str(target_member.id), [])
+        corpse_houses = [ctx.guild.get_channel(ch_id) for ch_id in stored_houses if ctx.guild.get_channel(ch_id)]
+
+        selected_house = None
+        if not corpse_houses:
+            await ctx.send("No stored house found for this player. Reply with the house channel (e.g. `#house-3`) to place the corpse there, or reply `skip` to skip the corpse pin:")
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+            try:
+                reply = await self.bot.wait_for("message", timeout=60, check=check)
+                if reply.content.strip().lower() == "skip":
+                    selected_house = None
+                elif reply.channel_mentions:
+                    selected_house = reply.channel_mentions[0]
+                else:
+                    await ctx.send("No valid channel found. Corpse pin skipped.")
+                    selected_house = None
+            except asyncio.TimeoutError:
+                await ctx.send("Timed out. No corpse message will be sent.")
+        elif len(corpse_houses) == 1:
+            selected_house = corpse_houses[0]
+        else:
+            selected_house = await self._choose_house_for_corpse(ctx, target_member, corpse_houses)
+            if selected_house is False:
+                return
+
+        errors = []
+
+        if str(target_member.id) in guild_data.get("member_homes", {}):
+            del guild_data["member_homes"][str(target_member.id)]
+            save_guild_data(ctx.guild.id, guild_data)
+            await ctx.send(f"{target_member.mention} is now homeless")
+
+        if selected_house and guild_data.get("auto_pin_corpse", True):
+            try:
+                corpse_message = await selected_house.send(f"{target_member.mention} corpse is here")
+                await corpse_message.pin()
+            except discord.Forbidden:
+                errors.append(f"Cannot pin corpse in {selected_house.mention} — Missing Manage Messages")
+            except Exception as e:
+                errors.append(f"Pin error in {selected_house.mention}: {e}")
+
+        privc_errors = await self._remove_member_from_side_channels(target_member, privc_category)
+        publc_errors = await self._remove_member_from_side_channels(target_member, publc_category)
+        errors.extend(privc_errors)
+        errors.extend(publc_errors)
+
+        if alive_member:
+            try:
+                await alive_member.remove_roles(alive_role)
+                await alive_member.add_roles(dead_role)
+                await ctx.send(f"{alive_member.display_name} is now {dead_role.mention}.")
+            except discord.Forbidden:
+                errors.append(f"Cannot update roles for {alive_member.display_name} — Missing Manage Roles or role is higher than bot")
+            except Exception as e:
+                errors.append(f"Role update error for {alive_member.display_name}: {e}")
+        if sponsor_member:
+            try:
+                await sponsor_member.remove_roles(sponsor_role)
+                await sponsor_member.add_roles(dead_role)
+                await ctx.send(f"{sponsor_member.display_name} is now {dead_role.mention}.")
+            except discord.Forbidden:
+                errors.append(f"Cannot update roles for {sponsor_member.display_name} — Missing Manage Roles or role is higher than bot")
+            except Exception as e:
+                errors.append(f"Role update error for {sponsor_member.display_name}: {e}")
+
+        # Clean up follow pairs where dead member was the target
+        if alive_member:
+            await self._cleanup_follows_on_death(ctx.guild.id, guild_data, target_member.id)
+        elif sponsor_member:
+            await self._cleanup_follows_on_death(ctx.guild.id, guild_data, target_member.id)
+
+        # Report all errors at the end
+        if errors:
+            await ctx.send("⚠️ **Errors encountered:**")
+            for err in errors:
+                await ctx.send(f"  • {err}")
+
+        team = None
+        role = None
+        if args:
+            parsed = " ".join(args).strip().rsplit(" ", 1)
+            if len(parsed) == 2:
+                role = parsed[0].strip()
+                team = self._normalize_team(parsed[1])
+            if not role or not team:
+                await ctx.send("Invalid syntax. Use `.deadrole Role Name TeamNumber`, for example `.deadrole Doctor 1`.")
+                return
+        else:
+            team, role = await self._prompt_deadrole_details(ctx)
+            if not team or not role:
+                return
+
+        add_player(target_member.display_name, team, role, ctx.guild.id)
+        await ctx.send(f"{target_member.display_name} successfully added to deadlist.")
+        estate_cog = self.bot.get_cog('Estate')
+        if estate_cog:
+            await estate_cog.update_estate_map(ctx.guild)
+
+    @commands.command()
+    async def corpselist(self, ctx):
+        """List all corpse locations in the server."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
+        dead_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        categories = [cat for cat in [houses_category, dead_category] if cat]
+        if not categories:
+            await ctx.send("No houses or dead RC category found.")
+            return
+
+        corpses = []
+        for category in categories:
+            for channel in category.text_channels:
+                try:
+                    pins = await channel.pins()
+                except discord.Forbidden:
+                    continue
+                for pin in pins:
+                    if "corpse is here" in (pin.content or "").lower():
+                        corpses.append((channel, pin.author, pin))
+
+        if not corpses:
+            await ctx.send("No corpses found.")
+            return
+
+        lines = []
+        for channel, author, pin in corpses:
+            # Extract the mention from the message content
+            content = pin.content
+            mention_part = content.split(" corpse is here")[0].strip() if "corpse is here" in content else content
+            lines.append(f"💀 {mention_part} — {channel.mention}")
+
+        embed = discord.Embed(title="Corpse Locations", description="\n".join(lines), color=discord.Color.dark_grey())
+        await ctx.send(embed=embed)
+
+    @commands.command()
+    async def addrole(self, ctx, role: discord.Role, *members):
+        """Give a role to one or more members."""
+        if ctx.author.guild_permissions.administrator:
+            response = f"{role.mention} role successfully added"
+            if 'everyone' in members:
+                members_wo_role = [member for member in ctx.guild.members if role not in member.roles]
+                for member in members_wo_role:
+                    await member.add_roles(role)
+                await ctx.send(f"{role.mention} role successfully added to everyone")
+            else:
+                members_wo_role = []
+                for member in members:
+                    found_member = discord.utils.find(lambda m: m.name == member or m.mention == member or str(m.id) == member, ctx.guild.members)
+                    if found_member and role not in found_member.roles:
+                        members_wo_role.append(found_member)
+                        await found_member.add_roles(role)
+                if members_wo_role:
+                    await ctx.send(response)
+                else:
+                    await ctx.send("No valid members found or they already have the role.")
+        else:
+            await ctx.send("You don't have enough permissions to use this command")
+
+    @commands.command()
+    async def removerole(self, ctx, role: discord.Role, member: discord.Member):
+        """Remove a role from a member (admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return
+        await member.remove_roles(role)
+        
+    @commands.command()
+    async def addchannelperms(self, ctx, role: discord.Role, channel: discord.TextChannel, type: str = "r"):
+        """Set read (R) or send (S) permissions for a role in a channel."""
+        if ctx.author.guild_permissions.administrator:
+            if type.lower() == "r":
+                await channel.set_permissions(role, read_messages=True, send_messages=False)
+            elif type.lower() == "s":
+                await channel.set_permissions(role, read_messages=True, send_messages=True)
+            else:
+                return await ctx.send("Invalid type. Valid types are r and s")
+            await ctx.send("Done")
+        else:
+            await ctx.send("You don't have enough permissions to use this command")
+
+    @commands.command()
+    async def addcategoryperms(self, ctx, role: discord.Role, category_name: str, type: str = "r"):
+        """Set read (R) or send (S) permissions for a role in a category."""
+        if ctx.author.guild_permissions.administrator:
+            category = discord.utils.get(ctx.guild.categories, name=category_name)
+            if category:
+                if type.lower() == "r":
+                    await category.set_permissions(role, read_messages=True, send_messages=False)
+                    for channel in category.channels:
+                        await channel.set_permissions(role, read_messages=True, send_messages=False)
+                elif type.lower() == "s":
+                    await category.set_permissions(role, read_messages=True, send_messages=True)
+                    for channel in category.channels:
+                        await channel.set_permissions(role, read_messages=True, send_messages=True)
+                elif type.lower() == "m":
+                    await category.set_permissions(role, read_messages=False, manage_messages=True)
+                    for channel in category.channels:
+                        await channel.set_permissions(role, read_messages=False, manage_messages=True) 
+                else:
+                    return await ctx.send("Invalid type. Valid types are r and s")
+                await ctx.send("Done")
+            else:
+                await ctx.send("Category not found")
+        else:
+            await ctx.send("You don't have enough permissions to use this command")
+
+    @commands.command()
+    async def endgame(self, ctx):
+        """Unlock all channels for post-game access (admin only)."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command.")
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        os_cat = discord.utils.get(ctx.guild.categories, name=guild_data['overseer_category_name'])
+        everyone = ctx.guild.default_role
+        prompt = discord.Embed(title='⚠️ Confirm Permissions Reset', description=("This will clear all perms outside the overseer category and give everyone **View Channels** and **Send Messages** in every channel.\n\nClick ✔ Yes to proceed or ❌ No to cancel."), color=0xFF3FB9, timestamp=datetime.utcnow()).set_footer(text="Village Game")
+        view = discord.ui.View(timeout=None)
+
+        async def confirm(inter: discord.Interaction):
+            if inter.user != ctx.author:
+                return await inter.response.send_message("You can't confirm this.", ephemeral=True)
+            await inter.response.defer()
+            base_perms = everyone.permissions
+            grant = discord.Permissions(view_channel=True, send_messages=True)
+            await everyone.edit(permissions=base_perms | grant)
+            role_edits = [r.edit(permissions=r.permissions | discord.Permissions(send_messages=True)) for r in ctx.guild.roles if r != everyone and not r.managed]
+            roles_task = asyncio.gather(*role_edits, return_exceptions=True)
+            sem = asyncio.Semaphore(5)
+            async def safe_clear(ch: discord.abc.GuildChannel):
+                async with sem:
+                    try:
+                        await ch.edit(overwrites={})
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.1)
+            channels = [ch for cat in ctx.guild.categories if cat != os_cat for ch in cat.channels]
+            channels_task = asyncio.gather(*(safe_clear(ch) for ch in channels), return_exceptions=True)
+            await asyncio.gather(roles_task, channels_task)
+            done = discord.Embed(
+                title='✅ Done',
+                description='Permissions have been reset.',
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            ).set_footer(text="Village Game")
+            await inter.edit_original_response(embed=done, view=None)
+
+        async def cancel(inter: discord.Interaction):
+            if inter.user != ctx.author:
+                return await inter.response.send_message("You can't cancel this.", ephemeral=True)
+            await inter.response.edit_message(
+                embed=discord.Embed(title='❌ Cancelled', description='Permissions reset cancelled.', color=discord.Color.red(), timestamp=datetime.utcnow()).set_footer(text="Village Game"), view=None)
+        
+        btn_yes = discord.ui.Button(label='✔ Yes', style=discord.ButtonStyle.green)
+        btn_yes.callback = confirm
+        btn_no  = discord.ui.Button(label='❌ No',  style=discord.ButtonStyle.red)
+        btn_no.callback  = cancel
+        view.add_item(btn_yes)
+        view.add_item(btn_no)
+        await ctx.send(embed=prompt, view=view)
+
+    @commands.command(name="skipnight")
+    async def skipnight(self, ctx, min_votes: int, *words):
+        """Start a vote to skip the night phase. Usage: .skipnight <votes> [custom text]"""
+
+        guild_data = load_guild_data(ctx.guild.id)
+
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+
+        os_role = discord.utils.get(
+            ctx.guild.roles,
+            name=guild_data["overseer_role_name"]
+        )
+        if not os_role:
+            return await ctx.send("Overseer role not found.")
+        if (
+            os_role not in ctx.author.roles
+            and not ctx.author.guild_permissions.administrator
+        ):
+            return await ctx.send(
+                "You don't have permission to use this command."
+            )
+
+        announcements_channel = discord.utils.get(
+            ctx.guild.channels,
+            name=guild_data["announcements_channel_name"]
+        )
+
+        if not announcements_channel:
+            return await ctx.send(
+                "Announcements channel not found."
+            )
+
+        alive_role = discord.utils.get(
+            ctx.guild.roles,
+            name=guild_data["alive_role_name"]
+        )
+
+        alive_count = len([
+            m for m in ctx.guild.members
+            if alive_role in m.roles
+        ]) if alive_role else 0
+
+        session = {
+            "required": min_votes,
+            "voters": [],
+            "pinged": False
+        }
+
+        title = " ".join(words) if words else "🌙 Vote to Skip the Night"
+
+        progress = "⬛" * alive_count
+
+        embed = discord.Embed(
+            title=title,
+            description=(
+                f"{progress}\n\n"
+                f"**0/{min_votes}** votes needed\n"
+                f"👥 {alive_count} alive players"
+            ),
+            color=0xff3fb9,
+            timestamp=datetime.now()
+        )
+
+        embed.set_footer(
+            text="Votes are anonymous • Village Game"
+        )
+
+        msg = await announcements_channel.send(
+            content=alive_role.mention if alive_role else "",
+            embed=embed
+        )
+
+        session["voters"] = set()
+        view = SkipNightView(session, title=title, message_id=msg.id, guild_id=ctx.guild.id)
+        await msg.edit(embed=embed, view=view)
+        view.message = msg
+
+        sessions = guild_data.setdefault("skipnight_sessions", {})
+        sessions[str(msg.id)] = {
+            "required": min_votes,
+            "voters": [],
+            "pinged": False,
+            "title": title,
+        }
+        save_guild_data(ctx.guild.id, guild_data)
+
+    @commands.command(name="skipnightvoters")
+    async def skipnightvoters(self, ctx, *, raw_input: str):
+        """Show who voted on a skip-night vote (admin only). Usage: .skipnightvoters <message_id or message_link>"""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have permission to use this command.")
+            return
+
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+
+        raw_input = raw_input.strip().strip("<>")
+
+        message_id = None
+        if raw_input.startswith("https://discord.com/channels/"):
+            parts = raw_input.rstrip("/").split("/")
+            if len(parts) >= 3:
+                message_id = parts[-1]
+        elif raw_input.isdigit():
+            message_id = raw_input
+        else:
+            return await ctx.send(f"Invalid format. Use a message ID (e.g. `1234567890123456789`) or a full message link.\nExample: `.skipnightvoters 1234567890123456789`")
+
+        announcements_channel = discord.utils.get(
+            ctx.guild.channels,
+            name=guild_data.get("announcements_channel_name")
+        )
+
+        resolved_msg = None
+        if announcements_channel:
+            try:
+                resolved_msg = await announcements_channel.fetch_message(int(message_id))
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            except Exception:
+                pass
+
+        sessions = guild_data.get("skipnight_sessions", {})
+        session_data = sessions.get(str(message_id))
+
+        if not session_data:
+            hint = ""
+            if resolved_msg:
+                hint = f"\nFound a message in announcements channel but it has no active skipnight session (may have expired)."
+            elif announcements_channel:
+                hint = f"\nMake sure the message is in the **#{announcements_channel.name}** channel."
+            else:
+                hint = "\nAnnouncements channel not found in this server."
+            return await ctx.send(f"No skipnight session found for message ID `{message_id}`.{hint}")
+
+        voters_ids = session_data.get("voters", [])
+        required = session_data.get("required", 0)
+        title = session_data.get("title", "🌙 Skip-night Vote")
+        pinged = session_data.get("pinged", False)
+
+        if not voters_ids:
+            return await ctx.send(f"No votes yet on **{title}**.")
+
+        voter_names = []
+        not_found = []
+        for vid in voters_ids:
+            member = ctx.guild.get_member(int(vid))
+            if member:
+                voter_names.append(f"• **{member.display_name}** (`{vid}`)")
+            else:
+                not_found.append(f"`{vid}`")
+
+        lines = voter_names + ([f"• Unknown ({n})" for n in not_found] if not_found else [])
+
+        embed = discord.Embed(
+            title=f"🗳️ Skipnight Voters — {title}",
+            description=f"**{len(voters_ids)}/{required}** votes\nThreshold reached: {'✅ Yes' if pinged else '❌ No'}",
+            color=0xff3fb9,
+        )
+        embed.add_field(name="Voters", value="\n".join(lines), inline=False)
+        embed.set_footer(text=f"Message ID: {message_id}")
+
+        await ctx.send(embed=embed)
+
+    @commands.command(name="lockhouse")
+    async def lockhouse(self, ctx, channel: discord.TextChannel):
+        """Lock a house so no moves or knocks are allowed into it."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houselist = guild_data.get("houselist") or []
+        if not isinstance(houselist, list):
+            houselist = []
+        if channel.name not in houselist:
+            await ctx.send(f"❌ {channel.mention} is not a registered house.")
+            return
+        locked = guild_data.setdefault("locked_houses", {})
+        if channel.id in locked:
+            await ctx.send(f"🔒 {channel.mention} is already locked.")
+            return
+        locked[channel.id] = {"timestamp": int(datetime.now(timezone.utc).timestamp())}
+        save_guild_data(ctx.guild.id, guild_data)
+        guild_data = load_guild_data(ctx.guild.id)
+        color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+        embed = discord.Embed(
+            description=(
+                "The doors to this dwelling groan and seal shut.\n"
+                "No one enters. No one leaves.\n"
+                "The house holds its breath."
+            ),
+            color=color
+        )
+        await channel.send(embed=embed)
+        await ctx.send(f"🔒 {channel.mention} has been locked.")
+
+    @commands.command(name="unlockhouse")
+    async def unlockhouse(self, ctx, channel: discord.TextChannel):
+        """Unlock a previously locked house."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houselist = guild_data.get("houselist") or []
+        if not isinstance(houselist, list):
+            houselist = []
+        if channel.name not in houselist:
+            await ctx.send(f"❌ {channel.mention} is not a registered house.")
+            return
+        locked = guild_data.get("locked_houses", {})
+        if channel.id not in locked:
+            await ctx.send(f"🔓 {channel.mention} is not locked.")
+            return
+        del guild_data["locked_houses"][channel.id]
+        save_guild_data(ctx.guild.id, guild_data)
+        guild_data = load_guild_data(ctx.guild.id)
+        color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
+        embed = discord.Embed(
+            description=(
+                "A key turns in the lock.\n"
+                "The doors ease open.\n"
+                "The house breathes again."
+            ),
+            color=color
+        )
+        await channel.send(embed=embed)
+        await ctx.send(f"🔓 {channel.mention} has been unlocked.")
+
+    @commands.command(name="kill")
+    async def kill(self, ctx, member: discord.Member, *, killer_text: str = None):
+        """Log a kill attribution. Overseer only — pure log, no role changes or narration."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        os_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("overseer_category_name", "OVERSEER"))
+        if not ctx.channel.category or ctx.channel.category != os_cat:
+            await ctx.send("This command can only be used in the **OVERSEER** category.")
+            return
+        os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+        if os_role not in ctx.author.roles and not ctx.author.guild_permissions.administrator:
+            await ctx.send("Only overseers or admins can use this command.")
+            return
+        kill_log = guild_data.setdefault("kill_log", {})
+        resolved_killer = None
+        resolved_killer_id = None
+        if killer_text:
+            mentions = [m for m in ctx.message.mentions if m.id != member.id]
+            if mentions:
+                resolved_killer = mentions[0].display_name
+                resolved_killer_id = mentions[0].id
+            else:
+                resolved_killer = killer_text.strip()
+                resolved_killer_id = None
+        else:
+            resolved_killer = ctx.author.display_name
+            resolved_killer_id = ctx.author.id
+        kill_log[str(member.id)] = {
+            "name": member.display_name,
+            "killed_by": resolved_killer,
+            "killed_by_id": str(resolved_killer_id) if resolved_killer_id else None,
+            "logged_by": ctx.author.id,
+            "logged_at": datetime.now(timezone.utc).isoformat(),
+        }
+        save_guild_data(ctx.guild.id, guild_data)
+        await ctx.send(f"☠️ Logged: **{member.display_name}** was killed by **{resolved_killer}**.", ephemeral=True)
+
+    @commands.command(name="kills")
+    async def kills(self, ctx, *, member: discord.Member = None):
+        """View kill log. Admin only, ephemeral output."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        os_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("overseer_category_name", "OVERSEER"))
+        if not ctx.channel.category or ctx.channel.category != os_cat:
+            await ctx.send("This command can only be used in the **OVERSEER** category.")
+            return
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("Only administrators can use this command.")
+            return
+        kill_log = guild_data.get("kill_log", {})
+        if member:
+            entry = kill_log.get(str(member.id))
+            if not entry:
+                await ctx.send(f"No kill log entry found for **{member.display_name}**.", ephemeral=True)
+                return
+            ts = entry.get("logged_at", "")
+            try:
+                dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
+                age = f"<t:{int(dt.timestamp())}:R>"
+            except Exception:
+                age = "unknown"
+            embed = discord.Embed(
+                title=f"☠️ {entry['name']}",
+                description=f"**Killed by:** {entry['killed_by']}",
+                color=0xdc143c
+            )
+            try:
+                dt = datetime.fromisoformat(entry.get("logged_at", "")).astimezone(timezone.utc)
+                footer_ts = f"<t:{int(dt.timestamp())}:f>"
+            except Exception:
+                footer_ts = ""
+            embed.set_footer(text=footer_ts)
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            if not kill_log:
+                await ctx.send("No kills logged yet.", ephemeral=True)
+                return
+            lines = []
+            for pid, entry in kill_log.items():
+                ts = entry.get("logged_at", "")
+                try:
+                    dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
+                    ts_short = f"<t:{int(dt.timestamp())}:f>"
+                except Exception:
+                    ts_short = "unknown"
+                lines.append(f"💀 **{entry['name']}** — {entry['killed_by']} — {ts_short}")
+            embed = discord.Embed(
+                title="☠️ Kill Log",
+                description="\n".join(lines) if lines else "No kills logged yet.",
+                color=0xdc143c
+            )
+            await ctx.send(embed=embed, ephemeral=True)
+
