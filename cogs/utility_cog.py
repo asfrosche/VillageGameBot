@@ -1,9 +1,10 @@
 import os
+import re
+import typing
 import discord
 import asyncio
 import datetime
 import tempfile
-import re
 from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from discord.ui import View, Button
@@ -1118,8 +1119,8 @@ class Utility(commands.Cog):
                 if os_disc and os_role:
                     if alive_members:
                         await os_disc.send(
-                            f"{os_role.mention} An RC was moved to Dead. "
-                            "Use `.kill @player [killer]` to log the kill attribution."
+                            f"{os_role.mention} {channel.mention} was moved to dead. "
+                            "Reply to this message with the killer/way of death."
                         )
                 estate_cog = self.bot.get_cog('Estate')
                 if estate_cog:
@@ -1801,7 +1802,8 @@ class Utility(commands.Cog):
         else:
             resolved_killer = ctx.author.display_name
             resolved_killer_id = ctx.author.id
-        kill_log[str(member.id)] = {
+        key = f"m:{member.id}:{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        kill_log[key] = {
             "name": member.display_name,
             "killed_by": resolved_killer,
             "killed_by_id": str(resolved_killer_id) if resolved_killer_id else None,
@@ -1812,7 +1814,7 @@ class Utility(commands.Cog):
         await ctx.send(f"☠️ Logged: **{member.display_name}** was killed by **{resolved_killer}**.", ephemeral=True)
 
     @commands.command(name="kills")
-    async def kills(self, ctx, *, member: discord.Member = None):
+    async def kills(self, ctx, *, member: typing.Union[discord.Member, discord.TextChannel] = None):
         """View kill log. Admin only, ephemeral output."""
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
@@ -1827,19 +1829,20 @@ class Utility(commands.Cog):
             return
         kill_log = guild_data.get("kill_log", {})
         if member:
-            entry = kill_log.get(str(member.id))
-            if not entry:
-                await ctx.send(f"No kill log entry found for **{member.display_name}**.", ephemeral=True)
+            if isinstance(member, discord.TextChannel):
+                matches = [e for k, e in kill_log.items() if k == f"chan:{member.id}" or k.startswith(f"chan:{member.id}:")]
+                lookup_name = f"#{member.name}"
+            else:
+                matches = [e for k, e in kill_log.items() if k == str(member.id) or k.startswith(f"m:{member.id}:")]
+                lookup_name = member.display_name
+            if not matches:
+                await ctx.send(f"No kill log entry found for **{lookup_name}**.", ephemeral=True)
                 return
-            ts = entry.get("logged_at", "")
-            try:
-                dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
-                age = f"<t:{int(dt.timestamp())}:R>"
-            except Exception:
-                age = "unknown"
+            entry = matches[-1]
+            display_name = lookup_name
             embed = discord.Embed(
-                title=f"☠️ {entry['name']}",
-                description=f"**Killed by:** {entry['killed_by']}",
+                title=f"☠️ {display_name}",
+                description=f"**Killed by/way:** {entry['killed_by']}",
                 color=0xdc143c
             )
             try:
@@ -1854,18 +1857,90 @@ class Utility(commands.Cog):
                 await ctx.send("No kills logged yet.", ephemeral=True)
                 return
             lines = []
-            for pid, entry in kill_log.items():
+            for idx, (pid, entry) in enumerate(kill_log.items(), 1):
                 ts = entry.get("logged_at", "")
                 try:
                     dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
                     ts_short = f"<t:{int(dt.timestamp())}:f>"
                 except Exception:
                     ts_short = "unknown"
-                lines.append(f"💀 **{entry['name']}** — {entry['killed_by']} — {ts_short}")
+                name = f"#{entry['channel_name']}" if entry.get("channel_name") else entry["name"]
+                lines.append(f"{idx}. 💀 **{name}** — {entry['killed_by']} — {ts_short}")
             embed = discord.Embed(
                 title="☠️ Kill Log",
                 description="\n".join(lines) if lines else "No kills logged yet.",
                 color=0xdc143c
             )
+            embed.set_footer(text="Remove a line with .killremove <number>")
             await ctx.send(embed=embed, ephemeral=True)
+
+    @commands.command(name="killremove", aliases=["killrm"])
+    async def killremove(self, ctx, index: int):
+        """Remove a kill log entry by its number from .kills. Admin only."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        os_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("overseer_category_name", "OVERSEER"))
+        if not ctx.channel.category or ctx.channel.category != os_cat:
+            await ctx.send("This command can only be used in the **OVERSEER** category.")
+            return
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("Only administrators can use this command.")
+            return
+        kill_log = guild_data.get("kill_log", {})
+        if not kill_log:
+            await ctx.send("No kills logged yet.", ephemeral=True)
+            return
+        keys = list(kill_log.keys())
+        if index < 1 or index > len(keys):
+            await ctx.send("Invalid index. Use `.kills` to see entry numbers.", ephemeral=True)
+            return
+        key = keys[index - 1]
+        entry = kill_log.pop(key)
+        save_guild_data(ctx.guild.id, guild_data)
+        name = f"#{entry['channel_name']}" if entry.get("channel_name") else entry["name"]
+        await ctx.send(f"🗑️ Removed **{name}** — {entry['killed_by']}.", ephemeral=True)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """Log a kill attribution when an overseer replies to a 'was moved to dead' message."""
+        if message.author.bot or message.guild is None:
+            return
+        if not message.reference or not isinstance(message.reference.resolved, discord.Message):
+            return
+        ref = message.reference.resolved
+        if ref.author.id != self.bot.user.id:
+            return
+        if "was moved to dead" not in ref.content:
+            return
+        guild_data = load_guild_data(message.guild.id)
+        if not guild_data:
+            return
+        os_role = discord.utils.get(message.guild.roles, name=guild_data["overseer_role_name"])
+        if os_role not in message.author.roles and not message.author.guild_permissions.administrator:
+            return
+        match = re.search(r"<#(\d+)>", ref.content)
+        if not match:
+            return
+        channel_id = int(match.group(1))
+        channel = message.guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        kill_text = message.content.strip()
+        if not kill_text:
+            return
+        kill_log = guild_data.setdefault("kill_log", {})
+        key = f"chan:{channel_id}:{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        kill_log[key] = {
+            "channel_name": channel.name,
+            "killed_by": kill_text,
+            "logged_by": message.author.id,
+            "logged_at": datetime.now(timezone.utc).isoformat(),
+        }
+        save_guild_data(message.guild.id, guild_data)
+        await message.channel.send(
+            f"☠️ Logged: **#{channel.name}** — {kill_text}",
+            reference=message,
+        )
 
