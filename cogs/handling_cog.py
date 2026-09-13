@@ -7,6 +7,23 @@ from cogs.data_utils import load_guild_data, save_guild_data
 
 PUBLIC_CHANNEL_EMOJI = " \U0001f513"
 
+
+def _ensure_public_emoji(name: str) -> str:
+    emoji = PUBLIC_CHANNEL_EMOJI.strip()
+    stripped = name.rstrip()
+    if stripped.endswith(emoji):
+        return stripped
+    return stripped + PUBLIC_CHANNEL_EMOJI
+
+
+def _remove_public_emoji(name: str) -> str:
+    emoji = PUBLIC_CHANNEL_EMOJI.strip()
+    stripped = name.rstrip()
+    if stripped.endswith(emoji):
+        return stripped[: -len(emoji)].rstrip()
+    return stripped
+
+
 class Handling(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -304,9 +321,10 @@ class Handling(commands.Cog):
                     await channel.set_permissions(sponsor_role, overwrite=overwrite)
                 if dead_role:
                     await channel.set_permissions(dead_role, overwrite=overwrite)
-                if not channel.name.endswith(PUBLIC_CHANNEL_EMOJI):
+                public_name = _ensure_public_emoji(channel.name)
+                if public_name != channel.name:
                     try:
-                        await channel.edit(name=channel.name + PUBLIC_CHANNEL_EMOJI)
+                        await channel.edit(name=public_name)
                     except discord.HTTPException:
                         pass
                 if announcements_channel:
@@ -336,9 +354,10 @@ class Handling(commands.Cog):
                 await channel.set_permissions(sponsor_role, overwrite=None)
                 await channel.set_permissions(dead_role, overwrite=None)
                 await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-                if channel.name.endswith(PUBLIC_CHANNEL_EMOJI):
+                private_name = _remove_public_emoji(channel.name)
+                if private_name != channel.name:
                     try:
-                        await channel.edit(name=channel.name[:-len(PUBLIC_CHANNEL_EMOJI)])
+                        await channel.edit(name=private_name)
                     except discord.HTTPException:
                         pass
                 await ctx.send('Done')
