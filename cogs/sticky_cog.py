@@ -2,7 +2,7 @@ import re
 import time
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from cogs.data_utils import load_guild_data, save_guild_data
 from utils.embeds import error_embed, info_embed, success_embed
@@ -11,11 +11,38 @@ DEFAULT_STICKY_COOLDOWN = 60
 MIN_STICKY_COOLDOWN = 10
 MAX_STICKY_CONTENT = 2048
 
+DISBOARD_BOT_ID = 302050872383242240
+DEFAULT_BUMP_HOURS = 4
+MIN_BUMP_HOURS = 1
+MAX_BUMP_HOURS = 24
+
 
 class StickyCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._cooldown_lock = {}
+        self.bump_reminder_loop.start()
+
+    async def cog_unload(self):
+        self.bump_reminder_loop.cancel()
+
+    def _get_bump_config(self, guild_data):
+        config = guild_data.get("bump_reminder")
+        if config is None:
+            config = {
+                "channel_ids": [],
+                "hours": DEFAULT_BUMP_HOURS,
+                "bumps": {},
+            }
+            guild_data["bump_reminder"] = config
+        if "channel_id" in config:
+            old = config.pop("channel_id")
+            if old:
+                config.setdefault("channel_ids", []).append(old)
+        config.setdefault("channel_ids", [])
+        config.setdefault("hours", DEFAULT_BUMP_HOURS)
+        config.setdefault("bumps", {})
+        return config
 
     @staticmethod
     def _is_admin(ctx):
@@ -48,6 +75,8 @@ class StickyCog(commands.Cog):
         return message
 
     async def _delete_old_sticky(self, channel, sticky):
+        if not sticky:
+            return
         old_id = sticky.get("message_id")
         if not old_id:
             return
@@ -188,6 +217,153 @@ class StickyCog(commands.Cog):
         )
         await ctx.send(embed=embed)
 
+    @sticky.command(name="bumpchannel", aliases=["bump"])
+    async def sticky_bump_channel(self, ctx, *, channel_text: str = None):
+        """Add a channel to watch for Disboard /bump and send reminders. Usage: .sticky bumpchannel [#ch]"""
+        if not self._is_admin(ctx):
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        config = self._get_bump_config(guild_data)
+        channel = ctx.channel
+        if channel_text:
+            match = re.match(r"<#(\d+)>", channel_text)
+            if match:
+                target = ctx.guild.get_channel(int(match.group(1)))
+                if target is not None:
+                    channel = target
+        channel_ids = config["channel_ids"]
+        if channel.id not in channel_ids:
+            channel_ids.append(channel.id)
+            save_guild_data(ctx.guild.id, guild_data)
+            embed = success_embed(
+                title="Bump reminder channel added",
+                description=(
+                    f"Now watching {channel.mention} for Disboard `/bump`.\n"
+                    f"Reminder after {config['hours']}h."
+                ),
+            )
+        else:
+            embed = error_embed(
+                description=f"{channel.mention} is already being watched for bumps."
+            )
+        await ctx.send(embed=embed)
+
+    @sticky.command(name="bumpremove")
+    async def sticky_bump_remove(self, ctx, *, channel_text: str = None):
+        """Remove a channel from bump reminders. Usage: .sticky bumpremove [#ch]"""
+        if not self._is_admin(ctx):
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        config = self._get_bump_config(guild_data)
+        channel = ctx.channel
+        if channel_text:
+            match = re.match(r"<#(\d+)>", channel_text)
+            if match:
+                target = ctx.guild.get_channel(int(match.group(1)))
+                if target is not None:
+                    channel = target
+        channel_ids = config["channel_ids"]
+        if channel.id in channel_ids:
+            channel_ids.remove(channel.id)
+            config["bumps"].pop(str(channel.id), None)
+            save_guild_data(ctx.guild.id, guild_data)
+            embed = success_embed(
+                title="Bump reminder channel removed",
+                description=f"Stopped watching {channel.mention} for bumps.",
+            )
+        else:
+            embed = error_embed(
+                description=f"{channel.mention} was not being watched for bumps."
+            )
+        await ctx.send(embed=embed)
+
+    @sticky.command(name="bumplist", aliases=["bumpchannels"])
+    async def sticky_bump_list(self, ctx):
+        """List all channels watching for Disboard /bump. Usage: .sticky bumplist"""
+        if not self._is_admin(ctx):
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        config = self._get_bump_config(guild_data)
+        channel_ids = config["channel_ids"]
+        if not channel_ids:
+            await ctx.send(embed=info_embed(description="No bump reminder channels set."))
+            return
+        bumps = config["bumps"]
+        lines = []
+        for channel_id in channel_ids:
+            channel = ctx.guild.get_channel(channel_id)
+            name = channel.mention if channel else f"#{channel_id}"
+            entry = bumps.get(str(channel_id))
+            last = entry.get("last_bump_time") if entry else None
+            if last:
+                lines.append(f"{name} — last bump <t:{int(last)}:R>")
+            else:
+                lines.append(f"{name} — no bump recorded yet")
+        embed = info_embed(
+            title="Bump reminder channels",
+            description=(
+                "\n".join(lines)
+                + f"\n\nReminder delay: {config['hours']}h"
+            ),
+        )
+        await ctx.send(embed=embed)
+
+    @sticky.command(name="bumphours")
+    async def sticky_bump_hours(self, ctx, hours: int):
+        """Set bump reminder delay in hours. Usage: .sticky bumphours <hours>"""
+        if not self._is_admin(ctx):
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        if not MIN_BUMP_HOURS <= hours <= MAX_BUMP_HOURS:
+            await ctx.send(
+                embed=error_embed(description=f"Hours must be between {MIN_BUMP_HOURS} and {MAX_BUMP_HOURS}."),
+            )
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        config = self._get_bump_config(guild_data)
+        config["hours"] = hours
+        save_guild_data(ctx.guild.id, guild_data)
+        embed = success_embed(
+            title="Bump reminder delay updated",
+            description=f"Reminder will be sent {hours}h after each bump.",
+        )
+        await ctx.send(embed=embed)
+
+    @sticky.command(name="bumpoff")
+    async def sticky_bump_off(self, ctx):
+        """Disable bump reminders. Usage: .sticky bumpoff"""
+        if not self._is_admin(ctx):
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        config = self._get_bump_config(guild_data)
+        config["channel_ids"] = []
+        config["bumps"] = {}
+        save_guild_data(ctx.guild.id, guild_data)
+        embed = success_embed(
+            title="Bump reminders disabled",
+            description="No more bump reminders will be sent.",
+        )
+        await ctx.send(embed=embed)
+
     @sticky.command(name="list")
     async def sticky_list(self, ctx):
         """List all sticky messages in this server."""
@@ -241,7 +417,12 @@ class StickyCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.author.bot or not message.guild:
+        if not message.guild:
+            return
+        if message.author.id == DISBOARD_BOT_ID:
+            self._record_bump(message)
+            return
+        if message.author.bot:
             return
         if message.content.startswith(self.bot.command_prefix):
             return
@@ -268,6 +449,61 @@ class StickyCog(commands.Cog):
         except discord.HTTPException:
             return
         save_guild_data(message.guild.id, guild_data)
+
+    def _record_bump(self, message):
+        guild_data = load_guild_data(message.guild.id)
+        if not guild_data:
+            return
+        config = self._get_bump_config(guild_data)
+        if message.channel.id not in config["channel_ids"]:
+            return
+        description = (message.embeds[0].description or "") if message.embeds else ""
+        content = message.content or ""
+        if "Bump done" not in description and "Bump done" not in content:
+            return
+        config["bumps"][str(message.channel.id)] = {
+            "last_bump_time": time.time(),
+            "reminded": False,
+        }
+        save_guild_data(message.guild.id, guild_data)
+
+    @tasks.loop(minutes=1)
+    async def bump_reminder_loop(self):
+        for guild in self.bot.guilds:
+            guild_data = load_guild_data(guild.id)
+            if not guild_data:
+                continue
+            config = guild_data.get("bump_reminder")
+            if not config or not config.get("channel_ids"):
+                continue
+            hours = config.get("hours", DEFAULT_BUMP_HOURS)
+            bumps = config.get("bumps", {})
+            dirty = False
+            for channel_id in list(config["channel_ids"]):
+                entry = bumps.get(str(channel_id))
+                if not entry or entry.get("reminded"):
+                    continue
+                last_bump = entry.get("last_bump_time")
+                if not last_bump or time.time() - last_bump < hours * 3600:
+                    continue
+                channel = self.bot.get_channel(channel_id)
+                if channel is None:
+                    continue
+                try:
+                    await channel.send(
+                        f"🔔 Time to bump! Run `/bump` to keep the server on DISBOARD "
+                        f"(last bump: <t:{int(last_bump)}:R>)."
+                    )
+                except discord.HTTPException:
+                    continue
+                entry["reminded"] = True
+                dirty = True
+            if dirty:
+                save_guild_data(guild.id, guild_data)
+
+    @bump_reminder_loop.before_loop
+    async def before_bump_reminder_loop(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot):
