@@ -14,7 +14,7 @@ class ActionButtons(ui.View):
         user_embed_obj: Embed,
         log_embed_obj: Embed,
         meta: dict,
-        timeout=840,
+        timeout=86400,
     ):
         super().__init__(timeout=timeout)
         self.user_embed = user_embed
@@ -94,7 +94,7 @@ class ActionButtons(ui.View):
 
 
 class CancelOnlyView(ui.View):
-    def __init__(self, user_embed: discord.Message, log_embed: discord.Message, user_embed_obj: Embed, log_embed_obj: Embed, meta: dict, timeout=840):
+    def __init__(self, user_embed: discord.Message, log_embed: discord.Message, user_embed_obj: Embed, log_embed_obj: Embed, meta: dict, timeout=86400):
         super().__init__(timeout=timeout)
         self.user_embed = user_embed
         self.log_embed = log_embed
