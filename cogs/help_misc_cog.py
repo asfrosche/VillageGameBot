@@ -178,6 +178,7 @@ COMMAND_INDEX = [
     (".settarget <channel_id>", "Set target channel (ID, not mention)", "Send Role", ["target", "channel", "set"]),
     (".sendrole/sr <players>", "Reply to a msg to forward it to the target channel (admin)", "Send Role", ["send", "role", "forward"]),
     (".teamroll <n1> \"msg1\" <n2> \"msg2\" ...", "Randomly assigns quoted roles (Admin)", "Send Role", ["team", "roll", "random", "assign", "admin"]),
+    (".dl", "Reply to a link to download the media and send it here", "Utility", ["download", "media", "link", "yt-dlp"]),
     (".day", "Unlock all day channels", "Utility", ["day", "unlock", "phase"]),
     (".night", "Lock all day channels", "Utility", ["night", "lock", "phase"]),
     (".broom", "Delete replied-to messages (logs kept)", "Utility", ["broom", "delete", "clean", "message"]),
@@ -190,8 +191,9 @@ COMMAND_INDEX = [
     (".deadrole", "Mark dead, remove house, pin corpse (use in RC)", "Utility", ["dead", "role", "mark", "corpse"]),
     (".deadc", "Move RC to Dead (admin)", "Utility", ["dead", "rc", "admin"]),
     (".corpselist", "List all corpse locations (admin)", "Utility", ["corpse", "list", "dead", "locations"]),
-    (".kill @player [killer]", "Log kill attribution (overseer only, no narration)", "Utility", ["kill", "log", "overseer"]),
-    (".kills [@player]", "View kill log (admin only, ephemeral)", "Utility", ["kill", "log", "view", "ephemeral"]),
+    (".kill @player [killer]", "Log kill attribution (overseer only). Or reply to a 'was moved to dead' message in overseer-discussion with the killer/way", "Utility", ["kill", "log", "overseer", "reply"]),
+    (".kills [@player] [#channel]", "View kill log (admin only, ephemeral)", "Utility", ["kill", "log", "view", "ephemeral"]),
+    (".killremove <number>", "Remove a kill log entry by .kills number (admin only)", "Utility", ["kill", "log", "remove", "delete", "edit"]),
     (".addrole @role @users...", "Give role to members", "Utility", ["role", "add", "give", "admin"]),
     (".removerole <role> <member>", "Remove role (admin)", "Utility", ["role", "remove", "admin"]),
     (".addcategoryperms @role <cat> <perm>", "R=Read, S=Send", "Utility", ["perm", "category", "read", "send", "admin"]),
@@ -271,7 +273,7 @@ COMMAND_INDEX = [
     (".sell /.sell-item <item>", "Sell for 50% refund", "Economy", ["sell", "refund", "item"]),
     (".inv /.inventory [#ch]", "View RC inventory", "Economy", ["inventory", "items", "rc"]),
     (".give @user <amt>", "Give RC coins (in houses)", "Economy", ["give", "coins", "transfer"]),
-    (".give-money @user <amt>", "Transfer from wallet", "Economy", ["money", "transfer", "wallet"]),
+    (".give-money @user <amt>", "Transfer RC coins to another player", "Economy", ["money", "transfer", "rc"]),
     (".use <item>", "Use an item from inventory", "Economy", ["use", "item", "activate"]),
     (".additem <price> <name>", "Add new shop item", "Economy", ["item", "add", "shop", "admin"]),
     (".removeitem /.rmitem #ch <item> [qty]", "Remove from RC", "Economy", ["item", "remove", "rc", "admin"]),
@@ -279,7 +281,7 @@ COMMAND_INDEX = [
     (".delitem <name>", "Delete item from shop", "Economy", ["item", "delete", "shop", "admin"]),
     (".addmoney #ch <amt>", "Add coins to RC", "Economy", ["money", "add", "coins", "rc", "admin"]),
     (".removemoney #ch <amt>", "Remove coins from RC", "Economy", ["money", "remove", "coins", "rc", "admin"]),
-    (".add-money-role @role <amt>", "Add wallet coins by role", "Economy", ["money", "role", "wallet", "admin"]),
+    (".add-money-role @role <amt>", "Add RC coins by role", "Economy", ["money", "role", "rc", "admin"]),
     (".additemrole @role <item> <qty>", "Give items by role", "Economy", ["item", "role", "give", "admin"]),
     (".giveitem @player <item> [qty]", "Give items to player (admin)", "Economy", ["item", "give", "admin"]),
     (".removeitemplayer @player <item> [qty]", "Remove items from player (admin)", "Economy", ["item", "remove", "admin", "rip"]),
@@ -2258,7 +2260,7 @@ class Other(commands.Cog):
             "**`.sell`/`.sell-item <item>`** ─ Sell for 50% refund\n"
             "**`.inv`/`.inventory [#ch]`** ─ View RC inventory\n"
             "**`.give @user <amt>`** ─ Give RC coins (in houses)\n"
-            "**`.give-money @user <amt>`** ─ Transfer from wallet\n"
+            "**`.give-money @user <amt>`** ─ Transfer RC coins to another player\n"
             "**`.trade @user <item> [qty]`** ─ Give items to another player\n"
             "**`.use <item>`** ─ Use an item from inventory"
         ), inline=False)
@@ -2270,7 +2272,7 @@ class Other(commands.Cog):
             "━━━━━━━━━━━━━━━━\n"
             "**`.addmoney #ch <amt>`** ─ Add coins to RC\n"
             "**`.removemoney #ch <amt>`** ─ Remove coins from RC\n"
-            "**`.add-money-role @role <amt>`** ─ Add wallet coins by role\n"
+            "**`.add-money-role @role <amt>`** ─ Add RC coins by role\n"
             "**`.additemrole @role <item> <qty>`** ─ Give items by role\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.giveitem @user <item> [qty]`** ─ Give items to a player\n"
