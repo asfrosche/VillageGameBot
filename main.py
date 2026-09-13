@@ -56,6 +56,7 @@ from cogs.estate_cog import Estate
 from cogs.item_drop_cog import ItemDrop
 from cogs.channel_cog import ChannelMap
 from cogs.surveillance_cog import Surveillance
+from cogs.download_cog import DownloadCog
 import sys as _sys
 _main_dir = os.path.dirname(os.path.abspath(__file__))
 _fifa_dir = os.path.join(_main_dir, "fifa_data")
@@ -100,6 +101,16 @@ _analytics_service = init_analytics(_analytics_config)
 # Initialize databases on startup
 init_invites_db()
 init_deadlist_db()
+
+# Report missing optional runtime dependencies (yt-dlp, ffmpeg) at boot so the
+# host admin sees them in the console without every .dl failing mysteriously.
+try:
+    from cogs.download_cog import _missing_requirements
+
+    for _msg in _missing_requirements():
+        print(f"[download-cog] WARNING: {_msg}")
+except ImportError:
+    pass
 
 # ── Event: on_ready ──────────────────────────────────────────────────────────
 @bot.event
@@ -694,6 +705,7 @@ async def startcog():
     await bot.add_cog(ItemDrop(bot))
     await bot.add_cog(ChannelMap(bot))
     await bot.add_cog(Surveillance(bot))
+    await bot.add_cog(DownloadCog(bot))
     await bot.add_cog(VgIntro(bot))
     await bot.add_cog(Status(bot))
     await bot.add_cog(StickyCog(bot))
