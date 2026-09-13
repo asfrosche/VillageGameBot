@@ -17,7 +17,6 @@ from utils.economy_db import (
     add_shop_item,
     buy_shop_item,
     clear_channel_inventory,
-    get_economy_account,
     get_economy_channel_balance,
     get_inventory_channel,
     get_removed_default_items,
@@ -27,8 +26,6 @@ from utils.economy_db import (
     remove_shop_item_by_name,
     set_economy_channel_balance,
     transfer_channel_balance,
-    transfer_economy_balance,
-    update_economy_balance,
     update_economy_channel_balance,
     update_shop_item_by_name,
 )
@@ -84,6 +81,28 @@ def _is_houses_category(
         return False
     houses = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
     return channel.category == houses
+
+
+def _find_player_rolechat(
+    guild: discord.Guild,
+    member: discord.Member,
+    guild_data: dict | None = None,
+) -> discord.TextChannel | None:
+    """Return the first rolechat the member can send in, or None."""
+    if guild_data is None:
+        guild_data = load_guild_data(guild.id)
+    if not guild_data:
+        return None
+    rc_cat = discord.utils.get(guild.categories, name=guild_data.get("rc_category_name"))
+    alt_cat = discord.utils.get(guild.categories, name=guild_data.get("alt_category_name"))
+    dead_rc = discord.utils.get(guild.categories, name=guild_data.get("dead_rc_category_name"))
+    for cat in (rc_cat, alt_cat, dead_rc):
+        if not cat:
+            continue
+        for c in cat.text_channels:
+            if c.permissions_for(member).send_messages:
+                return c
+    return None
 
 
 async def _log_economy(
@@ -1345,12 +1364,12 @@ class Economy(commands.Cog):
         )
 
     # ------------------------------------------------------------------ #
-    # User-based economy (ebeblieve-style)
+    # Rolechat-to-rolechat transfers
     # ------------------------------------------------------------------ #
 
     @commands.command(name="give-money", aliases=["give_money"])
     async def give_money(self, ctx: commands.Context, member: discord.Member, amount: int):
-        """Transfer coins from your wallet to another user."""
+        """Transfer coins from your rolechat to another player's rolechat."""
         if amount <= 0:
             return await ctx.send("Amount must be greater than 0. Usage: `.give-money @user <amount>`.")
         if member.bot:
@@ -1358,11 +1377,31 @@ class Economy(commands.Cog):
         if member == ctx.author:
             return await ctx.send("You can't give coins to yourself.")
 
-        if not transfer_economy_balance(ctx.guild.id, ctx.author.id, member.id, amount):
-            wallet, _ = get_economy_account(ctx.guild.id, ctx.author.id)
-            return await ctx.send(f"Insufficient coins. Wallet: **{wallet:,}**.")
+        guild_data = load_guild_data(ctx.guild.id)
+        sender_rc = _find_player_rolechat(ctx.guild, ctx.author, guild_data)
+        recipient_rc = _find_player_rolechat(ctx.guild, member, guild_data)
+        if sender_rc is None:
+            return await ctx.send("Couldn't find your rolechat.")
+        if recipient_rc is None:
+            return await ctx.send(f"Couldn't find a rolechat for {member.mention}.")
+        if sender_rc.id == recipient_rc.id:
+            return await ctx.send("You can't give coins to someone in the same rolechat.")
 
-        await ctx.send(f"You gave **{amount:,}** coins to {member.mention}.")
+        if not transfer_channel_balance(ctx.guild.id, sender_rc.id, recipient_rc.id, amount):
+            bal = get_economy_channel_balance(ctx.guild.id, sender_rc.id)
+            return await ctx.send(f"Insufficient coins. Rolechat balance: **{bal:,}**.")
+
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Give Money",
+            actor=ctx.author,
+            details=(
+                f"Gave **{amount:,}** to {member.mention} ({member.id}). "
+                f"{sender_rc.mention} → {recipient_rc.mention}."
+            ),
+        )
+        await ctx.send(f"You gave **{amount:,}** coins from {sender_rc.mention} to {member.mention} ({recipient_rc.mention}).")
 
     @commands.command(name="sell-item", aliases=["sell_item", "sell"])
     async def sell_item(self, ctx: commands.Context, *, item_name: str):
@@ -1398,23 +1437,12 @@ class Economy(commands.Cog):
             return await ctx.send("Amount cannot exceed **10,000** per user.")
 
         guild_data = load_guild_data(ctx.guild.id)
-        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
-        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
-        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
-        cats = [c for c in (rc_cat, alt_cat, dead_rc) if c]
-
-        def _find_rc(target: discord.Member) -> discord.TextChannel | None:
-            for cat in cats:
-                for c in cat.text_channels:
-                    if c.permissions_for(target).send_messages:
-                        return c
-            return None
 
         count = 0
         for member in role.members:
             if member.bot:
                 continue
-            rc = _find_rc(member)
+            rc = _find_player_rolechat(ctx.guild, member, guild_data)
             if rc:
                 update_economy_channel_balance(ctx.guild.id, rc.id, amount)
                 count += 1

@@ -10,7 +10,6 @@ After that, economy code reads/writes ONLY from ``economy.db``.
 
 import os
 import sqlite3
-from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_DIR = os.path.join(BASE_DIR, "db")
@@ -25,8 +24,6 @@ MIGRATION_VERSION = "1"
 MIGRATION_TABLES = [
     "economy_shop_items",
     "economy_removed_default_items",
-    "economy_accounts",
-    "economy_inventory",
     "economy_channel_balance",
     "economy_channel_inventory",
 ]
@@ -61,18 +58,6 @@ def init_db() -> None:
         cur = conn.cursor()
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS economy_accounts (
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                wallet INTEGER NOT NULL DEFAULT 0,
-                bank INTEGER NOT NULL DEFAULT 0,
-                last_collect_at TEXT,
-                PRIMARY KEY (guild_id, user_id)
-            )
-            """
-        )
-        cur.execute(
-            """
             CREATE TABLE IF NOT EXISTS economy_shop_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id INTEGER NOT NULL,
@@ -89,18 +74,6 @@ def init_db() -> None:
                 guild_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
                 PRIMARY KEY (guild_id, name)
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS economy_inventory (
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                item_id INTEGER NOT NULL,
-                quantity INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (guild_id, user_id, item_id),
-                FOREIGN KEY (item_id) REFERENCES economy_shop_items(id) ON DELETE CASCADE
             )
             """
         )
@@ -144,6 +117,11 @@ def init_db() -> None:
         """)
         # Unique constraint on shop item names per guild (prevents duplicates)
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_items_guild_name ON economy_shop_items(guild_id, name)")
+
+        # Drop orphaned per-user economy tables from legacy builds. Nothing
+        # references them anymore; removing them keeps the DB aligned with code.
+        cur.execute("DROP TABLE IF EXISTS economy_accounts")
+        cur.execute("DROP TABLE IF EXISTS economy_inventory")
 
         conn.commit()
 
@@ -202,9 +180,7 @@ def _migrate_from_bot_db() -> None:
                     placeholders = ", ".join("?" for _ in columns)
                     # Only keep inventory rows whose referenced shop item still
                     # exists, so FK relationships stay valid in the new DB.
-                    if table == "economy_inventory":
-                        guard = " WHERE item_id IN (SELECT id FROM economy_shop_items WHERE guild_id = economy_inventory.guild_id)"
-                    elif table == "economy_channel_inventory":
+                    if table == "economy_channel_inventory":
                         guard = " WHERE item_id IN (SELECT id FROM economy_shop_items WHERE guild_id = economy_channel_inventory.guild_id)"
                     else:
                         guard = ""
@@ -236,155 +212,6 @@ def _migrate_from_bot_db() -> None:
 # ---------------------------------------------------------------------------
 # Economy helpers
 # ---------------------------------------------------------------------------
-
-
-def get_economy_account(guild_id: int, user_id: int) -> tuple[int, int]:
-    """
-    Returns (wallet, bank). Ensures a row exists.
-    """
-    _ensure_ready()
-    with _connect() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank)
-            VALUES (?, ?, 0, 0)
-            """,
-            (guild_id, user_id),
-        )
-        conn.commit()
-        cur.execute(
-            "SELECT wallet, bank FROM economy_accounts WHERE guild_id = ? AND user_id = ?",
-            (guild_id, user_id),
-        )
-        row = cur.fetchone()
-        if not row:
-            return 0, 0
-        return int(row["wallet"]), int(row["bank"])
-
-
-def set_economy_account(
-    guild_id: int,
-    user_id: int,
-    wallet: int,
-    bank: int,
-    *,
-    last_collect_at: datetime | None = None,
-) -> None:
-    _ensure_ready()
-    wallet = max(0, int(wallet))
-    bank = max(0, int(bank))
-    ts = last_collect_at.isoformat() if last_collect_at else None
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO economy_accounts (guild_id, user_id, wallet, bank, last_collect_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                wallet = excluded.wallet,
-                bank = excluded.bank,
-                last_collect_at = COALESCE(excluded.last_collect_at, economy_accounts.last_collect_at)
-            """,
-            (guild_id, user_id, wallet, bank, ts),
-        )
-        conn.commit()
-
-
-def update_economy_balance(
-    guild_id: int,
-    user_id: int,
-    *,
-    delta_wallet: int = 0,
-    delta_bank: int = 0,
-) -> tuple[int, int]:
-    """
-    Atomically adjust wallet/bank; clamps to >= 0. Returns new (wallet, bank).
-    """
-    _ensure_ready()
-    with _connect() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank) VALUES (?, ?, 0, 0)",
-            (guild_id, user_id),
-        )
-        cur.execute(
-            """
-            UPDATE economy_accounts
-            SET wallet = MAX(0, wallet + ?),
-                bank = MAX(0, bank + ?)
-            WHERE guild_id = ? AND user_id = ?
-            """,
-            (delta_wallet, delta_bank, guild_id, user_id),
-        )
-        conn.commit()
-        row = cur.execute(
-            "SELECT wallet, bank FROM economy_accounts WHERE guild_id = ? AND user_id = ?",
-            (guild_id, user_id),
-        ).fetchone()
-        return (int(row["wallet"]), int(row["bank"])) if row else (0, 0)
-
-
-def transfer_economy_balance(guild_id: int, from_user_id: int, to_user_id: int, amount: int) -> bool:
-    """
-    Atomic wallet-to-wallet transfer between two users.
-    Deducts from sender wallet (fails if insufficient), adds to recipient wallet.
-    Returns True if transfer succeeded.
-    """
-    _ensure_ready()
-    if amount <= 0:
-        return False
-    with _connect() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank) VALUES (?, ?, 0, 0)",
-            (guild_id, from_user_id),
-        )
-        cur.execute(
-            "INSERT OR IGNORE INTO economy_accounts (guild_id, user_id, wallet, bank) VALUES (?, ?, 0, 0)",
-            (guild_id, to_user_id),
-        )
-        cur.execute(
-            "UPDATE economy_accounts SET wallet = wallet - ? WHERE guild_id = ? AND user_id = ? AND wallet >= ?",
-            (amount, guild_id, from_user_id, amount),
-        )
-        if cur.rowcount == 0:
-            conn.rollback()
-            return False
-        cur.execute(
-            "UPDATE economy_accounts SET wallet = wallet + ? WHERE guild_id = ? AND user_id = ?",
-            (amount, guild_id, to_user_id),
-        )
-        conn.commit()
-        return True
-
-
-def get_last_collect_at(guild_id: int, user_id: int) -> datetime | None:
-    _ensure_ready()
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT last_collect_at FROM economy_accounts WHERE guild_id = ? AND user_id = ?",
-            (guild_id, user_id),
-        ).fetchone()
-        if not row or not row["last_collect_at"]:
-            return None
-        try:
-            return datetime.fromisoformat(row["last_collect_at"])
-        except Exception:
-            return None
-
-
-def set_last_collect_at(guild_id: int, user_id: int, when: datetime) -> None:
-    _ensure_ready()
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO economy_accounts (guild_id, user_id, wallet, bank, last_collect_at)
-            VALUES (?, ?, 0, 0, ?)
-            ON CONFLICT(guild_id, user_id) DO UPDATE SET last_collect_at = excluded.last_collect_at
-            """,
-            (guild_id, user_id, when.isoformat()),
-        )
-        conn.commit()
 
 
 def get_shop_items(guild_id: int) -> list[dict]:
@@ -479,57 +306,6 @@ def get_removed_default_items(guild_id: int) -> set[str]:
             (guild_id,),
         ).fetchall()
         return {r["name"] for r in rows}
-
-
-def get_inventory(guild_id: int, user_id: int) -> list[dict]:
-    _ensure_ready()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT i.item_id, i.quantity, s.name, s.description
-            FROM economy_inventory i
-            JOIN economy_shop_items s ON s.id = i.item_id
-            WHERE i.guild_id = ? AND i.user_id = ? AND i.quantity > 0
-            ORDER BY s.name ASC
-            """,
-            (guild_id, user_id),
-        ).fetchall()
-        return [
-            {
-                "item_id": int(r["item_id"]),
-                "name": r["name"],
-                "description": r["description"] or "",
-                "quantity": int(r["quantity"]),
-            }
-            for r in rows
-        ]
-
-
-def add_inventory_item(guild_id: int, user_id: int, item_id: int, delta_qty: int) -> int:
-    """
-    Atomically adjust quantity for a given item; returns new quantity. Clamps to >= 0.
-    """
-    _ensure_ready()
-    try:
-        with _connect() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT OR IGNORE INTO economy_inventory (guild_id, user_id, item_id, quantity) VALUES (?, ?, ?, 0)",
-                (guild_id, user_id, item_id),
-            )
-            cur.execute(
-                "UPDATE economy_inventory SET quantity = MAX(0, quantity + ?) WHERE guild_id = ? AND user_id = ? AND item_id = ?",
-                (delta_qty, guild_id, user_id, item_id),
-            )
-            conn.commit()
-            row = cur.execute(
-                "SELECT quantity FROM economy_inventory WHERE guild_id = ? AND user_id = ? AND item_id = ?",
-                (guild_id, user_id, item_id),
-            ).fetchone()
-            return int(row["quantity"]) if row else 0
-    except sqlite3.IntegrityError:
-        # Item was deleted between lookup and add; nothing to adjust.
-        return 0
 
 
 # Channel-based economy (rolechat balance & inventory)
@@ -812,31 +588,3 @@ def remove_shop_item_by_name(guild_id: int, item_name: str) -> bool:
     if deleted and item.get("is_default"):
         _record_removed_default_item(guild_id, item["name"])
     return deleted
-
-
-def get_top_economy_users(guild_id: int, limit: int = 10) -> list[dict]:
-    """
-    Return top users by total (wallet + bank), descending.
-    Each entry: {user_id, wallet, bank, total}.
-    """
-    _ensure_ready()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT user_id, wallet, bank
-            FROM economy_accounts
-            WHERE guild_id = ? AND (wallet + bank) > 0
-            ORDER BY (wallet + bank) DESC
-            LIMIT ?
-            """,
-            (guild_id, limit),
-        ).fetchall()
-        return [
-            {
-                "user_id": int(r["user_id"]),
-                "wallet": int(r["wallet"]),
-                "bank": int(r["bank"]),
-                "total": int(r["wallet"]) + int(r["bank"]),
-            }
-            for r in rows
-        ]
