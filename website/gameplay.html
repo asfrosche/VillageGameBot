@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How to Play — Village Game</title>
+  <meta name="description" content="From setup and navigation to Day/Night voting — how a Village Game round actually runs.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a class="logo" href="index.html"><span class="dot"></span>Village Game</a>
+    <div class="spacer"></div>
+    <a class="item" href="index.html">Overview</a>
+    <a class="item active" href="gameplay.html">How to Play</a>
+    <a class="item" href="roles.html">Roles &amp; Intel</a>
+    <a class="item" href="economy.html">Economy &amp; Extras</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">The Round</span>
+      <h1>From empty server to full village.</h1>
+      <p class="lead">
+        A game is built in four moves: map the world, place the roles, open the doors,
+        then let the Day/Night loop take over.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="#loop">The game loop</a>
+        <a class="btn" href="#setup">Setup</a>
+      </div>
+    </header>
+
+    <section class="section" id="setup">
+      <div class="section-head">
+        <h2>1 · Building the village</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="steps">
+        <div class="step glass">
+          <div class="n"></div>
+          <div>
+            <h3>Map categories, roles, channels</h3>
+            <p>The host runs <span class="mono">.setup &lt;num_houses&gt;</span> to bind the world — Alive, Dead, Sponsor, Alt and log channels — to the datastore. <span class="mono">.roleset</span>, <span class="mono">.channelset</span> and <span class="mono">.categoryset</span> fine-tune the layout.</p>
+          </div>
+        </div>
+        <div class="step glass">
+          <div class="n"></div>
+          <div>
+            <h3>Spawn players at home</h3>
+            <p><span class="mono">.home</span> spawns a player, <span class="mono">.owner</span> assigns ownership. Presets and role packages register role cards so everyone gets a clean ability sheet.</p>
+          </div>
+        </div>
+        <div class="step glass">
+          <div class="n"></div>
+          <div>
+            <h3>Open the doors</h3>
+            <p>The host flips phases with <span class="mono">.day</span> / <span class="mono">.night</span>, sweeps channels with <span class="mono">.broom</span>, and the game is live.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Navigation — you live in this map</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile glass">
+          <div class="tile-num">MOVE</div>
+          <h3>.<span class="mono" style="color:var(--text)">move</span></h3>
+          <p>Walk to another room. Rendering happens live — join/leave messages reflect who is physically where.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">KNOCK</div>
+          <h3>.<span class="mono" style="color:var(--text)">knock</span></h3>
+          <p>Request entry to another player's house. The owner approves or ignores; hosts can force or cancel pending knocks.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">SNEAK</div>
+          <h3>.<span class="mono" style="color:var(--text)">renmove</span></h3>
+          <p>Stealth movement. <span class="mono">.renmove</span> quietly relocates while suppressing join/leave messages — perfect for killers with a hall pass.</p>
+        </div>
+      </div>
+      <p style="color:var(--muted);margin-top:16px;font-size:.92rem">
+        Every player can find the whole map instantly — <span class="mono">.map</span> and <span class="mono">.where</span> answer "where is the action?"
+      </p>
+    </section>
+
+    <section class="section" id="loop">
+      <div class="section-head">
+        <h2>2 · The Day/Night loop</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="phases">
+        <div class="phase glass day">
+          <div class="tag">Day</div>
+          <h3>Talk, accuse, vote</h3>
+          <p>Players gather, share intel, level accusations and vote. Hosts manipulate votes, skip night and read <span class="mono">.votelist</span> at a glance.</p>
+        </div>
+        <div class="phase glass day">
+          <div class="tag">Vote / lynch</div>
+          <h3>.<span class="mono" style="color:var(--text)">vote</span></h3>
+          <p>Classic lynching with <span class="mono">.abstain</span> and <span class="mono">.removevote</span>. A token-based trial track (<span class="mono">.accuse</span>, <span class="mono">.voten</span>) runs alongside from the Nominations cog.</p>
+        </div>
+        <div class="phase glass night">
+          <div class="tag">Night</div>
+          <h3>Kill &amp; scheme</h3>
+          <p>Under <span class="mono">.night</span>, sneaking happens, role actions resolve, and the host logs kills with <span class="mono">.dead</span> / <span class="mono">.deadrole</span>.</p>
+        </div>
+        <div class="phase glass night">
+          <div class="tag">Reset</div>
+          <h3>.<span class="mono" style="color:var(--text)">end</span></h3>
+          <p>When the world shifts, hosts rebuild: <span class="mono">.destroy</span>, <span class="mono">.rebuild</span>, <span class="mono">.newpc</span>, <span class="mono">.mergepc</span>, and <span class="mono">.endgame</span> to close the chapter cleanly.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>3 · Living world, live host</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile wide glass">
+          <h3>🌍 World shaping</h3>
+          <ul class="features">
+            <li><span class="mono">.decay</span> / <span class="mono">.destroy</span> — rooms collapse and are rebuilt over time.</li>
+            <li><span class="mono">.close</span> / <span class="mono">.public</span> / <span class="mono">.private</span> — flip room access live.</li>
+            <li><span class="mono">.setowner</span>, <span class="mono">.movehouse</span>, <span class="mono">.rename</span> — properties change hands mid-game.</li>
+          </ul>
+        </div>
+        <div class="tile wide glass">
+          <h3>🎛️ Host control room</h3>
+          <ul class="features">
+            <li><span class="mono">.settings</span> — inspect everything bound to the world.</li>
+            <li><span class="mono">.log</span> — full transcripts for review.</li>
+            <li><span class="mono">.timer</span>, <span class="mono">.roll</span>, <span class="mono">.narrate</span> — pacing tools for the table.</li>
+            <li><span class="mono">.skipnight</span>, <span class="mono">.resetvotes</span> — keep the tempo.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass cta-band">
+      <h2>Know who everyone is.</h2>
+      <p>Roles, abilities, surveillance and the Overseer Intelligence Board.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="roles.html">Roles &amp; Intel</a>
+        <a class="btn" href="economy.html">Economy &amp; Extras</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <span>Village Game Bot — setup → navigate → vote → scheme → reset.</span>
+      <span class="badge">Day/Night engine</span>
+    </div>
+  </footer>
+</body>
+</html>

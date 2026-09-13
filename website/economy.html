@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Economy &amp; Extras — Village Game</title>
+  <meta name="description" content="Economy, item drops, scheduling tools, sticky messages, analytics and the command hub.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a class="logo" href="index.html"><span class="dot"></span>Village Game</a>
+    <div class="spacer"></div>
+    <a class="item" href="index.html">Overview</a>
+    <a class="item" href="gameplay.html">How to Play</a>
+    <a class="item" href="roles.html">Roles &amp; Intel</a>
+    <a class="item active" href="economy.html">Economy &amp; Extras</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">Economy · Tools · Commands</span>
+      <h1>Money, gear, and the quiet machinery.</h1>
+      <p class="lead">
+        Wallets, a shop, item drops and leaderboards — plus the scheduling, sticky messages and
+        analytics that keep large games running smoothly.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="#economy">The economy</a>
+        <a class="btn" href="#hub">Command hub</a>
+      </div>
+    </header>
+
+    <section class="section" id="economy">
+      <div class="section-head">
+        <h2>The economy at a glance</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile glass">
+          <div class="tile-num">WALLET</div>
+          <h3>.<span class="mono" style="color:var(--text)">collect</span></h3>
+          <p>RC balances and wallets are per-server. Players collect income and spend it in the shop.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">SHOP</div>
+          <h3>.<span class="mono" style="color:var(--text)">buy</span> / <span class="mono" style="color:var(--text)">sell</span></h3>
+          <p>Items have real prices. <span class="mono">.inventory</span> tracks what you carry, <span class="mono">.trade</span> swaps between players.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">DROPS</div>
+          <h3>.<span class="mono" style="color:var(--text)">drop</span></h3>
+          <p>Interactive item drops run on persistent buttons with SQLite-backed atomic claims and an expiration loop — one click, one claim, no double-grabs.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">LADDER</div>
+          <h3>.<span class="mono" style="color:var(--text)">leaderboard</span></h3>
+          <p>Net worth rankings — bragging rights and a juicy target for thief roles.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>The quiet machinery</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile glass">
+          <h3>📌 Sticky messages</h3>
+          <p>Silent, cooldown-based re-pinning per channel (<span class="mono">.sticky set</span>, <span class="mono">.sticky cooldown</span>) — reposts only on new chat, never pings.</p>
+        </div>
+        <div class="tile glass">
+          <h3>🔔 Bump reminders</h3>
+          <p>Watch one or more channels for Disboard <span class="mono">/bump</span> and get a nudge after a configurable delay (<span class="mono">.sticky bumpchannel</span>, <span class="mono">bumplist</span>, <span class="mono">bumphours</span>).</p>
+        </div>
+        <div class="tile glass">
+          <h3>📅 Calendars &amp; meetups</h3>
+          <p>EN <span class="mono">.calendar</span> and IT <span class="mono">.calendario</span> wizards schedule games in their own SQLite DB; meetings and birthdays are announced on loop.</p>
+        </div>
+        <div class="tile glass">
+          <h3>🕰️ Timezones &amp; locations</h3>
+          <p><span class="mono">.mysetloc</span>, <span class="mono">.localtime</span>, <span class="mono">.near</span>, <span class="mono">.mapp</span> — real-world location mapping via timezonefinder &amp; geopy.</p>
+        </div>
+        <div class="tile glass">
+          <h3>📊 Analytics</h3>
+          <p>Every command is instrumented (<span class="mono">before/after_invoke</span>). Query via <span class="mono">.analytics</span>, <span class="mono">.failures</span>, export with <span class="mono">.analyticsexport</span>, or open the FastAPI dashboard.</p>
+        </div>
+        <div class="tile glass">
+          <h3>📚 Game library</h3>
+          <p><span class="mono">lib</span> / <span class="mono">libit</span>: a shared codex of games, roles, stats, winrates and relations across EN &amp; IT.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="hub">
+      <div class="section-head">
+        <h2>The command hub</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Area</th><th>Category</th><th>Examples</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>🏠</td><td>Setup &amp; world</td><td><code>.setup</code> <code>.roleset</code> <code>.home</code> <code>.destroy</code> <code>.end</code></td></tr>
+            <tr><td>🚪</td><td>Movement</td><td><code>.move</code> <code>.knock</code> <code>.renmove</code> <code>.map</code> <code>.where</code></td></tr>
+            <tr><td>🗳️</td><td>Voting &amp; trials</td><td><code>.vote</code> <code>.accuse</code> <code>.voten</code> <code>.intervene</code> <code>.votelist</code></td></tr>
+            <tr><td>🪙</td><td>Economy</td><td><code>.buy</code> <code>.sell</code> <code>.trade</code> <code>.collect</code> <code>.leaderboard</code></td></tr>
+            <tr><td>🕵️</td><td>Intel</td><td><code>.follow</code> <code>.track</code> <code>.stalk</code> <code>.setboard</code> <code>.meetupmatrix</code></td></tr>
+            <tr><td>🎛️</td><td>Host tools</td><td><code>.day</code> <code>.night</code> <code>.broom</code> <code>.log</code> <code>.timer</code> <code>.roll</code></td></tr>
+            <tr><td>📌</td><td>Sticky &amp; bump</td><td><code>.sticky set</code> <code>.sticky cooldown</code> <code>.sticky bumpchannel</code> <code>.sticky bumplist</code></td></tr>
+            <tr><td>📅</td><td>Scheduling</td><td><code>.calendar</code> <code>.calendario</code> <code>.meeting</code> <code>.birthdays</code></td></tr>
+            <tr><td>❓</td><td>Discover</td><td><code>.help</code> <code>.sh &lt;keyword&gt;</code> dropdown categories &amp; <code>/vgi</code> intro</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Also riding along</h2>
+        <div class="rule"></div>
+        <p style="margin-top:10px">Independent engines bundled into the same bot, each with its own identity.</p>
+      </div>
+      <div class="bento">
+        <div class="tile wide glass">
+          <h3>🎭 Blood on the Clocktower</h3>
+          <p>Full BOTC engine — role, jinx, fabled, night-order and script cogs plus a game engine. Uses <span class="mono">botc*</span>-prefixed commands and slash commands to avoid collisions.</p>
+        </div>
+        <div class="tile wide glass">
+          <h3>⚽ World Cup simulator</h3>
+          <p>Community drafts (<span class="mono">.draftstart</span>, <span class="mono">.myteam</span>, <span class="mono">.scoutingboard</span>), bracket PNG rendering, and V1–V5 tactical match simulators with live standings and heatmaps.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass cta-band">
+      <h2>That's the whole village.</h2>
+      <p>Pick a starting point — the loop, the roles, or the whole overview.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="index.html">Back to overview</a>
+        <a class="btn" href="roles.html">Roles &amp; Intel</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <span>Village Game Bot — Discord social deduction, 40 cogs strong.</span>
+      <span class="badge">.help · .sh &lt;keyword&gt;</span>
+    </div>
+  </footer>
+</body>
+</html>

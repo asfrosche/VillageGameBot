@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Village Game — The Living Map Mafia</title>
+  <meta name="description" content="A Discord social-deduction bot that turns a server into a living map. Move, knock, whisper, vote, earn and survive.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a class="logo" href="index.html"><span class="dot"></span>Village Game</a>
+    <div class="spacer"></div>
+    <a class="item active" href="index.html">Overview</a>
+    <a class="item" href="gameplay.html">How to Play</a>
+    <a class="item" href="roles.html">Roles &amp; Intel</a>
+    <a class="item" href="economy.html">Economy &amp; Extras</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">Discord · Mafia · Social Deduction</span>
+      <h1>The village is a living map.</h1>
+      <p class="lead">
+        The Village Game is a 30–40 player social deduction bot. Your Discord server
+        <em>becomes</em> the village: channels are rooms, players physically move, knock
+        on doors, whisper and scheme — while Overseers run the whole world from one panel.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="gameplay.html">Learn the game loop</a>
+        <a class="btn" href="roles.html">Explore roles &amp; intel</a>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>What makes it a game</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile glass">
+          <div class="tile-num">MOVEMENT</div>
+          <h3><span class="emoji">🚪</span>Channels are rooms</h3>
+          <p><span class="mono">.move</span>, <span class="mono">.knock</span> and <span class="mono">.home</span> let players genuinely walk the map. Hosts can force-move, lock houses and auto-route traffic. No more fake "rooms" — space matters.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">PHASES</div>
+          <h3><span class="emoji">☀️</span>Day &amp; night cycles</h3>
+          <p>A rigid Day/Night structure driven by the host. Votes and lynching by day; sneaking, killing and role actions under cover of darkness.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">META</div>
+          <h3><span class="emoji">🪙</span>Everything is host-tunable</h3>
+          <p>Economy balances, role packages, status effects, cooldowns and calendars are configured per server and published to players through the built-in help hub.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">TOOLS</div>
+          <h3><span class="emoji">🕵️</span>Overseer toolkit</h3>
+          <p>Follow, track and stalk relationships, an Intelligence Board, status manager, action logs, transcripts and one-click resets keep hosts in total control.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">ENGINES</div>
+          <h3><span class="emoji">⚙️</span>Sub-systems built-in</h3>
+          <p>Blood on the Clocktower, a World Cup draft/simulator, a fast analytics pipeline and a web dashboard ship with the same bot.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">DATA</div>
+          <h3><span class="emoji">📊</span>Every action recorded</h3>
+          <p>Every command execution is captured to SQLite and exposed through <span class="mono">.analytics</span>, <span class="mono">.failures</span> and a FastAPI dashboard.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>The world at a glance</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile wide glass">
+          <h3>🎭 One bot, three theatres</h3>
+          <ul class="features">
+            <li><strong>Village Game</strong> — the main living-map mafia experience.</li>
+            <li><strong>Blood on the Clocktower</strong> — full BOTC engine with roles, jinxes, fabled and scripts.</li>
+            <li><strong>World Cup simulator</strong> — community drafts and V1–V5 tactical match simulations.</li>
+          </ul>
+        </div>
+        <div class="tile wide glass">
+          <h3>🧩 Architecture</h3>
+          <ul class="features">
+            <li><strong>Cog-based</strong> — ~40 isolated cogs registered in <span class="mono">main.py</span>, some loaded lazily on ready.</li>
+            <li><strong>SQLite-first</strong> — settings, invites, deadlist, players and per-feature DBs, with legacy JSON auto-migration.</li>
+            <li><strong>Analytics pipeline</strong> — instrumentation hooks <span class="mono">before_invoke</span>/<span class="mono">after_invoke</span> to capture every command.</li>
+          </ul>
+        </div>
+        <div class="tile full glass">
+          <h3>⚡ Technology stack</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Layer</th><th>Choice</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Language</td><td>Python 3.12+</td></tr>
+                <tr><td>Framework</td><td>discord.py 2.x, asyncio, persistent <code>discord.ui</code> views</td></tr>
+                <tr><td>Storage</td><td>SQLite3 — no external DB server required</td></tr>
+                <tr><td>Analytics</td><td>Custom SQLite service, optional PostHog, FastAPI dashboard</td></tr>
+                <tr><td>Geo &amp; data</td><td>timezonefinder, geopy, numpy, pandas, matplotlib, folium</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass cta-band">
+      <h2>Ready to walk the village?</h2>
+      <p>Start with the setup wizard, then let players loose on the map.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="gameplay.html">How to Play</a>
+        <a class="btn" href="economy.html">Commands &amp; Extras</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <span>Village Game Bot — a living-map social deduction engine.</span>
+      <span class="badge">discord.py · 40 cogs · SQLite</span>
+    </div>
+  </footer>
+</body>
+</html>

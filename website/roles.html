@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roles &amp; Intel — Village Game</title>
+  <meta name="description" content="Role sheets, ability dashboards, status effects, surveillance and the Overseer Intelligence Board.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a class="logo" href="index.html"><span class="dot"></span>Village Game</a>
+    <div class="spacer"></div>
+    <a class="item" href="index.html">Overview</a>
+    <a class="item" href="gameplay.html">How to Play</a>
+    <a class="item active" href="roles.html">Roles &amp; Intel</a>
+    <a class="item" href="economy.html">Economy &amp; Extras</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">Roles · Status · Intel</span>
+      <h1>Everyone knows a little. Nobody knows it all.</h1>
+      <p class="lead">
+        Role cards are published at game start, abilities live on a personal dashboard,
+        and the Overseer tracks every effect, relationship and whisper behind the scenes.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="#abilities">Abilities</a>
+        <a class="btn" href="#intel">The intel network</a>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Your role, on a dashboard</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile wide glass">
+          <h3>🧾 Role packages</h3>
+          <p>
+            Hosts register pinned-message role packages and role cards/teams, then run the
+            publishing pipeline — <span class="mono">.publishroles</span> → <span class="mono">.reviewroles</span> →
+            <span class="mono">.approvepublish</span> — so every player gets an official sheet. The library
+            keeps the codex with stats, winrates and relations.
+          </p>
+        </div>
+        <div class="tile wide glass">
+          <h3>📋 Player dashboard</h3>
+          <p>
+            <span class="mono">.dashboard</span> renders each player's active and passive abilities, visit
+            blocking (<span class="mono">.vb</span>), action log and house locks. Presets (<span class="mono">.preset</span>,
+            <span class="mono">.ospreset</span>) let hosts roll out ability packages by category.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="abilities">
+      <div class="section-head">
+        <h2>The Status Manager</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Status</th><th>Effect</th><th>Who can see it</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>Protection</code></td><td>Blocks incoming harmful visits / actions</td><td>Host · owner</td></tr>
+            <tr><td><code>Roleblock</code></td><td>Prevents the player from using abilities</td><td>Host · owner</td></tr>
+            <tr><td><code>Visitblock</code></td><td>Blocks visits toward the player</td><td>Host · owner</td></tr>
+            <tr><td><code>Immunity</code></td><td>Immune to lynching / night kills</td><td>Host</td></tr>
+            <tr><td><code>Stealth</code></td><td>Movement hidden from public rendering</td><td>Host</td></tr>
+            <tr><td><code>Untargetable</code></td><td>Cannot be selected by any ability</td><td>Host</td></tr>
+            <tr><td><code>Custom</code></td><td>Arbitrary host-defined effects</td><td>Host</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="color:var(--muted);margin-top:14px;font-size:.92rem">
+        Statuses are set per-channel via <span class="mono">/status</span> &amp; <span class="mono">.statuslist</span>, and movement
+        warnings fire automatically when a blocked player tries to act.
+      </p>
+    </section>
+
+    <section class="section" id="intel">
+      <div class="section-head">
+        <h2>The intel network</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile glass">
+          <div class="tile-num">FOLLOW</div>
+          <h3>.<span class="mono" style="color:var(--text)">follow</span></h3>
+          <p>Passively observe another player. The bot relays their activity into your intel feed.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">TRACK</div>
+          <h3>.<span class="mono" style="color:var(--text)">track</span></h3>
+          <p>Track movement paths — every room a target enters is logged and updated automatically.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">STALK</div>
+          <h3>.<span class="mono" style="color:var(--text)">stalk</span></h3>
+          <p>The deep version: relationships and habits, built up across the whole game.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">MATRIX</div>
+          <h3>.<span class="mono" style="color:var(--text)">meetupmatrix</span></h3>
+          <p>A passive who-met-whom adjacency matrix — the host can replay the entire social graph.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">BOARD</div>
+          <h3>.<span class="mono" style="color:var(--text)">setboard</span></h3>
+          <p>The Overseer Intelligence Board: per-player effect cards in a dedicated SQLite DB, refreshed with <span class="mono">.refreshcards</span>.</p>
+        </div>
+        <div class="tile glass">
+          <div class="tile-num">LOG</div>
+          <h3>Action log channel</h3>
+          <p>Central logs intercept role/bot mentions and track player actions, with approval buttons for hosts.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>Meetings &amp; whispers</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="bento">
+        <div class="tile wide glass">
+          <h3>🤝 Meeting rooms</h3>
+          <p>
+            The meeting cog runs the full scheduler — requests, cooldowns, blocked users and archives
+            (<span class="mono">.meeting</span>, <span class="mono">.endmeeting</span>, <span class="mono">.meetingconfig</span>), wired
+            into the meetup matrix so every private chat feeds the social graph.
+          </p>
+        </div>
+        <div class="tile wide glass">
+          <h3>👁️ Message tracking</h3>
+          <p>
+            <span class="mono">.statss</span>, <span class="mono">.serverstats</span> and <span class="mono">.start_tracking</span> expose
+            message-count metrics — who talks, when, and how much. Great for hosts judging activity and
+            for meta-gamers counting tells.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass cta-band">
+      <h2>Follow the money next.</h2>
+      <p>Shops, wallets, item drops and every command the bot ships with.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="economy.html">Economy &amp; Extras</a>
+        <a class="btn" href="gameplay.html">Back to the loop</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot-inner">
+      <span>Village Game Bot — follow, track, stalk, log.</span>
+      <span class="badge">Surveillance network</span>
+    </div>
+  </footer>
+</body>
+</html>
