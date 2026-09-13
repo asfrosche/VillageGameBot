@@ -1,10 +1,9 @@
 # utils/map_generator.py
-import folium
-from folium.plugins import HeatMap
 from io import BytesIO
 
 def create_location_map(locations_data):
     """Create a map with markers for each location"""
+    import folium
     # Create Folium map with OpenStreetMap tiles
     m = folium.Map(tiles='OpenStreetMap')
     
@@ -25,6 +24,8 @@ def create_location_map(locations_data):
 
 def create_heatmap(locations_data):
     """Create a heatmap of user locations"""
+    import folium
+    from folium.plugins import HeatMap
     # Create base map with OpenStreetMap tiles
     m = folium.Map(tiles='OpenStreetMap')
 

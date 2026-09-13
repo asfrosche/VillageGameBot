@@ -23,6 +23,7 @@ def _load_worldcup_data():
         content = f.read()
     data_block = content.split("RAW_ROSTERS")[0]
     data_block = data_block.replace("from numpy.random import poisson\n", "")
+    data_block = data_block.replace("import pandas as pd\n", "")
     g = {"TEAM_METRICS": TEAM_METRICS, "GROUPS": GROUPS}
     exec(data_block, g)
     TEAM_METRICS.update(g.get("TEAM_METRICS", {}))
