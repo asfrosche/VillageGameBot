@@ -1,5 +1,6 @@
 """Single cog: Follow (move with them), Track (watch where they are), Stalk (read access)."""
 
+import asyncio
 import discord
 from discord.ext import commands
 from datetime import datetime, timezone
@@ -150,17 +151,25 @@ class Surveillance(commands.Cog):
 
     @staticmethod
     def _check_follow_cycle(follows, follower_id, target_id):
-        """Return True if setting follower->target would create a cycle."""
+        """Return True if setting follower->target would create a loop.
+
+        A 2-cycle (mutual follow, A↔B) is allowed so two players can shadow
+        each other; longer loops and self-follows stay blocked.
+        """
+        if follower_id == target_id:
+            return True
         visited = set()
         current = target_id
+        depth = 0
         while current:
             if current == follower_id:
-                return True
+                return depth > 1
             if current in visited:
                 return True
             visited.add(current)
             entry = follows.get(current)
             current = entry["target"] if entry else None
+            depth += 1
         return False
 
     @commands.command()
@@ -206,11 +215,28 @@ class Surveillance(commands.Cog):
                 continue
 
             if self._check_follow_cycle(follows, fid, tid):
-                await ctx.send(
-                    f"⚠️ Cannot set follow — this would create a circular chain. "
-                    f"({follower.mention} → {target.mention})"
+                confirm_msg = await ctx.send(
+                    f"⚠️ This would create a circular chain "
+                    f"({follower.mention} → {target.mention}). "
+                    "Reply **yes** to allow it anyway, anything else to cancel."
                 )
-                continue
+
+                def check(m):
+                    return m.author == ctx.author and m.channel == ctx.channel
+
+                try:
+                    response = await self.bot.wait_for("message", timeout=30, check=check)
+                except asyncio.TimeoutError:
+                    await ctx.send("Timed out. Action cancelled.")
+                    continue
+                if response.content.lower() != "yes":
+                    await ctx.send("Action cancelled.")
+                    continue
+                try:
+                    await confirm_msg.delete()
+                    await response.delete()
+                except discord.HTTPException:
+                    pass
 
             if fid in follows and follows[fid]["target"] != tid:
                 old_target = ctx.guild.get_member(int(follows[fid]["target"]))
@@ -265,9 +291,6 @@ class Surveillance(commands.Cog):
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded.")
-            return
-        if not self._require_rolechat(ctx, guild_data):
-            await ctx.send("This command can only be used in a RoleChat channel.")
             return
 
         follows = guild_data.get("player_follows", {})

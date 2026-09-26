@@ -72,7 +72,7 @@ class TestCheckFollowCycle:
 
     def test_direct_cycle(self):
         follows = {"1": {"target": "2"}}
-        assert surveillance_cog.Surveillance._check_follow_cycle(follows, "2", "1") is True
+        assert surveillance_cog.Surveillance._check_follow_cycle(follows, "2", "1") is False
 
     def test_chain_cycle(self):
         follows = {"1": {"target": "2"}, "2": {"target": "3"}}

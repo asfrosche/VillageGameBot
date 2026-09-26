@@ -163,7 +163,7 @@ class Meetup(commands.Cog):
     # ======================================================
 
     @commands.Cog.listener()
-    async def on_phase_change(self, phase: str):
+    async def on_phase_change(self, phase: str, guild_id: int = 0):
         try:
             self.current_phase = phase
 
