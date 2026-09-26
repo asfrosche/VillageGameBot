@@ -199,3 +199,24 @@ class TestSetup:
         method = getattr(setup_cog.Setup, 'resetdb')
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
+
+    def test_stealemoji_exists(self):
+        """Verify stealemoji command exists on the cog."""
+        assert hasattr(setup_cog.Setup, 'stealemoji')
+
+    def test_stealemoji_has_help(self):
+        """Verify stealemoji command has help text."""
+        method = getattr(setup_cog.Setup, 'stealemoji')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    def test_stealemoji_parses_static_custom_emoji(self):
+        assert setup_cog._parse_custom_emoji("<:pepe:123456789>") == ("pepe", 123456789, False)
+
+    def test_stealemoji_parses_animated_custom_emoji(self):
+        assert setup_cog._parse_custom_emoji("<a:pepeSpin:987654321>") == ("pepeSpin", 987654321, True)
+
+    def test_stealemoji_rejects_non_custom_emoji(self):
+        assert setup_cog._parse_custom_emoji("😀") is None
+        assert setup_cog._parse_custom_emoji(":pepe:") is None
+        assert setup_cog._parse_custom_emoji("<:pepe:abc>") is None

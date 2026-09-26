@@ -1,6 +1,8 @@
 import discord
 import asyncio
+import aiohttp
 import datetime
+import re
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from discord.ext import commands
@@ -31,6 +33,21 @@ def _parse_time_value(val: str):
         time_part = val
     h, m = (int(x) for x in time_part.split(":"))
     return h, m, tz_name
+
+
+_CUSTOM_EMOJI_RE = re.compile(r"<(a?):([0-9a-zA-Z_]+):(\d+)>")
+
+def _parse_custom_emoji(emoji: str):
+    """Parse a custom emoji string like `<:pepe:123456789>` or `<a:pepe:123456789>`.
+
+    Returns (name, emoji_id, animated) or None if it isn't a custom emoji."""
+    match = _CUSTOM_EMOJI_RE.fullmatch(emoji.strip())
+    if not match:
+        return None
+    animated = bool(match.group(1))
+    name = match.group(2)
+    emoji_id = int(match.group(3))
+    return name, emoji_id, animated
 
 class Setup(commands.Cog):
     def __init__(self, bot):
@@ -306,6 +323,59 @@ class Setup(commands.Cog):
                 await ctx.send("Guild data not loaded.")
         else:
             await ctx.send("You don't have enough permissions to use this command")
+
+    # Add text to the current channel name, or rename the channel
+    @commands.group(invoke_without_command=True)
+    async def addch(self, ctx, *, text: str = None):
+        """Append text to the current channel name (admin only). Example: .addch Po makes 'apple' become 'apple -po'. Use .addch rename <name> to fully rename the channel."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        if not text:
+            await ctx.send("❌ Provide the text to append. Example: `.addch Po`")
+            return
+        suffix = text.strip()
+        if not suffix:
+            await ctx.send("❌ Provide the text to append. Example: `.addch Po`")
+            return
+        if suffix.startswith("-"):
+            new_name = f"{ctx.channel.name} {suffix}"
+        else:
+            new_name = f"{ctx.channel.name} -{suffix}"
+        if len(new_name) > 100:
+            await ctx.send("❌ The new channel name would exceed Discord's 100 character limit.")
+            return
+        try:
+            await ctx.channel.edit(name=new_name)
+            await ctx.send(f"✅ Channel renamed to `{new_name}`")
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to rename this channel.")
+        except discord.HTTPException as e:
+            await ctx.send(f"❌ Could not rename the channel: {e}")
+
+    @addch.command(name="rename")
+    async def addch_rename(self, ctx, *, text: str = None):
+        """Rename the current channel to the given text (admin only). Spaces & special chars become dashes, uppercase becomes lowercase. Example: .addch rename Apple Pie -> apple-pie"""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        if not text:
+            await ctx.send("❌ Provide the new channel name. Example: `.addch rename apple-pie`")
+            return
+        new_name = re.sub(r"[^a-z0-9_-]", "-", text.strip().lower())
+        new_name = re.sub(r"-{2,}", "-", new_name).strip("-")
+        if not new_name:
+            await ctx.send("❌ That text produced an empty/invalid channel name. Example: `.addch rename apple-pie`")
+            return
+        if len(new_name) > 100:
+            new_name = new_name[:100].strip("-")
+        try:
+            await ctx.channel.edit(name=new_name)
+            await ctx.send(f"✅ Channel renamed to `{new_name}`")
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to rename this channel.")
+        except discord.HTTPException as e:
+            await ctx.send(f"❌ Could not rename the channel: {e}")
 
     # Setup categories
     @commands.command()
@@ -688,6 +758,138 @@ class Setup(commands.Cog):
         else:
             await ctx.send(embed=embed)
 
+    @commands.command()
+    async def settings(self, ctx):
+        """View all current server configuration settings."""
+        guild_data = load_guild_data(ctx.guild.id)
+
+        embed = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
+        embed.set_footer(text="Village Game")
+
+        embed.add_field(name="Timeout Duration", value=str(guild_data.get("timeout_duration")), inline=False)
+        embed.add_field(name="Show Whisper Sender", value=str(guild_data.get("showwhispersender")), inline=False)
+        embed.add_field(name="Auto Join if empty", value=str(guild_data.get("autojoinifempty")), inline=False)
+        embed.add_field(name="Auto Join on knock expire", value=str(guild_data.get("autojoinknockexpired")), inline=False)
+        embed.add_field(name="Max Players in Home", value=str(guild_data.get("maxmembersinhome")), inline=False)
+        embed.add_field(name="Refuse Response", value=str(guild_data.get("refuseresponse")), inline=False)
+        embed.add_field(name="Vote in RC", value=str(guild_data.get("voteinrc")), inline=False)
+        embed.add_field(name="Dead count in House", value=str(guild_data.get("dead_count")), inline=False)
+        embed.add_field(name="Alt count in House", value=str(guild_data.get("alt_count")), inline=False)
+        embed.add_field(name="Show Deads on knock refuse", value=str(guild_data.get("show_dead_on_refuse")), inline=False)
+        embed.add_field(name="Show Alts on knock refuse", value=str(guild_data.get("show_alt_on_refuse")), inline=False)
+        embed.add_field(name="Can Deads interact with the door", value=str(guild_data.get("can_dead_open")), inline=False)
+        embed.add_field(name="Can Alts interact with the door", value=str(guild_data.get("can_alt_open")), inline=False)
+        embed.add_field(name="Auto Pin Corpses", value=str(guild_data.get("auto_pin_corpse", True)), inline=False)
+
+        def _fmt_time_val(val):
+            if not val:
+                return "Not set"
+            h, m, tz_name = _parse_time_value(val)
+            base = f"{h:02d}:{m:02d}"
+            if tz_name:
+                tz_label = next((n for n, v, _ in COMMON_TIMEZONES if v == tz_name), tz_name)
+                return f"{base} ({tz_label}{_utc_offset_str(tz_name)})"
+            return f"{base} (UTC)"
+
+        embed.add_field(name="Day End Time", value=_fmt_time_val(guild_data.get("day_end_time")), inline=False)
+        embed.add_field(name="Lynch End Time", value=_fmt_time_val(guild_data.get("lynch_end_time")), inline=False)
+        embed.add_field(name="Presets End Time", value=_fmt_time_val(guild_data.get("presets_end_time")), inline=False)
+        embed.add_field(name="Dashboard enabled", value=str(guild_data.get("dashboard_enabled", False)), inline=False)
+
+        await ctx.send(embed=embed)
+
+    # Reset
+    @commands.command()
+    async def resetdb(self, ctx):
+        """Reset all server setup configuration back to defaults."""
+        if ctx.author.guild_permissions.administrator:
+            guild_data = load_guild_data(ctx.guild.id)
+            if guild_data:
+                embedq = discord.Embed(title="Confirm you want to reset all personalization", description="Click a button to confirm or cancel.", color=0xff3fb9, timestamp=datetime.now())
+                embedq.set_footer(text="Village Game")
+                confirm_view = View(timeout=30)
+                async def confirm_callback(interaction):
+                    if interaction.user == ctx.author:
+                        save_guild_data(ctx.guild.id, base_variables)
+                        embedy = discord.Embed(title="Done", description="Personalization has been reset", color=discord.Color.green(), timestamp=datetime.now())
+                        embedy.set_footer(text="Village Game")
+                        await interaction.response.edit_message(embed=embedy, view=None)
+                    else:
+                        await interaction.response.send_message("You can't confirm this action.", ephemeral=True)
+                async def cancel_callback(interaction):
+                    if interaction.user == ctx.author:
+                        embedn = discord.Embed(title="Reset canceled", description="Your personalization settings remain unchanged", color=discord.Color.red(), timestamp=datetime.now())
+                        embedn.set_footer(text="Village Game")
+                        await interaction.response.edit_message(embed=embedn, view=None)
+                    else:
+                        await interaction.response.send_message("You can't cancel this action.", ephemeral=True)
+                confirm_button = Button(label="✔Yes", style=discord.ButtonStyle.green)
+                confirm_button.callback = confirm_callback
+                cancel_button = Button(label="❌No", style=discord.ButtonStyle.red)
+                cancel_button.callback = cancel_callback
+                confirm_view.add_item(confirm_button)
+                confirm_view.add_item(cancel_button)
+                await ctx.send(embed=embedq, view=confirm_view)
+            else:
+                await ctx.send("Guild data not loaded.")
+        else:
+            await ctx.send("You don't have enough permissions to use this command")
+
+    @commands.command(name="stealemoji")
+    async def stealemoji(self, ctx, emoji: str):
+        """Copy a custom emoji (animated or static) from another server into this one (admin only). Usage: .stealemoji <:pepe:123456789> or <a:pepe:123456789>"""
+        if not ctx.author.guild_permissions.administrator and not ctx.author.guild_permissions.manage_emojis:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+
+        parsed = _parse_custom_emoji(emoji)
+        if parsed is None:
+            await ctx.send("❌ That isn't a custom emoji. Provide one from another server, e.g. `<:pepe:123456789>` or `<a:animated:123456789>`.")
+            return
+        name, emoji_id, animated = parsed
+
+        if any(existing.name == name for existing in ctx.guild.emojis):
+            await ctx.send(f"❌ An emoji named `{name}` already exists in this server. Delete it first or choose a different one.")
+            return
+
+        if len(name) > 32 or not re.fullmatch(r"[0-9a-zA-Z_]+", name):
+            await ctx.send("❌ The emoji name is invalid (max 32 characters, letters/digits/underscores only).")
+            return
+
+        extension = "gif" if animated else "png"
+        url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        await ctx.send(f"❌ Couldn't fetch the emoji image (HTTP {resp.status}). The emoji URL may be invalid.")
+                        return
+                    image_data = await resp.read()
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            await ctx.send("❌ Couldn't download the emoji image. Try again in a few seconds.")
+            return
+
+        if len(image_data) > 256 * 1024:
+            await ctx.send("❌ The emoji image is larger than Discord's 256KB upload limit.")
+            return
+
+        try:
+            created = await ctx.guild.create_custom_emoji(
+                name=name,
+                image=image_data,
+                reason=f"{name} added by {ctx.author} via .stealemoji",
+            )
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have permission to create emojis (the bot needs **Manage Emojis & Stickers**).")
+            return
+        except discord.HTTPException as e:
+            await ctx.send(f"❌ Discord rejected the emoji: {e}")
+            return
+
+        animated_note = " (animated)" if created.animated else ""
+        await ctx.send(f"✅ Added {created} `{created.name}`{animated_note} to this server.")
+
 
 class TimesButtonView(View):
     def __init__(self, author_id: int, guild_data: dict, channel):
@@ -774,79 +976,3 @@ class TimesButtonView(View):
             f"✅ **{label}** set to <t:{unix_ts}:t> (-{offset} min from Day End)",
             ephemeral=True
         )
-
-    @commands.command()
-    async def settings(self, ctx):
-        """View all current server configuration settings."""
-        guild_data = load_guild_data(ctx.guild.id)
-        
-        embed = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
-        embed.set_footer(text="Village Game")
-        
-        embed.add_field(name="Timeout Duration", value=str(guild_data.get("timeout_duration")), inline=False)
-        embed.add_field(name="Show Whisper Sender", value=str(guild_data.get("showwhispersender")), inline=False)
-        embed.add_field(name="Auto Join if empty", value=str(guild_data.get("autojoinifempty")), inline=False)
-        embed.add_field(name="Auto Join on knock expire", value=str(guild_data.get("autojoinknockexpired")), inline=False)
-        embed.add_field(name="Max Players in Home", value=str(guild_data.get("maxmembersinhome")), inline=False)
-        embed.add_field(name="Refuse Response", value=str(guild_data.get("refuseresponse")), inline=False)
-        embed.add_field(name="Vote in RC", value=str(guild_data.get("voteinrc")), inline=False)
-        embed.add_field(name="Dead count in House", value=str(guild_data.get("dead_count")), inline=False)
-        embed.add_field(name="Alt count in House", value=str(guild_data.get("alt_count")), inline=False)
-        embed.add_field(name="Show Deads on knock refuse", value=str(guild_data.get("show_dead_on_refuse")), inline=False)
-        embed.add_field(name="Show Alts on knock refuse", value=str(guild_data.get("show_alt_on_refuse")), inline=False)
-        embed.add_field(name="Can Deads interact with the door", value=str(guild_data.get("can_dead_open")), inline=False)
-        embed.add_field(name="Can Alts interact with the door", value=str(guild_data.get("can_alt_open")), inline=False)
-        embed.add_field(name="Auto Pin Corpses", value=str(guild_data.get("auto_pin_corpse", True)), inline=False)
-        def _fmt_time_val(val):
-            if not val:
-                return "Not set"
-            h, m, tz_name = _parse_time_value(val)
-            base = f"{h:02d}:{m:02d}"
-            if tz_name:
-                tz_label = next((n for n, v, _ in COMMON_TIMEZONES if v == tz_name), tz_name)
-                return f"{base} ({tz_label}{_utc_offset_str(tz_name)})"
-            return f"{base} (UTC)"
-
-        embed.add_field(name="Day End Time", value=_fmt_time_val(guild_data.get("day_end_time")), inline=False)
-        embed.add_field(name="Lynch End Time", value=_fmt_time_val(guild_data.get("lynch_end_time")), inline=False)
-        embed.add_field(name="Presets End Time", value=_fmt_time_val(guild_data.get("presets_end_time")), inline=False)
-        embed.add_field(name="Dashboard enabled", value=str(guild_data.get("dashboard_enabled", False)), inline=False)
-
-        await ctx.send(embed=embed)
-
-    # Reset
-    @commands.command()
-    async def resetdb(self, ctx):
-        """Reset all server setup configuration back to defaults."""
-        if ctx.author.guild_permissions.administrator:
-            guild_data = load_guild_data(ctx.guild.id)
-            if guild_data:
-                embedq = discord.Embed(title="Confirm you want to reset all personalization", description="Click a button to confirm or cancel.", color=0xff3fb9, timestamp=datetime.now())
-                embedq.set_footer(text="Village Game")
-                confirm_view = View(timeout=30)
-                async def confirm_callback(interaction):
-                    if interaction.user == ctx.author:
-                        save_guild_data(ctx.guild.id, base_variables)
-                        embedy = discord.Embed(title="Done", description="Personalization has been reset", color=discord.Color.green(), timestamp=datetime.now())
-                        embedy.set_footer(text="Village Game")
-                        await interaction.response.edit_message(embed=embedy, view=None)
-                    else:
-                        await interaction.response.send_message("You can't confirm this action.", ephemeral=True)
-                async def cancel_callback(interaction):
-                    if interaction.user == ctx.author:
-                        embedn = discord.Embed(title="Reset canceled", description="Your personalization settings remain unchanged", color=discord.Color.red(), timestamp=datetime.now())
-                        embedn.set_footer(text="Village Game")
-                        await interaction.response.edit_message(embed=embedn, view=None)
-                    else:
-                        await interaction.response.send_message("You can't cancel this action.", ephemeral=True)
-                confirm_button = Button(label="✔Yes", style=discord.ButtonStyle.green)
-                confirm_button.callback = confirm_callback
-                cancel_button = Button(label="❌No", style=discord.ButtonStyle.red)
-                cancel_button.callback = cancel_callback
-                confirm_view.add_item(confirm_button)
-                confirm_view.add_item(cancel_button)
-                await ctx.send(embed=embedq, view=confirm_view)
-            else:
-                await ctx.send("Guild data not loaded.")
-        else:
-            await ctx.send("You don't have enough permissions to use this command")
