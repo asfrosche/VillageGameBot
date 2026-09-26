@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -36,6 +37,14 @@ MAX_EMBED_DESC = 4096
 def _escape_md(value: str | None) -> str | None:
     """Escape Discord markdown (_, *, ~, `, |, \\) so raw names render as plain text."""
     return discord.utils.escape_markdown(value) if value else value
+
+
+def _clean_visual_name(value: str | None) -> str | None:
+    """Visual-only filter: keep letters and spaces, drop numbers/special characters."""
+    if not value:
+        return value
+    cleaned = " ".join("".join(c if c.isalpha() or c.isspace() else " " for c in value).split())
+    return cleaned or value
 
 
 @dataclass
@@ -628,6 +637,7 @@ class RolePackageCog(commands.Cog):
           .role regteam [1-5] @player @sponsor — specify both directly (only 1 sponsor)
         Player and sponsor can be mentions, user IDs, display names, or (for logged players no longer on the server) plain text names.
         """
+        cog_ref = self
         slot_names = {1: "Village", 2: "Evil", 3: "Rk", 4: "Neutral", 5: "Bonus/Extra"}
 
         if slot is not None and (slot < 1 or slot > 5):
@@ -741,9 +751,9 @@ class RolePackageCog(commands.Cog):
                     await picker_msg.delete()
                     selected_member = ctx.guild.get_member(player_id)
                     if is_self:
-                        await self._do_regteam_self_picked(ctx, channel, slot, selected_member, sponsor_members, is_admin)
+                        await cog_ref._do_regteam_self_picked(ctx, channel, slot, selected_member, sponsor_members, is_admin)
                     else:
-                        await self._do_regteam_confirm(ctx, channel, slot, selected_member, None)
+                        await cog_ref._do_regteam_confirm(ctx, channel, slot, selected_member, None)
 
                 async def interaction_check(self, interaction: discord.Interaction) -> bool:
                     if interaction.user.id != ctx.author.id:
@@ -759,7 +769,7 @@ class RolePackageCog(commands.Cog):
             return
 
         if is_self:
-            if ctx.author not in player_members and ctx.author not in sponsor_members:
+            if not is_admin and ctx.author not in player_members and ctx.author not in sponsor_members:
                 await ctx.send(f"❌ You must have the **Alive** or **Sponsor** role in {channel.mention} to register your team.")
                 return
             selected_player = ctx.author if ctx.author in player_members else None
@@ -826,12 +836,12 @@ class RolePackageCog(commands.Cog):
 
                                 async def on_selected(sponsor_id):
                                     sponsor = ctx.guild.get_member(sponsor_id)
-                                    await self._do_regteam_confirm(ctx, channel, slot, selected_member, sponsor)
+                                    await cog_ref._do_regteam_confirm(ctx, channel, slot, selected_member, sponsor)
 
                                 await ctx.send(view=SponsorPickView(on_selected))
                             else:
                                 selected_sponsor = sponsor_members[0] if sponsor_members else None
-                                await self._do_regteam_confirm(ctx, channel, slot, selected_member, selected_sponsor)
+                                await cog_ref._do_regteam_confirm(ctx, channel, slot, selected_member, selected_sponsor)
 
                         async def interaction_check(self, interaction: discord.Interaction) -> bool:
                             if interaction.user.id != ctx.author.id:
@@ -874,7 +884,7 @@ class RolePackageCog(commands.Cog):
 
                 async def on_selected(sponsor_id):
                     sponsor = ctx.guild.get_member(sponsor_id)
-                    await self._do_regteam_confirm(ctx, channel, slot, selected_player, sponsor)
+                    await cog_ref._do_regteam_confirm(ctx, channel, slot, selected_player, sponsor)
 
                 await ctx.send(view=SponsorPickView(on_selected))
                 return
@@ -1044,15 +1054,15 @@ class RolePackageCog(commands.Cog):
             stored_info = self._get_channel_slot_info(channel_slots, channel.id)
             stored_slot = self._get_channel_slot(channel_slots, channel.id)
 
-            player_name = _escape_md(stored_info.get("player_name", "Unknown")) if stored_info else "Unknown"
-            sponsor_name = _escape_md(stored_info.get("sponsor_name", "—")) if stored_info else "—"
+            player_name = _clean_visual_name(_escape_md(stored_info.get("player_name", "Unknown"))) if stored_info else "Unknown"
+            sponsor_name = _clean_visual_name(_escape_md(stored_info.get("sponsor_name", "—"))) if stored_info else "—"
             team_slot = stored_slot
 
+            entry = f"🔹 **{ch_name}** — {player_name} + {sponsor_name}"
             if team_slot:
-                team_label = slot_names[team_slot]
-                by_team[team_slot].append(f"**{ch_name}** → {player_name} + {sponsor_name} → {team_label}")
+                by_team[team_slot].append(entry)
             else:
-                unassigned.append(f"**{ch_name}** → {player_name} + {sponsor_name}")
+                unassigned.append(entry)
 
         MAX_EMBED = MAX_EMBED_DESC
         pages: list[str] = []
@@ -1115,6 +1125,81 @@ class RolePackageCog(commands.Cog):
         for i, page_text in enumerate(pages):
             await ctx.send(embed=info_embed(
                 title="Team Review" + (f" ({i + 1}/{len(pages)})" if len(pages) > 1 else ""),
+                description=page_text
+            ))
+
+    @commands.command(name="ps", aliases=["playerspons"])
+    async def ps(self, ctx: commands.Context):
+        """Show a randomized list of players & their sponsors (team tags hidden so pairings can't be inferred).
+
+        Only includes entries where at least one of the player or their sponsor currently holds the Alive role.
+        Uses the same data as `.reviewteams` but strips all team/slot info and shuffles the order."""
+        guild_data = self._guild_data(ctx.guild)
+        packages = get_role_packages(ctx.guild.id)
+        if not packages:
+            await ctx.send("No Role Packages registered.")
+            return
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+
+        def _member_by_id(member_id):
+            if not member_id:
+                return None
+            try:
+                return ctx.guild.get_member(int(member_id))
+            except (TypeError, ValueError):
+                return None
+
+        def _verified_alive(member):
+            if alive_role is None:
+                return True
+            return member is not None and alive_role in member.roles
+
+        channel_slots = guild_data.get("channel_slots", {})
+
+        entries = []
+        for package in packages:
+            channel = ctx.guild.get_channel(package["channel_id"])
+            if channel is None:
+                continue
+            ch_name = channel.mention
+
+            stored_info = self._get_channel_slot_info(channel_slots, channel.id)
+            if not stored_info:
+                continue
+
+            player_name = _clean_visual_name(_escape_md(stored_info.get("player_name", "Unknown")))
+            sponsor_name = _clean_visual_name(_escape_md(stored_info.get("sponsor_name", "—")))
+
+            if not _verified_alive(_member_by_id(stored_info.get("player_id"))) and not _verified_alive(_member_by_id(stored_info.get("sponsor_id"))):
+                continue
+
+            entries.append(f"🔹 **{ch_name}** — {player_name} + {sponsor_name}")
+
+        if not entries:
+            await ctx.send("No player/sponsor packages to review.")
+            return
+
+        random.shuffle(entries)
+
+        pages: list[str] = []
+        current_page = ""
+        current_chars = 0
+        for line in entries:
+            line_chars = len(line) + 1
+            if current_chars + line_chars > MAX_EMBED_DESC:
+                pages.append(current_page)
+                current_page = line
+                current_chars = line_chars
+            else:
+                current_page += ("\n" if current_page else "") + line
+                current_chars += line_chars
+        if current_page:
+            pages.append(current_page)
+
+        for i, page_text in enumerate(pages):
+            await ctx.send(embed=info_embed(
+                title="Players & Sponsors" + (f" ({i + 1}/{len(pages)})" if len(pages) > 1 else ""),
                 description=page_text
             ))
 
