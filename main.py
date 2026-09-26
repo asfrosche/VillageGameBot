@@ -29,6 +29,7 @@ from cogs.game_manager import GameManager
 from cogs.game_manager_en import GameManagerEn
 from cogs.game_manager_it import GameManagerIt
 from cogs.economy_cog import Economy
+from cogs.auction_cog import AuctionCog
 from cogs.dashboard_cog import Dashboard
 from cogs.handling_cog import Handling
 from cogs.home_cog import Home
@@ -48,6 +49,7 @@ from cogs.tracker_cog import MessageTracker
 from cogs.utility_cog import Utility
 from cogs.vg_intro import VgIntro
 from cogs.status_cog import Status
+from cogs.status_panel_cog import StatusPanel
 from cogs.sticky_cog import StickyCog
 from cogs.voting_cog import Voting
 from config import PREFIX, TOKEN
@@ -697,6 +699,7 @@ async def startcog():
     await bot.add_cog(GameManagerEn(bot))
     await bot.add_cog(GameManagerIt(bot))
     await bot.add_cog(Economy(bot))
+    await bot.add_cog(AuctionCog(bot))
     await bot.add_cog(Dashboard(bot))
     await bot.add_cog(AuxBattle(bot))
     await bot.add_cog(Birthday(bot))
@@ -708,6 +711,7 @@ async def startcog():
     await bot.add_cog(DownloadCog(bot))
     await bot.add_cog(VgIntro(bot))
     await bot.add_cog(Status(bot))
+    await bot.add_cog(StatusPanel(bot))
     await bot.add_cog(StickyCog(bot))
     await bot.add_cog(DraftCog(bot))
     await bot.add_cog(BracketCog(bot))
