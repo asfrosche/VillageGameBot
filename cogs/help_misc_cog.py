@@ -1,9 +1,11 @@
 import os
 import re
+import html
 import random
 import difflib
 import wcwidth
 import discord
+import aiohttp
 import asyncio
 import datetime
 from datetime import datetime
@@ -12,6 +14,17 @@ from discord import AllowedMentions
 from discord.ui import Select, View, Button
 from cogs.data_utils import load_guild_data, save_guild_data
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+HELP_CATEGORIES = {
+    "setup", "moving", "home", "handling", "infos", "presets", "voting",
+    "nominations", "lists", "utility", "other", "botc", "surveillance",
+    "analytics", "status", "economy", "meetupmatrix",
+}
+HELP2_CATEGORIES = {
+    "location", "dashboard", "gamemanager", "library", "games", "auction",
+    "birthdays", "calendar", "draft", "sticky", "sendrole",
+}
 
 
 def _chunk_lines(lines, cap=1024):
@@ -60,6 +73,256 @@ def _embed_pages(title, footer_text, groups, color):
     return pages
 
 
+INTERACTION_GIFS = {
+    "poke": [
+        "https://tenor.com/view/nekone-utawarerumono-poke-anime-gif-26470052",
+        "https://tenor.com/view/poking-screen-poke-pokes-poking-poke-screen-gif-11084141349623928344",
+        "https://tenor.com/view/poke-eyes-gif-12619607009147797210",
+        "https://tenor.com/view/marin-kitagawa-kitagawa-giggle-love-anime-gif-16415664153773123078",
+        "https://tenor.com/view/anime-poke-gif-8531096320778102788",
+        "https://tenor.com/view/boop-anime-poke-mad-gif-16935420",
+        "https://tenor.com/view/boop-poke-anime-cute-gif-16935454",
+        "https://tenor.com/view/yonomori-kobeni-anime-girl-poke-cheek-kobeni-mikakunin-de-shinkoukei-gif-9593787201996879155",
+        "https://tenor.com/view/boop-poke-gif-22382916",
+        "https://tenor.com/view/highschool-dxd-anime-poke-pokeing-gif-23242564",
+        "https://tenor.com/view/boop-rascal-does-not-dream-of-bunny-girl-senpai-anime-touch-nose-poke-gif-17682170",
+        "https://tenor.com/view/point-anime-poke-gif-17113067",
+        "https://tenor.com/view/poke-anime-gif-13062234263843120326",
+        "https://tenor.com/view/my-deer-friend-nokotan-noko-gif-13644573839223951462",
+        "https://tenor.com/view/poke-gif-19326797",
+        "https://tenor.com/view/poke-the-bear-angry-gif-26844893",
+        "https://tenor.com/view/tkthao219-bunny-rabbit-gif-22168506",
+        "https://tenor.com/view/mochi-poke-poke-cute-cat-cat-cartoon-gif-310352913820334743",
+        "https://tenor.com/view/poke-cute-sleepy-wake-up-hey-you-gif-14322931",
+        "https://tenor.com/view/cute-annoying-poke-couple-bunny-gif-14647363090995704310",
+    ],
+    "pat": [
+        "https://tenor.com/view/tsumiki-anime-waifu-miia-neko-gif-27055340",
+        "https://tenor.com/view/pat-pat-anime-anime-pat-pat-cosmic-princess-kaguya-iroha-cutie-baby-gif-13718927594949096538",
+        "https://tenor.com/view/kobayashi-dragon-maid-kanna-kamui-kanna-gif-4487183595152594707",
+        "https://tenor.com/view/frieren-pat-frieren-pat-pat-frieren-pat-pat-gif-16450085803075970062",
+        "https://tenor.com/view/pat-pat-gif-27638431",
+        "https://tenor.com/view/headpat-comforting-gif-17155758397973400424",
+        "https://tenor.com/view/shiro-anime-no-game-no-life-headpat-cute-gif-17317343567086759130",
+        "https://tenor.com/view/anime-pat-gif-22001971",
+        "https://tenor.com/view/pat-pat-pat-anime-girl-pat-anime-girl-gif-gif-9912105134255577569",
+        "https://tenor.com/view/mai-sakurajima-sakuta-anime-pat-gif-22595893",
+        "https://tenor.com/view/anime-pat-anime-gif-26506449",
+        "https://tenor.com/view/headpats-anime-headpat-headpats-anime-chibi-gif-16550181993246603720",
+        "https://tenor.com/view/clannad-anime-anime-girl-head-pat-good-girl-gif-9592662185233931869",
+        "https://tenor.com/view/nekopara-vanilla-cat-girl-head-pat-gif-650742815674383074",
+        "https://tenor.com/view/konohana-kitan-yuzu-headpat-anime-pat-gif-1995447864617839542",
+        "https://tenor.com/view/patpat-gif-24636459",
+        "https://tenor.com/view/thuongthuong-gif-1068228798904543626",
+        "https://tenor.com/view/cat-pat-pat-gato-gatinho-kitty-gif-1043380680712787840",
+        "https://tenor.com/view/pat-duck-cute-love-sparkle-gif-16328031",
+        "https://tenor.com/view/sadness-sad-kitty-cat-pat-pat-meow-meow-gif-17938305558576565629",
+    ],
+    "hug": [
+        "https://tenor.com/view/hug-anime-comfy-cute-gif-5299348585618231224",
+        "https://tenor.com/view/anime-anime-hug-anime-boy-anime-girl-gif-7244423311549892217",
+        "https://tenor.com/view/hug-love-anime-gif-8183148795245625994",
+        "https://tenor.com/view/anime-hug-gif-14794426129399232107",
+        "https://tenor.com/view/horimiya-hug-anime-miyamura-hori-gif-20848980",
+        "https://tenor.com/view/hugtrip-gif-2490966530865073004",
+        "https://tenor.com/view/hug-gif-26359154",
+        "https://tenor.com/view/cuddle-bed-hug-bed-anime-anime-hug-gif-8314924890104257587",
+        "https://tenor.com/view/hug-k-on-teto-sagrada-gif-14420937574950184822",
+        "https://tenor.com/view/kanna-kamui-give-a-hug-gif-10775448422433807163",
+        "https://tenor.com/view/hugs-gif-16204475217460758568",
+        "https://tenor.com/view/hug-gif-4334405360982857072",
+        "https://tenor.com/view/hugging-gif-6353720017538202613",
+        "https://tenor.com/view/horimiya-hori-miyamura-gif-6944457256172224561",
+        "https://tenor.com/view/oshi-no-ko-aqua-akane-hug-anime-hug-gif-8320852771448643180",
+        "https://tenor.com/view/schitts-creek-david-rose-alexis-rose-hugs-hugging-gif-23706078",
+        "https://tenor.com/view/cat-gif-6892218099699146160",
+        "https://tenor.com/view/miss-you-gif-7307606366743938279",
+        "https://tenor.com/view/tkthao219-bubududu-panda-gif-22343387",
+        "https://tenor.com/view/couple-hugs-boy-hugging-girl-gif-13767421397200238709",
+    ],
+    "slap": [
+        "https://tenor.com/view/anime-kaguya-sama-kaguya-shinomiya-slap-slapping-gif-8212906941276691404",
+        "https://tenor.com/view/slap-slapping-yae-miko-chibi-yae-genshin-impact-gif-14573828462376627039",
+        "https://tenor.com/view/girl-slap-anime-mad-student-gif-17423278",
+        "https://tenor.com/view/anime-slap-mad-gif-16057834",
+        "https://tenor.com/view/slap-handa-seishuu-naru-kotoishi-barakamon-anime-barakamon-gif-5509136",
+        "https://tenor.com/view/no-angry-anime-slap-gif-7355956",
+        "https://tenor.com/view/boy-slap-girl-anime-gif-6921254811684530096",
+        "https://tenor.com/view/slap-jjk-nicevagg-anime-gif-22368283",
+        "https://tenor.com/view/chikku-neesan-girl-hit-wall-stfu-anime-girl-smack-gif-17078255",
+        "https://tenor.com/view/yuzuki-mizusaka-nonoka-komiya-celestial-method-sora-no-method-anime-slap-gif-26485601",
+        "https://tenor.com/view/slap-slapping-call-of-the-night-yofukashi-no-uta-nazuna-nanakusa-gif-14212836341310937869",
+        "https://tenor.com/view/anime-chika-fujiwara-slap-slapping-harisen-gif-18043240",
+        "https://tenor.com/view/anime-toradora-ryuji-taiga-slap-gif-16919174636897443220",
+        "https://tenor.com/view/slap-anime-girl-anime-gif-16992074182247359639",
+        "https://tenor.com/view/anime-slap-gif-24278310",
+        "https://tenor.com/view/slap-gif-26123394",
+        "https://tenor.com/view/peach-goma-peach-and-goma-peach-peach-cat-slap-gif-26865200",
+        "https://tenor.com/view/slap-slaps-enough-stop-stop-it-gif-13025908752997150429",
+        "https://tenor.com/view/jagyasini-singh-do-you-need-vitamin-slap-slap-slapping-slap-meme-gif-8382734432187924811",
+        "https://tenor.com/view/slap-face-gif-7991356173427238776",
+    ],
+    "kill": [
+        "https://tenor.com/view/die-kill-kills-you-anime-gif-23910501",
+        "https://tenor.com/view/yandere-tagged-knife-anime-gif-16524623",
+        "https://tenor.com/view/falling-from-window-anime-death-dropkick-gif-18770900",
+        "https://tenor.com/view/yumeko-mirai-nikki-anime-knife-gif-25152104",
+        "https://tenor.com/view/2s-gif-23585902",
+        "https://tenor.com/view/anime-gif-26383556",
+        "https://tenor.com/view/yandere-bloopakill-knife-dangerous-gif-13390617426499031065",
+        "https://tenor.com/view/katana-anime-8bit-gif-26096099",
+        "https://tenor.com/view/chainsaw-evil-laugh-gif-26012440",
+        "https://tenor.com/view/bleach-anime-ichigo-kick-fight-gif-18957478",
+        "https://tenor.com/view/kill-gif-26478068",
+        "https://tenor.com/view/esdeath-akame-ga-kill-gif-26225772",
+        "https://tenor.com/view/akame-ga-kill-gif-26884269",
+        "https://tenor.com/view/akame-pink-pfp-gif-8460099571599710431",
+        "https://tenor.com/view/eucliwood-hellscythe-is-this-a-zombie-kore-wa-zombie-desuka-anime-anime-waifu-gif-24749636",
+        "https://tenor.com/view/kill-gif-7836150005251650243",
+        "https://tenor.com/view/rabbit-sticker-bunny-sticker-shooting-gun-shooting-gun-gif-26487737",
+        "https://tenor.com/view/pengu-pudgy-penguin-pudgypenguins-knife-gif-2887622356907368259",
+        "https://tenor.com/view/matmot-matmotgif-reaction-smile-cartoon-gif-6095664922065357452",
+        "https://tenor.com/view/yungviral-gif-18033858609494320219",
+    ],
+    "kiss": [
+        "https://tenor.com/view/kiss-gentle-kiss-anime-kiss-gentle-anime-kiss-gif-10550883246321102858",
+        "https://tenor.com/view/kiss-gif-2768132236962548601",
+        "https://tenor.com/view/kiss-anime-couple-kiss-anime-couple-anime-gif-14386257619920860170",
+        "https://tenor.com/view/kiss-josee-anime-gif-26581761",
+        "https://tenor.com/view/taiga-aisaka-ryuuji-takasu-aisaka-taiga-takasu-ryuuji-taiga-kiss-gif-14296171118038755935",
+        "https://tenor.com/view/shirayuki-zen-kiss-anime-kiss-anime-couple-gif-gif-27520373",
+        "https://tenor.com/view/anime-anime-kiss-love-gif-2187039208590998809",
+        "https://tenor.com/view/anime-kiss-gif-14128267361195048504",
+        "https://tenor.com/view/kiss-him-gif-6469108198636795149",
+        "https://tenor.com/view/kiss-love-gif-16938490043241978829",
+        "https://tenor.com/view/kissme-hon-anime-gif-16673710045813165646",
+        "https://tenor.com/view/kiss-anime-anime-girl-blush-anime-girl-2-kissing-gif-11129237452451356840",
+        "https://tenor.com/view/couple-kiss-passion-gif-14595913819685611037",
+        "https://tenor.com/view/besos-gif-6180200097750952521",
+        "https://tenor.com/view/kiss-lip-kiss-hug-kiss-kiss-kiss-sending-kisses-gif-3205895451106484105",
+        "https://tenor.com/view/bear-blowakiss-love-hearts-kissing-gif-16158903236209431619",
+        "https://tenor.com/view/cosytales-cute-kawaii-adorable-lovers-gif-11278828254163470784",
+        "https://tenor.com/view/cheek-kiss-cheeks-kissing-cheek-kissing-love-gif-4259560615051180157",
+        "https://tenor.com/view/cat-cute-sweet-gif-4736403030433414453",
+        "https://tenor.com/view/dudu-bubu-dudu-kiss-bubu-crashing-to-the-walls-i-like-cute-couples-funny-gif-16407283704699471471",
+    ],
+    "dance": [
+        "https://tenor.com/view/kakashi-dancing-naruto-anime-meme-gif-20691646",
+        "https://tenor.com/view/happy-dance-dancing-anime-girl-gif-5699276185411794439",
+        "https://tenor.com/view/anime-girl-dancing-hakari-dance-lonely-gif-13337816897041770339",
+        "https://tenor.com/view/bocchi-the-rock-bocchi-bocchi-dance-anime-dance-anime-cute-dance-gif-8640564821222907754",
+        "https://tenor.com/view/dance-gif-12046390263636064509",
+        "https://tenor.com/view/evangelion-neon-genesis-evangelion-gif-1251291685974598497",
+        "https://tenor.com/view/chainsaw-man-dance-chainsaw-man-anime-gif-26903148",
+        "https://tenor.com/view/deal-with-it-trailblazer-honkai-star-rail-dancing-dance-gif-3020397715460894213",
+        "https://tenor.com/view/cute-dance-gif-10310485452175495509",
+        "https://tenor.com/view/happy-holidays-gif-2946506647643920769",
+        "https://tenor.com/view/cool-verycute-cute-dancing-cyte-dancing-gif-18419613755250334503",
+        "https://tenor.com/view/sparkle-lonely-lonely-dance-lonely-lonely-dance-chibi-gif-14506696327820781252",
+        "https://tenor.com/view/sheen-gif-11503506469982527610",
+        "https://tenor.com/view/good-night-gif-2030152775311029167",
+        "https://tenor.com/view/marmot-ai-marmot-dance-animal-animal-dance-gif-17488437489161922450",
+        "https://tenor.com/view/claire-dancing-baby-sunglasses-toddler-gif-16263996862542136105",
+        "https://tenor.com/view/dance-desacatao-gif-4763670583671661800",
+        "https://tenor.com/view/cowboy-dancing-kid-spagetti-legs-dance-gif-7038044923520317292",
+        "https://tenor.com/view/silly-cat-kitten-gif-12239801577603428952",
+        "https://tenor.com/view/shiba-dance-meme-dog-funny-gif-16363840026393230719",
+    ],
+    "wave": [
+        "https://tenor.com/view/laid-back-camp-nadeshiko-kagamihara-wave-anime-gif-14395014036606108394",
+        "https://tenor.com/view/anime-bye-bye-maki-wave-soredemo-ayumu-wa-yosetekuru-when-will-ayumu-make-his-move-gif-26195508",
+        "https://tenor.com/view/anime-wave-hatsune-miku-gif-22384247",
+        "https://tenor.com/view/fern-frieren-beyond-journey%27s-end-season-2-anime-girl-gif-13647920306909544011",
+        "https://tenor.com/view/sailor-moon-rei-hino-sailor-mars-fast-hand-wave-anime-gif-1279063740737499555",
+        "https://tenor.com/view/anime-waves-hi-gif-25928708",
+        "https://tenor.com/view/anime-gif-18288690896653517146",
+        "https://tenor.com/view/hello-hello-wave-waving-wave-anime-wave-gif-5241959545903110447",
+        "https://tenor.com/view/bay-anime-bye-anime-bya-anime-anime-hola-anime-gif-20374982",
+        "https://tenor.com/view/lucky-star-wave-hello-gif-3561948478976684501",
+        "https://tenor.com/view/wind-breaker-wind-breaker-togame-anime-wave-anime-hello-togame-jo-gif-8582759802918432362",
+        "https://tenor.com/view/keai-cute-gif-13201974045211134059",
+        "https://tenor.com/view/seal-seal-waving-wave-waving-sea-lion-gif-16088027112700753598",
+        "https://tenor.com/view/qoobee-hi-hello-wave-gif-25562895",
+        "https://tenor.com/view/hi-good-afternoon-good-care-rabbit-hand-waves-gif-14148706483768650372",
+        "https://tenor.com/view/creature-creature-wave-critter-wave-hello-gif-16718033248734905264",
+        "https://tenor.com/view/waving-joy-lizard-hi-there-well-hello-there-gif-15622233555234689915",
+        "https://tenor.com/view/happy-dance-wave-gif-25283702",
+        "https://tenor.com/view/hand-wave-nommie-cut-the-rope-hi-hello-gif-27287856",
+        "https://tenor.com/view/forrest-gump-wave-hello-hi-sup-gif-16159238468026206620",
+    ],
+}
+
+INTERACTION_LINES = {
+    "poke": [
+        "{user} pokes {target} 👉",
+        "{user} pokes {target}! Boop!",
+        "{user} boops {target} 👉",
+        "{user} pokes {target} playfully",
+    ],
+    "pat": [
+        "{user} pats {target} 🫳",
+        "{user} gives {target} a pat 🫳",
+        "{user} headpats {target} 🫳",
+        "{user} pats {target} gently",
+    ],
+    "hug": [
+        "{user} hugs {target} 🫂",
+        "{user} gives {target} a big hug 🫂",
+        "{user} wraps {target} in a hug 🫂",
+        "{user} hugs {target} tightly",
+    ],
+    "slap": [
+        "{user} slaps {target} ✋",
+        "{user} slaps {target} hard ✋",
+        "{user} sends a slap {target}'s way ✋",
+        "{user} slaps {target} across the room",
+    ],
+    "kill": [
+        "{user} kills {target} 💀",
+        "{user} eliminates {target} 💀",
+        "{user} takes {target} out 💀",
+        "{user} ends {target} 💀",
+    ],
+    "kiss": [
+        "{user} kisses {target} 💋",
+        "{user} gives {target} a kiss 💋",
+        "{user} plants a kiss on {target}'s cheek 💋",
+        "{user} kisses {target} gently 💋",
+    ],
+    "dance": [
+        "{user} dances with {target} 🕺",
+        "{user} pulls {target} into a dance 💃",
+        "{user} and {target} dance together 💃",
+        "{user} makes {target} dance 🕺",
+    ],
+    "wave": [
+        "{user} waves at {target} 👋",
+        "{user} waves hello to {target} 👋",
+        "{user} gives {target} a friendly wave 👋",
+        "{user} waves at {target} excitedly 👋",
+    ],
+}
+
+
+async def _choose_interaction_gif(pool, is_valid=None):
+    """Pick a random GIF from the pool, skipping any that fail the is_valid check."""
+    ordered = list(pool)
+    random.shuffle(ordered)
+    for url in ordered:
+        if is_valid is None:
+            return url
+        try:
+            result = is_valid(url)
+            if asyncio.iscoroutine(result):
+                result = await result
+            ok = bool(result)
+        except Exception:
+            ok = False
+        if ok:
+            return url
+    return None
+
+
 COMMAND_INDEX = [
     (".setup <num>", "Setup roles, channels & categories (num houses)", "Setup", ["init", "configure", "server", "channel"]),
     (".roleset <key> @role", "Assign a role for the bot", "Setup", ["config", "permission"]),
@@ -71,6 +334,7 @@ COMMAND_INDEX = [
     (".refuseresponse 1/2/3", "Knock refuse behavior: 1=show players, 2=show count, 3=no info", "Setup", ["knock", "refuse", "behaviour"]),
     (".settings", "View current settings", "Setup", ["config", "view", "current"]),
     (".resetdb", "Reset all setup", "Setup", ["clear", "wipe", "reset"]),
+    (".stealemoji <emoji>", "Copy a custom emoji from another server into this one (animated & static)", "Setup", ["emoji", "copy", "steal", "server"]),
     (".showwhispersender", "Show/hide whisper sender", "Setup", ["whisper", "toggle", "anonymous"]),
     (".ajifempty", "Auto-join if house is empty", "Setup", ["auto", "join", "empty"]),
     (".ajknockexpire", "Auto-join when knock expires", "Setup", ["auto", "join", "expire"]),
@@ -237,6 +501,14 @@ COMMAND_INDEX = [
     (".narrationcolor", "Pick embed color (admin)", "Other", ["narration", "color", "embed", "admin"]),
     (".dice <n>", "Roll 1-N", "Other", ["dice", "roll", "random", "number"]),
     (".dice <opt1>, <opt2>, ...", "Random pick from options (comma or space separated)", "Other", ["dice", "choose", "pick", "random"]),
+    (".opoke @user", "Poke someone with an anime GIF", "Other", ["poke", "fun", "interaction"]),
+    (".opat @user", "Pat someone with an anime GIF", "Other", ["pat", "fun", "interaction"]),
+    (".ohug @user", "Hug someone with an anime GIF", "Other", ["hug", "fun", "interaction"]),
+    (".oslap @user", "Slap someone with an anime GIF", "Other", ["slap", "fun", "interaction"]),
+    (".okill @user", "Kill someone with an anime GIF", "Other", ["kill", "fun", "interaction"]),
+    (".okiss @user", "Kiss someone with an anime GIF", "Other", ["kiss", "fun", "interaction"]),
+    (".odance @user", "Dance with someone with an anime GIF", "Other", ["dance", "fun", "interaction"]),
+    (".owave @user", "Wave at someone with an anime GIF", "Other", ["wave", "fun", "interaction"]),
     (".loc", "Show all houses and occupants (admin)", "Other", ["loc", "location", "houses", "occupants", "admin"]),
     (".gettag <link>", "Get mentioned users from a message", "Other", ["tag", "mention", "get"]),
     (".timer <time> [tag] [#ch]", "Set a timer", "Other", ["timer", "remind", "countdown"]),
@@ -275,9 +547,10 @@ COMMAND_INDEX = [
     (".give @user <amt>", "Give RC coins (in houses)", "Economy", ["give", "coins", "transfer"]),
     (".give-money @user <amt>", "Transfer RC coins to another player", "Economy", ["money", "transfer", "rc"]),
     (".use <item>", "Use an item from inventory", "Economy", ["use", "item", "activate"]),
-    (".additem <price> <name>", "Add new shop item", "Economy", ["item", "add", "shop", "admin"]),
+    (".additem <name> <price> [desc] [stock]", "Add new shop item (emoji first, no numbers in name — quote it if needed; trailing number = stock)", "Economy", ["item", "add", "shop", "admin"]),
+    (".updatestock <item> <stock>", "Set item stock (0 = unlimited)", "Economy", ["item", "stock", "shop", "admin"]),
     (".removeitem /.rmitem #ch <item> [qty]", "Remove from RC", "Economy", ["item", "remove", "rc", "admin"]),
-    (".edititem <field> <name> <val>", "Edit shop item (field: price/name/description)", "Economy", ["item", "edit", "shop", "admin"]),
+    (".edititem <field> <name> <val>", "Edit shop item (field: price/name/description/stock)", "Economy", ["item", "edit", "shop", "admin"]),
     (".delitem <name>", "Delete item from shop", "Economy", ["item", "delete", "shop", "admin"]),
     (".addmoney #ch <amt>", "Add coins to RC", "Economy", ["money", "add", "coins", "rc", "admin"]),
     (".removemoney #ch <amt>", "Remove coins from RC", "Economy", ["money", "remove", "coins", "rc", "admin"]),
@@ -348,12 +621,16 @@ COMMAND_INDEX = [
     (".lib setwin <#> <team>", "Set winning team", "Library & Stats", ["library", "win", "set", "admin"]),
     (".lib search <term>", "Search by name or player", "Library & Stats", ["library", "search", "find"]),
     (".lib searchdisc <query>", "Search role descriptions & text", "Library & Stats", ["library", "search", "description", "text", "disc"]),
+    (".gamesearch <conds>", "Search past games by team stats, outcomes & role counts (Win/Lose, >/< %, VillageCount, Players)", "Library & Stats", ["game", "search", "stats", "outcome", "win", "lose", "percent", "count", "players"]),
+    (".gamesearchn <conds>", "Search games with percentages excluding Neutral roles (counts unchanged)", "Library & Stats", ["game", "search", "stats", "no", "neutral", "percent", "win", "count"]),
     (".publishroles", "Build role publishing draft (clean packages only)", "Library & Stats", ["roles", "publish", "archive"]),
     (".resolveplayers", "Show unresolved Role Package players", "Library & Stats", ["roles", "resolve", "players"]),
     (".resolveplayer #channel @player", "Resolve a Role Chat player", "Library & Stats", ["roles", "resolve", "player"]),
     (".resolvesponsor #channel @sponsor", "Choose the Library Sponsor", "Library & Stats", ["roles", "resolve", "sponsor"]),
     (".reviewroles", "Review the role publishing draft", "Library & Stats", ["roles", "review", "publish"]),
     (".reviewteams", "Review role teams in the publishing draft", "Library & Stats", ["roles", "teams", "review"]),
+    (".ps", "Randomized players & sponsors list (no team info)", "Library & Stats", ["players", "sponsors", "review", "list", "random"]),
+    (".playerspons", "Alias of `.ps` — randomized players & sponsors list (no team info)", "Library & Stats", ["players", "sponsors", "list", "random"]),
     (".approvepublish", "Approve and publish the role archive", "Library & Stats", ["roles", "approve", "publish"]),
     (".libimport", "Import the approved draft into the library", "Library & Stats", ["library", "import", "roles"]),
     (".libitimport", "Import approved draft into Italian library", "Library & Stats", ["library", "import", "italian", "roles"]),
@@ -370,6 +647,14 @@ COMMAND_INDEX = [
     (".auxbattle signup", "Sign up for Aux Battle", "Games", ["aux", "signup", "register"]),
     (".auxbattle opensignup", "Open signups (admin)", "Games", ["aux", "signup", "open", "admin"]),
     (".auxbattle closesignup", "Close signups (admin)", "Games", ["aux", "signup", "close", "admin"]),
+    (".auc", "Blind auction board & status", "Auction", ["auction", "bid", "blind", "auctionhouse", "help2"]),
+    (".auc start <item> <dur> [sealed|visible]", "Open a blind auction (alive players)", "Auction", ["auction", "start", "blind", "open"]),
+    (".auc bid <amount>", "Place a sealed bid (or use the board button)", "Auction", ["auction", "bid", "sealed", "blind"]),
+    (".auc extend <dur>", "Add time to the current auction (Overseer)", "Auction", ["auction", "extend", "time", "overseer"]),
+    (".auc close", "End the auction early (Overseer)", "Auction", ["auction", "close", "overseer", "end"]),
+    (".auc cancel", "Void the current auction (Overseer)", "Auction", ["auction", "cancel", "overseer", "void"]),
+    (".auc alias <player>", "Reveal a player's auction alias (Overseer)", "Auction", ["auction", "alias", "reveal", "investigate", "overseer"]),
+    (".aucset", "Configure the auction system (admin)", "Auction", ["auction", "config", "settings", "admin"]),
     (".auxbattle bracket", "View bracket", "Games", ["aux", "bracket", "view"]),
     (".auxbattle reset", "Reset tournament (admin)", "Games", ["aux", "reset", "admin"]),
     (".auxbattle start", "Start tournament (admin)", "Games", ["aux", "start", "admin"]),
@@ -447,6 +732,7 @@ COMMAND_INDEX = [
     ("/status", "Open Status Manager for this channel (admin)", "Status", ["status", "moderator", "track", "protection", "roleblock", "stealth", "immunity", "untargetable"]),
     (".status clear", "Clear all statuses for this channel (admin)", "Status", ["status", "clear", "remove", "admin"]),
     (".statuslist", "Show all channels with active statuses (admin)", "Status", ["status", "list", "overview", "moderator"]),
+    (".statuspanel", "Post or refresh the interactive Online/AFK member status panel", "Status", ["status", "panel", "online", "afk"]),
     (".sticky [#ch]", "Show sticky message status for a channel", "Sticky", ["sticky", "pin", "status"]),
     (".sticky set [#ch] <text>", "Set a sticky message for a channel (admin)", "Sticky", ["sticky", "set", "pin", "admin"]),
     (".sticky remove [#ch]", "Remove a sticky message (admin)", "Sticky", ["sticky", "remove", "delete", "admin"]),
@@ -912,6 +1198,11 @@ class PlayerHelpView(View):
 class Other(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._http_session = None
+        self._tenor_media_cache = {}
+        for _cmd in self.get_commands():
+            if _cmd.name in ("opoke", "opat", "ohug", "oslap", "okill", "okiss", "odance", "owave"):
+                _cmd.error(self._interaction_error)
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
@@ -1652,20 +1943,24 @@ class Other(commands.Cog):
     @commands.command()
     async def dice(self, ctx, *args):
         """Roll a random number (1-N) or pick randomly from given options."""
+        def embed(text):
+            # Replies go in an embed because mentions inside embeds never ping
+            # (@everyone, @here, and role mentions are safe there).
+            return discord.Embed(description=text, color=0xff3fb9)
         if not args:
-            await ctx.send("Usage: `.dice <number>` to roll 1-N, or `.dice <option1> <option2> ...` to pick randomly.")
+            await ctx.send(embed=embed("Usage: `.dice <number>` to roll 1-N, or `.dice <option1> <option2> ...` to pick randomly."))
             return
         if len(args) == 1:
             try:
                 n = int(args[0])
             except ValueError:
-                await ctx.send(f"`{args[0]}` is not a valid number. Usage: `.dice <number>` or `.dice <opt1>, <opt2>, ...`")
+                await ctx.send(embed=embed(f"`{args[0]}` is not a valid number. Usage: `.dice <number>` or `.dice <opt1>, <opt2>, ...`"))
                 return
             if n < 1:
-                await ctx.send(f"Number must be 1 or higher. Usage: `.dice <number>`")
+                await ctx.send(embed=embed("Number must be 1 or higher. Usage: `.dice <number>`"))
                 return
             result = random.randint(1, n)
-            await ctx.send(f"🎲 You rolled a **{result}** (1–{n})!")
+            await ctx.send(embed=embed(f"🎲 You rolled a **{result}** (1–{n})!"))
         else:
             raw = " ".join(args)
             if "," in raw:
@@ -1673,11 +1968,157 @@ class Other(commands.Cog):
             else:
                 options = list(args)
             if not options:
-                await ctx.send("No valid options provided.")
+                await ctx.send(embed=embed("No valid options provided."))
                 return
             choice = random.choice(options)
-            await ctx.send(f"🎲 I picked: **{choice}**")
+            await ctx.send(embed=embed(f"🎲 I picked: **{choice}**"))
 
+    @commands.command()
+    async def opoke(self, ctx, target: discord.Member = None):
+        """Poke someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "poke")
+
+    @commands.command()
+    async def opat(self, ctx, target: discord.Member = None):
+        """Pat someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "pat")
+
+    @commands.command()
+    async def ohug(self, ctx, target: discord.Member = None):
+        """Hug someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "hug")
+
+    @commands.command()
+    async def oslap(self, ctx, target: discord.Member = None):
+        """Slap someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "slap")
+
+    @commands.command()
+    async def okill(self, ctx, target: discord.Member = None):
+        """Kill someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "kill")
+
+    @commands.command()
+    async def okiss(self, ctx, target: discord.Member = None):
+        """Kiss someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "kiss")
+
+    @commands.command()
+    async def odance(self, ctx, target: discord.Member = None):
+        """Dance with someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "dance")
+
+    @commands.command()
+    async def owave(self, ctx, target: discord.Member = None):
+        """Wave at someone with an anime GIF."""
+        await self.perform_interaction(ctx, target, "wave")
+
+    async def perform_interaction(self, ctx, target, interaction_type):
+        """Shared handler for the .o interaction commands (poke, pat, hug, slap, kill)."""
+        actor = ctx.author
+        if target is None:
+            await ctx.send(f"❌ You need to mention someone. Example: `.{ctx.invoked_with} @user`")
+            return
+        if target.bot:
+            await ctx.send("❌ You can't do that to a bot!")
+            return
+        if target.id == actor.id:
+            await ctx.send("❌ You can't do that to yourself!")
+            return
+
+        lines = INTERACTION_LINES.get(interaction_type) or [f"{{user}} {interaction_type}s {{target}}"]
+        text_line = random.choice(lines).format(user=actor.mention, target=target.mention)
+        pool = INTERACTION_GIFS.get(interaction_type) or []
+
+        gif = None
+        if pool:
+            gif = await _choose_interaction_gif(pool, self._gif_is_valid)
+            if gif is None:
+                gif = random.choice(pool)
+
+        content = text_line
+        media = None
+        if gif:
+            media = await self._resolve_tenor_media(gif)
+            if media is None:
+                content = f"{text_line}\n{gif}"
+
+        sent_text = False
+        try:
+            if media:
+                await ctx.send(text_line)
+                sent_text = True
+                await ctx.send(media)
+            else:
+                await ctx.send(content)
+                sent_text = True
+        except (discord.HTTPException, discord.Forbidden):
+            if not sent_text:
+                await ctx.send(text_line)
+
+    async def _gif_is_valid(self, url):
+        """Check that a GIF URL is reachable and points at an image or image-ready page."""
+        try:
+            session = self._get_http_session()
+            async with session.head(url, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as resp:
+                ct = resp.headers.get("Content-Type", "").lower()
+                if resp.status == 200 and ("image" in ct or "text/html" in ct):
+                    return True
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            pass
+        return False
+
+    async def _resolve_tenor_media(self, url):
+        """Resolve a tenor.com/view link to its direct media URL (cached)."""
+        if url in self._tenor_media_cache:
+            return self._tenor_media_cache[url]
+        media = None
+        page = ""
+        try:
+            session = self._get_http_session()
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=8),
+                allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0"},
+            ) as resp:
+                if resp.status == 200:
+                    page = await resp.text()
+            img = None
+            vid = None
+            mi = re.search(r'property="og:image"\s+content="([^"]+)"', page)
+            if not mi:
+                mi = re.search(r'content="([^"]+)"\s+property="og:image"', page)
+            if mi:
+                img = self._normalize_tenor_media(html.unescape(mi.group(1)))
+            mv = re.search(r'property="og:video:secure_url"\s+content="([^"]+)"', page)
+            if mv:
+                vid = self._normalize_tenor_media(html.unescape(mv.group(1)))
+            if img and img.lower().endswith(".gif"):
+                media = img
+            else:
+                media = vid or img
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            media = None
+        self._tenor_media_cache[url] = media
+        return media
+
+    @staticmethod
+    def _normalize_tenor_media(media):
+        """Rewrite media1.tenor.com/m/KEY/name.gif into the fetchable media.tenor.com/KEY/name.gif."""
+        m = re.search(r'^https?://media\d?\.tenor\.com/[^/]*/([A-Za-z0-9_-]+/[^/?#"]+)$', media)
+        return f"https://media.tenor.com/{m.group(1)}" if m else media
+
+    def _get_http_session(self):
+        if self._http_session is None or self._http_session.closed:
+            self._http_session = aiohttp.ClientSession()
+        return self._http_session
+
+    async def _interaction_error(self, ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.send("❌ That user wasn't found. Mention someone like `.{0} @user`.".format(ctx.invoked_with or "o"))
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("❌ You need to mention someone. Example: `.{0} @user`.".format(ctx.invoked_with or "o"))
 
     @commands.command()
     async def goat(self, ctx):
@@ -1692,34 +2133,38 @@ class Other(commands.Cog):
         if category is not None:
             category = category.lower()
             extra_categories = {
-                "meetupmatrix": self.help_meetupmatrix,
-                "economy": self.help_economy,
                 "location": self.help_location,
                 "dashboard": self.help_dashboard,
                 "gamemanager": self.help_gamemanager,
                 "library": self.help_library,
                 "games": self.help_games,
+                "auction": self.help_auction,
                 "birthdays": self.help_birthdays,
                 "calendar": self.help_calendar,
-                "status": self.help_status,
+                "draft": self.help_draft,
+                "sticky": self.help_sticky,
+                "sendrole": self.help_sendrole,
             }
             if category in extra_categories:
                 self._in_help2 = True
                 await extra_categories[category](ctx)
                 return
+            if category in HELP_CATEGORIES:
+                await ctx.send(f"`{category}` is a `.help` category → use `.help {category}`")
+                return
         self._in_help2 = True
         embed = discord.Embed(title="📂 Extended Command Categories", color=0xff3fb9)
-        embed.add_field(name="📊 - Meetings & Meetup Matrix", value="21 Commands\n`.help2 meetupmatrix`", inline=True)
-        embed.add_field(name="💰 - Economy", value="18 Commands\n`.help2 economy`", inline=True)
         embed.add_field(name="📍 - Location", value="18 Commands\n`.help2 location`", inline=True)
         embed.add_field(name="🎮 - Dashboard & Info", value="17 Commands\n`.help2 dashboard`", inline=True)
         embed.add_field(name="🎲 - Game Manager", value="4 Commands\n`.help2 gamemanager`", inline=True)
-        embed.add_field(name="📚 - Library & Stats", value="19 Commands\n`.help2 library`", inline=True)
+        embed.add_field(name="📚 - Library & Stats", value="21 Commands\n`.help2 library`", inline=True)
         embed.add_field(name="⚔️ - Games (Aux, Senet, Soldiers)", value="19 Commands\n`.help2 games`", inline=True)
+        embed.add_field(name="🔨 - Blind Auction", value="8 Commands\n`.help2 auction`", inline=True)
         embed.add_field(name="🎂 - Birthdays", value="6 Commands\n`.help2 birthdays`", inline=True)
         embed.add_field(name="📅 - Calendar & Intro", value="4 Commands\n`.help2 calendar`", inline=True)
-        embed.add_field(name="🛡 - Status", value="3 Commands\n`.help2 status`", inline=True)
-        embed.add_field(name="📌 - Sticky", value="4 Commands\n`.help2 sticky`", inline=True)
+        embed.add_field(name="📌 - Sticky", value="5 Commands\n`.help2 sticky`", inline=True)
+        embed.add_field(name="🏆 - Draft", value="24 Commands\n`.help2 draft`", inline=True)
+        embed.add_field(name="↪ - Send Role", value="3 Commands\n`.help2 sendrole`", inline=True)
         embed.set_footer(text="Village Game • Use `.help2 {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embed, self.help2)
 
@@ -1753,26 +2198,28 @@ class Other(commands.Cog):
 
         matches.sort(key=lambda x: (x[2], x[0]))
 
-        embed = discord.Embed(
-            title=f"🔍 Search results for `{keyword}`",
-            description=f"Found **{len(matches)}** matching command{'s' if len(matches) != 1 else ''}",
-            color=0xff3fb9
-        )
-
+        groups = []
         current_cat = None
         lines = []
         for cmd, desc, cat in matches:
             if cat != current_cat:
                 if lines:
-                    embed.add_field(name=f"📁 {current_cat}", value="\n".join(lines), inline=False)
+                    groups.append((f"📁 {current_cat}", lines))
                 current_cat = cat
                 lines = []
             lines.append(f"**`{cmd}`** ─ {desc}")
         if lines:
-            embed.add_field(name=f"📁 {current_cat}", value="\n".join(lines), inline=False)
+            groups.append((f"📁 {current_cat}", lines))
 
-        embed.set_footer(text="Village Game • Use `.help <category>` for the full category")
-        await ctx.send(embed=embed)
+        pages = _embed_pages(
+            f"🔍 Search results for `{keyword}`",
+            "Village Game • Use `.help <category>` for the full category",
+            groups,
+            0xff3fb9,
+        )
+        pages[0].description = f"Found **{len(matches)}** matching command{'s' if len(matches) != 1 else ''}"
+        for page in pages:
+            await ctx.send(embed=page)
 
     @commands.command(name="fmbot")
     async def fmbot(self, ctx):
@@ -1805,27 +2252,19 @@ class Other(commands.Cog):
                 "voting": self.help_voting,
                 "nominations": self.help_nominations,
                 "lists": self.help_lists,
-                "sendrole": self.help_sendrole,
                 "utility": self.help_utility,
                 "other": self.help_other,
                 "meetupmatrix": self.help_meetupmatrix,
                 "economy": self.help_economy,
-                "location": self.help_location,
-                "dashboard": self.help_dashboard,
-                "gamemanager": self.help_gamemanager,
-                "library": self.help_library,
-                "games": self.help_games,
-                "birthdays": self.help_birthdays,
-                "calendar": self.help_calendar,
-                "draft": self.help_draft,
                 "botc": self.help_botc,
                 "surveillance": self.help_surveillance,
                 "analytics": self.help_analytics,
                 "status": self.help_status,
-                "sticky": self.help_sticky,
             }
             if category in categories:
                 await categories[category](ctx)
+            elif category in HELP2_CATEGORIES:
+                await ctx.send(f"`{category}` is a `.help2` category → use `.help2 {category}`")
             else:
                 await ctx.send(f"{category} is not a valid category")
 
@@ -1834,17 +2273,17 @@ class Other(commands.Cog):
             in_help2 = getattr(self, '_in_help2', False)
             if in_help2:
                 options = [
-                    discord.SelectOption(label="📊 - Meetings & Meetup Matrix", value="meetupmatrix", description="Get all 'Meetings & Meetup Matrix' commands"),
-                    discord.SelectOption(label="💰 - Economy", value="economy", description="Get all 'Economy' commands"),
                     discord.SelectOption(label="📍 - Location", value="location", description="Get all 'Location' commands"),
                     discord.SelectOption(label="🎮 - Dashboard & Info", value="dashboard", description="Get all 'Dashboard & OS Info' commands"),
                     discord.SelectOption(label="🎲 - Game Manager", value="gamemanager", description="Get all 'Game Manager' commands"),
                     discord.SelectOption(label="📚 - Library & Stats", value="library", description="Get all 'Library & Stats' commands"),
                     discord.SelectOption(label="⚔️ - Games (Aux, Senet, Soldiers)", value="games", description="Get all 'Games' commands"),
+                    discord.SelectOption(label="🔨 - Blind Auction", value="auction", description="Get all 'Blind Auction' commands"),
                     discord.SelectOption(label="🎂 - Birthdays", value="birthdays", description="Get all 'Birthday' commands"),
                     discord.SelectOption(label="📅 - Calendar & Intro", value="calendar", description="Get all 'Calendar & Intro' commands"),
-                    discord.SelectOption(label="🛡 - Status", value="status", description="Get all 'Status' commands"),
                     discord.SelectOption(label="📌 - Sticky", value="sticky", description="Get all 'Sticky' commands"),
+                    discord.SelectOption(label="🏆 - Draft", value="draft", description="Get all 'Draft' commands"),
+                    discord.SelectOption(label="↪ - Send Role", value="sendrole", description="Get all 'Send Role' commands"),
                 ]
                 route_fn = lambda cat: self.help2(ctx, category=cat)
             else:
@@ -1858,12 +2297,12 @@ class Other(commands.Cog):
                     discord.SelectOption(label="🗳️ - Voting", value="voting", description="Get all 'Voting' commands"),
                     discord.SelectOption(label="👉 - Nominations", value="nominations", description="Get all 'Nominations' commands"),
                     discord.SelectOption(label="📄 - Lists", value="lists", description="Get all 'Lists' commands"),
-                    discord.SelectOption(label="↪ - Send Role", value="sendrole", description="Get all 'Send Role' commands"),
                     discord.SelectOption(label="⚙️ - Utility", value="utility", description="Get all 'Utility' commands"),
                     discord.SelectOption(label="👽 - Other", value="other", description="Get all 'Other' commands"),
                     discord.SelectOption(label="🐦 - BOTC", value="botc", description="Get all 'Blood on the Clocktower' commands"),
                     discord.SelectOption(label="🛡 - Status", value="status", description="Get all 'Status' commands"),
-                    discord.SelectOption(label="📌 - Sticky", value="sticky", description="Get all 'Sticky' commands"),
+                    discord.SelectOption(label="💰 - Economy", value="economy", description="Get all 'Economy' commands"),
+                    discord.SelectOption(label="📊 - Meetings & Meetup Matrix", value="meetupmatrix", description="Get all 'Meetings & Meetup Matrix' commands"),
                 ]
                 route_fn = lambda cat: self.help(ctx, category=cat)
         else:
@@ -1897,18 +2336,17 @@ class Other(commands.Cog):
         embedh.add_field(name="🗳️ - Voting", value="7 Commands\n`.help voting`", inline=True)
         embedh.add_field(name="👉 - Nominations", value="10 Commands\n`.help nominations`", inline=True)
         embedh.add_field(name="📄 - Lists", value="9 Commands\n`.help lists`", inline=True)
-        embedh.add_field(name="↪ - Send Role", value="2 Commands\n`.help sendrole`", inline=True)
         embedh.add_field(name="⚙️ - Utility", value="21 Commands\n`.help utility`", inline=True)
-        embedh.add_field(name="👽 - Other", value="22 Commands\n`.help other`", inline=True)
-        embedh.add_field(name="🏆 - Draft", value="20 Commands\n`.help draft`", inline=True)
+        embedh.add_field(name="👽 - Other", value="42 Commands\n`.help other`", inline=True)
         embedh.add_field(name="🐦 - Blood on the Clocktower", value="All Commands\n`.help botc`", inline=True)
         embedh.add_field(name="🛡 - Status", value="3 Commands\n`.help status`", inline=True)
-        embedh.add_field(name="📌 - Sticky", value="4 Commands\n`.help sticky`", inline=True)
+        embedh.add_field(name="💰 - Economy", value="25 Commands\n`.help economy`", inline=True)
+        embedh.add_field(name="📊 - Meetings & Meetup Matrix", value="21 Commands\n`.help meetupmatrix`", inline=True)
         embedh.set_footer(text="Village Game • Use `.help {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
     async def help_setup(self, ctx):
-        embeds = discord.Embed(title="🏗️ - Setup commands", description="21 Commands", color=0xff3fb9)
+        embeds = discord.Embed(title="🏗️ - Setup commands", description="22 Commands", color=0xff3fb9)
         embeds.add_field(name="Core Setup", value=(
             "**`.setup <num>`** ─ Setup roles, channels & categories\n"
             "**`.roleset <key> @role`** ─ Assign a role for the bot\n"
@@ -1921,7 +2359,8 @@ class Other(commands.Cog):
             "**`.refuseresponse 1/2/3`** ─ Knock refuse: 1=show players, 2=show count, 3=no info\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.settings`** ─ View current settings\n"
-            "**`.resetdb`** ─ Reset all setup"
+            "**`.resetdb`** ─ Reset all setup\n"
+            "**`.stealemoji <emoji>`** ─ Copy a custom emoji (animated/static) from another server"
         ), inline=False)
         embeds.add_field(name="Toggles & Flags", value=(
             "**`.showwhispersender`** ─ Show/hide whisper sender\n"
@@ -2179,7 +2618,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="22 commands", color=0xff3fb9)
+        embedo = discord.Embed(title="👽 - Other", description="42 commands", color=0xff3fb9)
         embedo.add_field(name="General", value=(
             "**`.help`** ─ Show this menu\n"
             "**`.who #ch`** ─ List players in a channel\n"
@@ -2200,9 +2639,20 @@ class Other(commands.Cog):
             "**`.anarration`/`.na <text>`** ─ Silent narration (admin)\n"
             "**`.narrationcolor`** ─ Pick embed color (admin)"
         ), inline=False)
-        embedo.add_field(name="Fun & Utilities", value=(
+        embedo.add_field(name="Fun Commands", value=(
             "**`.dice <n>`** ─ Roll 1–N\n"
             "**`.dice <opt1> <opt2> ...`** ─ Random pick\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.opoke @user`** ─ Poke someone\n"
+            "**`.opat @user`** ─ Pat someone\n"
+            "**`.ohug @user`** ─ Hug someone\n"
+            "**`.oslap @user`** ─ Slap someone\n"
+            "**`.okill @user`** ─ Kill someone\n"
+            "**`.okiss @user`** ─ Kiss someone\n"
+            "**`.odance @user`** ─ Dance with someone\n"
+            "**`.owave @user`** ─ Wave at someone"
+        ), inline=False)
+        embedo.add_field(name="Utility Commands", value=(
             "**`.loc`** ─ Show all houses and occupants (admin)\n"
             "**`.gettag <link>`** ─ Get mentioned users from a message\n"
             "**`.timer <time> [tag] [#ch]`** ─ Set a timer (1h2m10s)\n"
@@ -2252,7 +2702,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedm, self.help_meetupmatrix)
 
     async def help_economy(self, ctx):
-        embede = discord.Embed(title="💰 - Economy commands", description="24 commands", color=0xff3fb9)
+        embede = discord.Embed(title="💰 - Economy commands", description="25 commands", color=0xff3fb9)
         embede.add_field(name="Player Commands", value=(
             "**`.bal`/`.balance`** ─ Show RC balance\n"
             "**`.shop`** ─ View shop with interactive buttons\n"
@@ -2264,12 +2714,14 @@ class Other(commands.Cog):
             "**`.trade @user <item> [qty]`** ─ Give items to another player\n"
             "**`.use <item>`** ─ Use an item from inventory"
         ), inline=False)
-        embede.add_field(name="Admin Commands", value=(
-            "**`.additem <price> <name>`** ─ Add new shop item\n"
+        embede.add_field(name="Admin — Shop Items", value=(
+            "**`.additem <name> <price> [description] [stock]`** ─ Add shop item. Name must start with an emoji and should have **no numbers** (the first number is the price; the trailing number, if any, is the stock — 0 = unlimited); if a number is unavoidable, wrap the name in quotes — e.g. `.additem 🪵 \"Axe 3\" 500 Powerful axe 100`\n"
+            "**`.updatestock <item> <stock>`** ─ Set item stock (0 = unlimited)\n"
             "**`.removeitem`/`.rmitem #ch <item> [qty]`** ─ Remove from RC\n"
-            "**`.edititem <field> <name> <val>`** ─ Edit item (field: price/name/description)\n"
-            "**`.delitem <name>`** ─ Delete item from shop\n"
-            "━━━━━━━━━━━━━━━━\n"
+            "**`.edititem <field> <name> <val>`** ─ Edit item (field: price/name/description/stock)\n"
+            "**`.delitem <name>`** ─ Delete item from shop"
+        ), inline=False)
+        embede.add_field(name="Admin — Money & Items", value=(
             "**`.addmoney #ch <amt>`** ─ Add coins to RC\n"
             "**`.removemoney #ch <amt>`** ─ Remove coins from RC\n"
             "**`.add-money-role @role <amt>`** ─ Add RC coins by role\n"
@@ -2365,10 +2817,13 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_gamemanager)
 
     async def help_library(self, ctx):
-        embed = discord.Embed(title="📚 Library & Stats commands", description="30 commands", color=0xff3fb9)
+        embed = discord.Embed(title="📚 Library & Stats commands", description="32 commands", color=0xff3fb9)
         embed.add_field(name="Stats", value=(
             "**`.stats [@player]`** ─ View player statistics\n"
             "**`.winrate`** ─ Winrate stats by team\n"
+            "**`.gamesearch <conds>`** ─ Search games by team stats, outcomes & role counts — e.g. `Village > 69% AND Evil > 22% AND RK Win` or `VillageCount > 15 AND Players > 25`\n"
+            "**`.gamesearchn <conds>`** ─ Same search with percentages excluding Neutral roles (role counts stay the same)\n"
+            "**`.gamesearch`** *(no query)* ─ Prints the full usage reference: teams, % conditions, Win/Lose & the count variables `VillageCount`, `EvilCount`, `RKCount`, `NeutralCount`, `Players`*\n"
             "**`.relations [@user]`** ─ Allies and nemeses"
         ), inline=False)
         embed.add_field(name="Library — Browse & Manage", value=(
@@ -2391,6 +2846,7 @@ class Other(commands.Cog):
             "**`.resolvesponsor #ch @sponsor`** ─ Choose a Library Sponsor\n"
             "**`.reviewroles`** ─ Review roles\n"
             "**`.reviewteams`** ─ Review teams\n"
+            "**`.ps`** ─ Randomized players & sponsors list (no team info)\n"
             "**`.approvepublish`** ─ Publish the archive\n"
             "**`.libimport`** ─ Import approved roles into the library"
         ), inline=False)
@@ -2407,7 +2863,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_library)
 
     async def help_games(self, ctx):
-        embed = discord.Embed(title="⚔️ Games (Aux Battle, Senet & Soldiers)", description="19 commands", color=0xff3fb9)
+        embed = discord.Embed(title="⚔️ Games (Aux Battle, Senet & Soldiers)", description="23 commands", color=0xff3fb9)
         embed.add_field(name="🎯 Aux Battle", value=(
             "**`.auxbattle`/`.aux`** ─ Main command (subcommands below)\n"
             "━━━━━━━━━━━━━━━━\n"
@@ -2443,6 +2899,37 @@ class Other(commands.Cog):
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_games)
 
+    async def help_auction(self, ctx):
+        embed = discord.Embed(title="🔨 Blind Auction", description="Live auction of a single item; only **Alive** players may bid. Every bidder is hidden as an `Anon #N` alias. Bids are strict-increasing, so ties are impossible.", color=0xff3fb9)
+        embed.add_field(name="Player Commands", value=(
+            "**`.auc status`** ─ Auction state, time left & recent activity\n"
+            "**`.auc start <item> <dur> [sealed|visible]`** ─ Open an auction (Alive players). "
+            "`dur` like `2h`/`30m`; `sealed` hides all amounts until reveal, `visible` shows the current highest.\n"
+            "**`.auc bid <amount>`** ─ Place a bid, or click the **Bid** button on the board. "
+            "Only the current highest bidder has funds held; if you are outbid your money is refunded.\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "**`.aucset channel #ch`** ─ Board channel (admin)\n"
+            "**`.aucset minbid <num>`** ─ Minimum opening bid (admin)\n"
+            "**`.aucset increment <num>`** ─ Reserve for future use (admin)\n"
+            "**`.aucset duration <sec>`** ─ Default length when no `dur` given (admin)\n"
+            "**`.aucset show`** ─ Current auction config (admin)"
+        ), inline=False)
+        embed.add_field(name="Overseer Commands", value=(
+            "**`.auc extend <dur>`** ─ Add time (e.g. `.auc extend 30m`)\n"
+            "**`.auc close`** ─ End early & announce the winner/reveal\n"
+            "**`.auc cancel`** ─ Void the auction & refund all escrow\n"
+            "**`.auc alias @player`** ─ Reveal a player's `Anon #N` alias"
+        ), inline=False)
+        embed.add_field(name="How the escrow works", value=(
+            "The moment a bid is placed, that amount is **removed from the bidder's RoleChat and held**. "
+            "If someone outbids them, they are **refunded in full** and the new leader's bid is held instead "
+            "(A bids 100 → hold 100; B bids 150 → hold 150, refund A 100; A bids 200 → hold 200, refund B 150). "
+            "Bid money can never be spent elsewhere. On close the winner keeps the escrow (shop items auto-grant, "
+            "named items are handed over by the Overseer); on cancel everyone is refunded."
+        ), inline=False)
+        embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
+        await self.send_help_page(ctx, embed, self.help_auction)
+
     async def help_birthdays(self, ctx):
         embed = discord.Embed(title="🎂 Birthday commands", description="6 commands", color=0xff3fb9)
         embed.add_field(name="Player Commands", value=(
@@ -2471,7 +2958,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_calendar)
 
     async def help_draft(self, ctx):
-        embed = discord.Embed(title="🏆 Draft commands", description="21 commands", color=0xff3fb9)
+        embed = discord.Embed(title="🏆 Draft commands", description="24 commands", color=0xff3fb9)
         embed.add_field(name="Draft Commands", value=(
             "**.draftstart @u1 @u2 ...** ─ Start a snake draft (admin)\n"
             "**.prepick** ─ Manage your prepicks (max 2)\n"
@@ -2623,7 +3110,8 @@ class Other(commands.Cog):
         embed.add_field(name="Commands", value=(
             "**`/status`** ─ Open the interactive Status Manager for the current channel (ephemeral)\n"
             "**`.status clear`** ─ Clear all statuses for the current channel\n"
-            "**`.statuslist`** ─ Show all channels that have active statuses"
+            "**`.statuslist`** ─ Show all channels that have active statuses\n"
+            "**`.statuspanel`** ─ Post/refresh the Interactive member status panel (Online/AFK)"
         ), inline=False)
         embed.add_field(name="Built-in Statuses", value=(
             "🛡 **Protection** ─ Channel is protected\n"
@@ -2651,7 +3139,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embed, self.help_status)
 
     async def help_sticky(self, ctx):
-        embed = discord.Embed(title="📌 - Sticky messages commands", description="4 Commands", color=0xff3fb9)
+        embed = discord.Embed(title="📌 - Sticky messages commands", description="5 Commands", color=0xff3fb9)
         embed.add_field(name="Setup", value=(
             "**`.sticky set [#ch] <text>`** ─ Set a sticky message for a channel (default: current channel)\n"
             "**`.sticky remove [#ch]`** ─ Remove the sticky message from a channel\n"

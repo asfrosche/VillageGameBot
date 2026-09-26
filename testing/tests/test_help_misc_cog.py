@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import discord
+from discord.ext import commands
 
 from cogs import help_misc_cog
 
@@ -259,3 +260,542 @@ class TestOther:
         """Verify ReviveView view can be instantiated."""
         # ReviveView — requires cog/bot context to instantiate
         pass
+
+
+# ── Deep tests for narration auto-pin ────────────────────────────────────────
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+class _FakeResponse:
+    def __init__(self, page_html, status=200):
+        self.status = status
+        self._html = page_html
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def text(self):
+        return self._html
+
+
+class _FakeSession:
+    def __init__(self, page_html, status=200):
+        self._html = page_html
+        self._status = status
+        self.get_calls = 0
+
+    def get(self, url, **kwargs):
+        self.get_calls += 1
+        return _FakeResponse(self._html, self._status)
+
+    @property
+    def closed(self):
+        return False
+
+
+class TestNarrationAutoPin:
+    """Tests for narration _send_narration auto-pin behavior."""
+
+    def test_send_narration_pins_first_message(self):
+        """Verify _send_narration pins the first sent message."""
+        cog = help_misc_cog.Other(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 100
+        ctx.guild.roles = []
+        ctx.guild.channels = []
+        ctx.channel = MagicMock()
+        ctx.channel.name = "test-channel"
+        ctx.author = MagicMock()
+        ctx.author.display_name = "Admin"
+        ctx.author.display_avatar = MagicMock()
+        ctx.author.display_avatar.url = "http://example.com/avatar.png"
+        ctx.message = MagicMock()
+        ctx.message.content = ".n Test narration"
+        ctx.message.delete = AsyncMock()
+        ctx.prefix = "."
+        ctx.invoked_with = "n"
+
+        sent_msg = MagicMock()
+        sent_msg.pin = AsyncMock()
+        ctx.send = AsyncMock(return_value=sent_msg)
+
+        with patch('cogs.help_misc_cog.load_guild_data', return_value={
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+            "narration_color": 0xdc143c,
+            "narration_log_channel_name": "commentary",
+        }):
+            with patch('discord.utils.get', return_value=None):
+                _run(cog._send_narration(ctx, "Test narration", ping_roles=False))
+
+        sent_msg.pin.assert_called_once()
+
+    def test_send_narration_handles_pin_failure(self):
+        """Verify _send_narration gracefully handles pin failure."""
+        cog = help_misc_cog.Other(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 100
+        ctx.guild.roles = []
+        ctx.guild.channels = []
+        ctx.channel = MagicMock()
+        ctx.channel.name = "test-channel"
+        ctx.author = MagicMock()
+        ctx.author.display_name = "Admin"
+        ctx.author.display_avatar = MagicMock()
+        ctx.author.display_avatar.url = "http://example.com/avatar.png"
+        ctx.message = MagicMock()
+        ctx.message.content = ".n Test"
+        ctx.message.delete = AsyncMock()
+        ctx.prefix = "."
+        ctx.invoked_with = "n"
+
+        sent_msg = MagicMock()
+        sent_msg.pin = AsyncMock(side_effect=discord.errors.Forbidden(MagicMock(), MagicMock()))
+        ctx.send = AsyncMock(return_value=sent_msg)
+
+        with patch('cogs.help_misc_cog.load_guild_data', return_value={
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+            "narration_color": 0xdc143c,
+            "narration_log_channel_name": "commentary",
+        }):
+            with patch('discord.utils.get', return_value=None):
+                _run(cog._send_narration(ctx, "Test", ping_roles=False))
+
+        sent_msg.pin.assert_called_once()
+
+    def test_send_narration_stores_sent_messages(self):
+        """Verify _send_narration tracks sent messages in a list."""
+        cog = help_misc_cog.Other(None)
+        ctx = MagicMock()
+        ctx.guild = MagicMock()
+        ctx.guild.id = 100
+        ctx.guild.roles = []
+        ctx.guild.channels = []
+        ctx.channel = MagicMock()
+        ctx.channel.name = "test-channel"
+        ctx.author = MagicMock()
+        ctx.author.display_name = "Admin"
+        ctx.author.display_avatar = MagicMock()
+        ctx.author.display_avatar.url = "http://example.com/avatar.png"
+        ctx.message = MagicMock()
+        ctx.message.content = ".n Test"
+        ctx.message.delete = AsyncMock()
+        ctx.prefix = "."
+        ctx.invoked_with = "n"
+
+        msg1 = MagicMock()
+        msg1.pin = AsyncMock()
+        msg2 = MagicMock()
+        msg2.pin = AsyncMock()
+        ctx.send = AsyncMock(side_effect=[msg1, msg2])
+
+        long_text = "x" * 5000
+        with patch('cogs.help_misc_cog.load_guild_data', return_value={
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+            "narration_color": 0xdc143c,
+            "narration_log_channel_name": "commentary",
+        }):
+            with patch('discord.utils.get', return_value=None):
+                _run(cog._send_narration(ctx, long_text, ping_roles=False))
+
+        assert ctx.send.call_count == 2
+        msg1.pin.assert_called_once()
+        msg2.pin.assert_not_called()
+
+
+class TestInteractions:
+    """Tests for the .o interaction commands (opoke/opat/ohug/oslap/okill)."""
+
+    GIF_URL = "https://tenor.com/view/nekone-utawarerumono-poke-anime-gif-26470052"
+
+    @staticmethod
+    def make_cog():
+        return help_misc_cog.Other(None)
+
+    @staticmethod
+    def make_ctx(invoked_with="opoke"):
+        ctx = MagicMock()
+        author = MagicMock()
+        author.id = 111
+        author.bot = False
+        author.mention = "@Actor"
+        ctx.author = author
+        ctx.invoked_with = invoked_with
+        ctx.send = AsyncMock(return_value=MagicMock())
+        return ctx
+
+    @staticmethod
+    def make_target(mid=222, bot=False):
+        target = MagicMock()
+        target.id = mid
+        target.bot = bot
+        target.mention = "@Target"
+        return target
+
+    @pytest.mark.parametrize("name", ["opoke", "opat", "ohug", "oslap", "okill", "okiss", "odance", "owave"])
+    def test_command_exists(self, name):
+        """Verify the interaction command exists on the cog."""
+        assert hasattr(help_misc_cog.Other, name)
+
+    @pytest.mark.parametrize("name,word", [
+        ("opoke", "poke"), ("opat", "pat"), ("ohug", "hug"),
+        ("oslap", "slap"), ("okill", "kill"),
+        ("okiss", "kiss"), ("odance", "dance"), ("owave", "wave"),
+    ])
+    def test_command_has_help(self, name, word):
+        """Verify the interaction command has help text mentioning its action."""
+        method = getattr(help_misc_cog.Other, name)
+        doc = getattr(method, "help", None) or getattr(method, "__doc__", None)
+        assert doc is not None and len(doc.strip()) > 0 and word.lower() in doc.lower()
+
+    def test_interaction_gifs_pool(self):
+        """Each action has a pool of Tenor GIF links (anime and non-anime)."""
+        assert set(help_misc_cog.INTERACTION_GIFS) == {"poke", "pat", "hug", "slap", "kill", "kiss", "dance", "wave"}
+        for pool in help_misc_cog.INTERACTION_GIFS.values():
+            assert len(pool) >= 10
+            for url in pool:
+                assert url.startswith("https://tenor.com/view/")
+
+    def test_interaction_lines_have_placeholders(self):
+        assert set(help_misc_cog.INTERACTION_LINES) == set(help_misc_cog.INTERACTION_GIFS)
+        for lines in help_misc_cog.INTERACTION_LINES.values():
+            assert lines
+            for line in lines:
+                assert "{user}" in line and "{target}" in line
+
+    def test_interactions_registered_on_cog(self):
+        cog = self.make_cog()
+        names = {c.name for c in cog.get_commands()}
+        assert {"opoke", "opat", "ohug", "oslap", "okill", "okiss", "odance", "owave"} <= names
+
+    def test_interactions_have_error_handler(self):
+        cog = self.make_cog()
+        cmds = {c.name: c for c in cog.get_commands()}
+        for name in ("opoke", "opat", "ohug", "oslap", "okill", "okiss", "odance", "owave"):
+            assert cmds[name].on_error is not None
+
+    def test_valid_target_sends_line_and_gif(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="opoke")
+        target = self.make_target()
+        media_url = "https://media.tenor.com/abc/poke.gif"
+        with patch("cogs.help_misc_cog.random.choice", return_value="{user} pokes {target} 👉"):
+            with patch("cogs.help_misc_cog._choose_interaction_gif", new=AsyncMock(return_value=self.GIF_URL)):
+                with patch.object(cog, "_resolve_tenor_media", new=AsyncMock(return_value=media_url)):
+                    _run(cog.perform_interaction(ctx, target, "poke"))
+        assert ctx.send.call_count == 2
+        first = ctx.send.call_args_list[0][0][0]
+        second = ctx.send.call_args_list[1][0][0]
+        assert "@Actor pokes @Target 👉" in first
+        assert second == media_url
+        assert self.GIF_URL not in first
+        assert "embed" not in ctx.send.call_args_list[0].kwargs
+        assert "file" not in ctx.send.call_args_list[0].kwargs
+
+    def test_self_target_rejected(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="hug")
+        _run(cog.perform_interaction(ctx, ctx.author, "hug"))
+        assert "yourself" in ctx.send.call_args[0][0]
+
+    def test_bot_target_rejected(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="hug")
+        target = self.make_target(bot=True)
+        _run(cog.perform_interaction(ctx, target, "hug"))
+        assert "bot" in ctx.send.call_args[0][0]
+
+    def test_missing_target_rejected(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="poke")
+        _run(cog.perform_interaction(ctx, None, "poke"))
+        assert "mention someone" in ctx.send.call_args[0][0]
+
+    def test_no_valid_gif_falls_back_to_random_pool(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="opoke")
+        target = self.make_target()
+        with patch("cogs.help_misc_cog.random.choice", side_effect=["{user} pokes {target} 👉", self.GIF_URL]):
+            with patch("cogs.help_misc_cog._choose_interaction_gif", new=AsyncMock(return_value=None)):
+                with patch.object(cog, "_resolve_tenor_media", new=AsyncMock(return_value=None)):
+                    _run(cog.perform_interaction(ctx, target, "poke"))
+        ctx.send.assert_awaited_once()
+        assert self.GIF_URL in ctx.send.call_args[0][0]
+
+    def test_send_failure_falls_back_to_text(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="hug")
+        target = self.make_target()
+        ctx.send = AsyncMock(side_effect=[discord.HTTPException(MagicMock(), MagicMock()), None])
+        with patch("cogs.help_misc_cog.random.choice", return_value="{user} hugs {target} 🫂"):
+            with patch("cogs.help_misc_cog._choose_interaction_gif", new=AsyncMock(return_value=self.GIF_URL)):
+                with patch.object(cog, "_resolve_tenor_media", new=AsyncMock(return_value="https://media.tenor.com/abc/hug.gif")):
+                    _run(cog.perform_interaction(ctx, target, "hug"))
+        assert ctx.send.call_count == 2
+        second = ctx.send.call_args_list[1][0][0]
+        assert "@Actor hugs @Target 🫂" in second
+        assert self.GIF_URL not in second
+
+    def test_no_gif_available_sends_text_only(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="okill")
+        target = self.make_target()
+        with patch("cogs.help_misc_cog.random.choice", return_value="{user} kills {target} 💀"):
+            _run(cog.perform_interaction(ctx, target, "unknown_action"))
+        ctx.send.assert_awaited_once()
+        sent = ctx.send.call_args[0][0]
+        assert "@Actor kills @Target 💀" in sent
+        assert "embed" not in ctx.send.call_args.kwargs
+
+    def test_choose_gif_random_shuffle(self):
+        with patch("cogs.help_misc_cog.random.shuffle", side_effect=lambda seq: seq.sort()):
+            result = _run(help_misc_cog._choose_interaction_gif(["b", "a", "c"]))
+        assert result == "a"
+
+    def test_choose_gif_skips_invalid(self):
+        async def valid(url):
+            return url != "bad"
+        result = _run(help_misc_cog._choose_interaction_gif(["bad", "good"], valid))
+        assert result == "good"
+
+    def test_choose_gif_supports_sync_validator(self):
+        result = _run(help_misc_cog._choose_interaction_gif(["a", "b", "c"], lambda u: u == "b"))
+        assert result == "b"
+
+    def test_choose_gif_all_invalid_returns_none(self):
+        result = _run(help_misc_cog._choose_interaction_gif(["a", "b"], lambda u: False))
+        assert result is None
+
+    def test_resolve_tenor_media_parses_og_image(self):
+        cog = self.make_cog()
+        session = _FakeSession('<meta property="og:image" content="https://media1.tenor.com/m/abc/poke.gif">')
+        cog._get_http_session = MagicMock(return_value=session)
+        media = _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert media == "https://media.tenor.com/abc/poke.gif"
+        assert cog._tenor_media_cache[self.GIF_URL] == media
+
+    def test_resolve_tenor_media_handles_reversed_meta_attrs(self):
+        cog = self.make_cog()
+        session = _FakeSession('<meta content="https://media1.tenor.com/m/xyz/hug.gif" property="og:image">')
+        cog._get_http_session = MagicMock(return_value=session)
+        media = _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert media == "https://media.tenor.com/xyz/hug.gif"
+
+    def test_resolve_tenor_media_falls_back_to_video(self):
+        cog = self.make_cog()
+        session = _FakeSession('<meta property="og:video:secure_url" content="https://media.tenor.com/abc/hug.mp4">')
+        cog._get_http_session = MagicMock(return_value=session)
+        media = _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert media == "https://media.tenor.com/abc/hug.mp4"
+
+    def test_resolve_tenor_media_prefers_animated_gif_over_static_poster(self):
+        cog = self.make_cog()
+        session = _FakeSession(
+            '<meta property="og:image" content="https://media1.tenor.com/m/abc/slap.jpg">'
+            '<meta property="og:video:secure_url" content="https://media.tenor.com/abc/slap.mp4">'
+        )
+        cog._get_http_session = MagicMock(return_value=session)
+        media = _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert media == "https://media.tenor.com/abc/slap.mp4"
+
+    def test_resolve_tenor_media_unescapes_html(self):
+        cog = self.make_cog()
+        session = _FakeSession("<meta property=\"og:image\" content=\"https://x&amp;y.gif\">")
+        cog._get_http_session = MagicMock(return_value=session)
+        media = _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert media == "https://x&y.gif"
+
+    def test_resolve_tenor_media_bad_status_returns_none(self):
+        cog = self.make_cog()
+        session = _FakeSession("", status=500)
+        cog._get_http_session = MagicMock(return_value=session)
+        media = _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert media is None
+        assert cog._tenor_media_cache[self.GIF_URL] is None
+
+    def test_resolve_tenor_media_caches_result(self):
+        cog = self.make_cog()
+        session = _FakeSession('<meta property="og:image" content="https://media1.tenor.com/m/abc/slap.gif">')
+        cog._get_http_session = MagicMock(return_value=session)
+        _run(cog._resolve_tenor_media(self.GIF_URL))
+        _run(cog._resolve_tenor_media(self.GIF_URL))
+        assert session.get_calls == 1
+        assert cog._get_http_session.call_count == 1
+
+    def test_gif_is_valid_true(self):
+        cog = self.make_cog()
+        session = MagicMock()
+
+        class Resp:
+            status = 200
+            headers = {"Content-Type": "text/html; charset=utf-8"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        session.head.return_value = Resp()
+        with patch.object(cog, "_get_http_session", return_value=session):
+            assert _run(cog._gif_is_valid("https://tenor.com/view/some-gif")) is True
+
+    def test_gif_is_valid_rejects_bad_status(self):
+        cog = self.make_cog()
+        session = MagicMock()
+
+        class Resp:
+            status = 404
+            headers = {"Content-Type": "image/gif"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        session.head.return_value = Resp()
+        with patch.object(cog, "_get_http_session", return_value=session):
+            assert _run(cog._gif_is_valid("https://x.gif")) is False
+
+    def test_error_bad_argument(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="opoke")
+        _run(cog._interaction_error(ctx, commands.BadArgument("nope")))
+        assert "wasn't found" in ctx.send.call_args[0][0]
+
+    def test_error_missing_required_argument(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="opoke")
+        _run(cog._interaction_error(ctx, commands.MissingRequiredArgument(MagicMock(name="target"))))
+        assert "mention someone" in ctx.send.call_args[0][0]
+
+    def test_error_unrelated_errors_ignored(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx(invoked_with="opoke")
+        _run(cog._interaction_error(ctx, commands.CommandNotFound()))
+        ctx.send.assert_not_called()
+
+    def test_help_other_lists_interactions(self):
+        cog = self.make_cog()
+        ctx = self.make_ctx()
+        recorded = []
+
+        class FakeEmbed:
+            def __init__(self, **kwargs):
+                self.fields = []
+                recorded.append(self)
+
+            def add_field(self, **kwargs):
+                self.fields.append(kwargs)
+                return self
+
+            def set_footer(self, **kwargs):
+                return self
+
+        with patch("cogs.help_misc_cog.discord.Embed", return_value=FakeEmbed()):
+            with patch.object(help_misc_cog.Other, "send_help_page", new=AsyncMock()):
+                _run(cog.help_other(ctx))
+        assert recorded
+        text = "\n".join(str(f.get("value", "")) for f in recorded[0].fields)
+        for cmd in (".opoke", ".opat", ".ohug", ".oslap", ".okill", ".okiss", ".odance", ".owave"):
+            assert cmd in text
+
+
+class TestEmbedLimits:
+    """Ensure help pages and .sh results stay within Discord embed limits."""
+
+    _categories = tuple(
+        c.lower() for c in (
+            "setup", "moving", "home", "handling", "infos", "presets", "voting",
+            "nominations", "lists", "utility", "other", "meetupmatrix", "economy",
+            "botc", "surveillance", "analytics", "status", "location", "dashboard",
+            "gamemanager", "library", "games", "auction", "birthdays", "calendar",
+            "draft", "sticky", "sendrole",
+        )
+    )
+
+    def _collect_help_embeds(self):
+        bot = MagicMock()
+        cog = help_misc_cog.Other(bot)
+        captured = []
+
+        async def capture(*args, **kwargs):
+            captured.append((args, kwargs))
+
+        cog.send_help_page = capture
+        ctx = MagicMock()
+        sent = []
+
+        async def fake_send(*a, **k):
+            sent.append(k)
+            return MagicMock()
+
+        ctx.send = fake_send
+        for cat in self._categories:
+            _run(cog.help.callback(cog, ctx, cat))
+            _run(cog.help2.callback(cog, ctx, cat))
+        _run(cog.help.callback(cog, ctx, None))
+        _run(cog.help2.callback(cog, ctx, None))
+        embeds = []
+        for args, _ in captured:
+            embeds += [a for a in args[1:] if isinstance(a, discord.Embed)]
+        embeds += [k["embed"] for k in sent if isinstance(k.get("embed"), discord.Embed)]
+        return embeds
+
+    def test_help_pages_within_discord_embed_limits(self):
+        embeds = self._collect_help_embeds()
+        assert embeds, "no help embeds were collected"
+        for eb in embeds:
+            assert len(eb.fields) <= 25, f"{eb.title}: {len(eb.fields)} fields in one embed"
+            for f in eb.fields:
+                assert len(f.value) <= 1024, f"{eb.title} field '{f.name}': {len(f.value)} chars"
+            if eb.title:
+                assert len(eb.title) <= 256, f"{eb.title}: title len {len(eb.title)}"
+            if eb.description:
+                assert len(eb.description) <= 4096, f"{eb.title}: desc len {len(eb.description)}"
+            total = len(eb.title or "") + len(eb.description or "") + sum(
+                len(f.name) + len(f.value) + 1 for f in eb.fields
+            )
+            assert total <= 6000, f"{eb.title}: embed total {total}"
+
+    def test_searchhelp_chunks_fields_within_1024(self):
+        bot = MagicMock()
+        cog = help_misc_cog.Other(bot)
+        ctx = MagicMock()
+        sent = []
+
+        async def fake_send(*a, **k):
+            sent.append(k)
+            return MagicMock()
+
+        ctx.send = fake_send
+        _run(cog.searchhelp.callback(cog, ctx, keyword="a"))
+        embeds = [k["embed"] for k in sent if isinstance(k.get("embed"), discord.Embed)]
+        assert embeds, "searchhelp produced no embeds"
+        for eb in embeds:
+            assert len(eb.fields) <= 25, f".sh: {len(eb.fields)} fields in one embed"
+            for f in eb.fields:
+                assert len(f.value) <= 1024, f".sh field '{f.name}': {len(f.value)} chars"
+            total = len(eb.title or "") + len(eb.description or "") + sum(
+                len(f.name) + len(f.value) + 1 for f in eb.fields
+            )
+            assert total <= 6000, f".sh: embed total {total}"
+
