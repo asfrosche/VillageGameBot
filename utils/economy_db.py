@@ -8,6 +8,7 @@ lived inside ``bot.db`` is migrated over (preserving IDs and relationships).
 After that, economy code reads/writes ONLY from ``economy.db``.
 """
 
+import difflib
 import os
 import sqlite3
 
@@ -64,7 +65,8 @@ def init_db() -> None:
                 name TEXT NOT NULL,
                 description TEXT,
                 price INTEGER NOT NULL,
-                is_default INTEGER NOT NULL DEFAULT 0
+                is_default INTEGER NOT NULL DEFAULT 0,
+                stock INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -117,6 +119,12 @@ def init_db() -> None:
         """)
         # Unique constraint on shop item names per guild (prevents duplicates)
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_items_guild_name ON economy_shop_items(guild_id, name)")
+
+        # Idempotent column migration: databases created before the "stock"
+        # column existed get it added here with the default (0 = unlimited).
+        cols = {r["name"] for r in cur.execute("PRAGMA table_info(economy_shop_items)").fetchall()}
+        if "stock" not in cols:
+            cur.execute("ALTER TABLE economy_shop_items ADD COLUMN stock INTEGER NOT NULL DEFAULT 0")
 
         # Drop orphaned per-user economy tables from legacy builds. Nothing
         # references them anymore; removing them keeps the DB aligned with code.
@@ -219,7 +227,7 @@ def get_shop_items(guild_id: int) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, name, description, price, is_default
+            SELECT id, name, description, price, is_default, stock
             FROM economy_shop_items
             WHERE guild_id = ?
             ORDER BY price ASC, name ASC
@@ -233,6 +241,7 @@ def get_shop_items(guild_id: int) -> list[dict]:
                 "description": r["description"] or "",
                 "price": int(r["price"]),
                 "is_default": bool(r["is_default"]),
+                "stock": int(r["stock"]) if r["stock"] is not None else 0,
             }
             for r in rows
         ]
@@ -245,20 +254,22 @@ def add_shop_item(
     price: int,
     *,
     is_default: bool = False,
+    stock: int = 0,
 ) -> int:
     _ensure_ready()
     if not name or not name.strip():
         return 0
     price = max(0, int(price))
+    stock = max(0, int(stock))
     with _connect() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO economy_shop_items (guild_id, name, description, price, is_default)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO economy_shop_items (guild_id, name, description, price, is_default, stock)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id, name) DO NOTHING
             """,
-            (guild_id, name, description, price, 1 if is_default else 0),
+            (guild_id, name, description, price, 1 if is_default else 0, stock),
         )
         conn.commit()
         # Resolve the item id by name: lastrowid is unreliable (returns 0) when
@@ -440,15 +451,19 @@ def add_inventory_item_channel(guild_id: int, channel_id: int, item_id: int, del
         return 0
 
 
-def buy_shop_item(guild_id: int, channel_id: int, item_id: int, price: int, quantity: int = 1) -> tuple[bool, int]:
+def buy_shop_item(guild_id: int, channel_id: int, item_id: int, price: int, quantity: int = 1) -> tuple[bool, int, str | None]:
     """
-    Atomic purchase: deduct balance and add inventory in one transaction.
-    Returns (success, new_quantity). On any failure (insufficient balance or
-    item deleted mid-purchase) nothing is changed.
+    Atomic purchase: check stock, deduct balance and add inventory in one
+    transaction. ``stock == 0`` means unlimited.
+
+    Returns (success, new_quantity, fail_reason). fail_reason is None on
+    success, otherwise ``"stock"`` (not enough available) or ``"balance"``
+    (insufficient coins) or ``"deleted"`` (item was removed mid-purchase).
+    Nothing is changed on any failure.
     """
     _ensure_ready()
     if quantity <= 0:
-        return False, 0
+        return False, 0, "balance"
     total_cost = price * quantity
     with _connect() as conn:
         cur = conn.cursor()
@@ -461,13 +476,30 @@ def buy_shop_item(guild_id: int, channel_id: int, item_id: int, price: int, quan
                 "INSERT OR IGNORE INTO economy_channel_inventory (guild_id, channel_id, item_id, quantity) VALUES (?, ?, ?, 0)",
                 (guild_id, channel_id, item_id),
             )
+            # Stock guard: only decrement when stock is being tracked (> 0).
+            row = cur.execute(
+                "SELECT stock FROM economy_shop_items WHERE id = ? AND guild_id = ?",
+                (item_id, guild_id),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return False, 0, "deleted"
+            stock = int(row["stock"] or 0)
+            if stock > 0:
+                cur.execute(
+                    "UPDATE economy_shop_items SET stock = stock - ? WHERE id = ? AND stock >= ?",
+                    (quantity, item_id, quantity),
+                )
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return False, 0, "stock"
             cur.execute(
                 "UPDATE economy_channel_balance SET balance = balance - ? WHERE guild_id = ? AND channel_id = ? AND balance >= ?",
                 (total_cost, guild_id, channel_id, total_cost),
             )
             if cur.rowcount == 0:
                 conn.rollback()
-                return False, 0
+                return False, 0, "balance"
             cur.execute(
                 "UPDATE economy_channel_inventory SET quantity = quantity + ? WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
                 (quantity, guild_id, channel_id, item_id),
@@ -477,12 +509,12 @@ def buy_shop_item(guild_id: int, channel_id: int, item_id: int, price: int, quan
                 "SELECT quantity FROM economy_channel_inventory WHERE guild_id = ? AND channel_id = ? AND item_id = ?",
                 (guild_id, channel_id, item_id),
             ).fetchone()
-            return True, int(row["quantity"]) if row else 0
+            return True, int(row["quantity"]) if row else 0, None
         except sqlite3.IntegrityError:
             # Item was deleted while the purchase was in flight; roll back so the
             # balance deduction is not persisted without the item being received.
             conn.rollback()
-            return False, 0
+            return False, 0, "deleted"
 
 
 def transfer_channel_balance(guild_id: int, from_channel_id: int, to_channel_id: int, amount: int) -> bool:
@@ -538,7 +570,63 @@ def get_shop_item_by_name(guild_id: int, name_substring: str) -> dict | None:
     return None
 
 
-def update_shop_item_by_name(guild_id: int, item_name: str, *, price: int | None = None, name: str | None = None, description: str | None = None) -> bool:
+FUZZY_MIN_SCORE = 0.5
+
+
+def search_shop_items(guild_id: int, query: str, limit: int = 6) -> list[dict]:
+    """Fuzzy-search shop items by name (emoji stripped, case-insensitive).
+
+    Returns items ranked by match score (highest first), each dict carrying a
+    ``score`` key in [0, 1]. Only items scoring >= FUZZY_MIN_SCORE are included.
+    """
+    _ensure_ready()
+    q = _normalize_name_for_match(query)
+    if not q:
+        return []
+    scored = []
+    for it in get_shop_items(guild_id):
+        n = _normalize_name_for_match(it["name"])
+        if not n:
+            continue
+        if q == n:
+            score = 1.0
+        elif q in n:
+            score = 0.95
+        else:
+            score = difflib.SequenceMatcher(None, q, n).ratio()
+        if score >= FUZZY_MIN_SCORE:
+            item = dict(it)
+            item["score"] = round(score, 3)
+            scored.append(item)
+    scored.sort(key=lambda x: (-x["score"], x["name"]))
+    return scored[:limit]
+
+
+def search_inventory_items(guild_id: int, channel_id: int, query: str, limit: int = 6) -> list[dict]:
+    """Fuzzy-search the items currently owned by a channel. Same scoring as shop search."""
+    q = _normalize_name_for_match(query)
+    if not q:
+        return []
+    scored = []
+    for it in get_inventory_channel(guild_id, channel_id):
+        n = _normalize_name_for_match(it["name"])
+        if not n:
+            continue
+        if q == n:
+            score = 1.0
+        elif q in n:
+            score = 0.95
+        else:
+            score = difflib.SequenceMatcher(None, q, n).ratio()
+        if score >= FUZZY_MIN_SCORE:
+            item = dict(it)
+            item["score"] = round(score, 3)
+            scored.append(item)
+    scored.sort(key=lambda x: (-x["score"], x["name"]))
+    return scored[:limit]
+
+
+def update_shop_item_by_name(guild_id: int, item_name: str, *, price: int | None = None, name: str | None = None, description: str | None = None, stock: int | None = None) -> bool:
     _ensure_ready()
     item = get_shop_item_by_name(guild_id, item_name)
     if not item:
@@ -558,6 +646,9 @@ def update_shop_item_by_name(guild_id: int, item_name: str, *, price: int | None
         if description is not None:
             updates.append("description = ?")
             params.append(description)
+        if stock is not None:
+            updates.append("stock = ?")
+            params.append(max(0, int(stock)))
         if not updates:
             return True
         params.append(guild_id)

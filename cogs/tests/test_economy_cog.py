@@ -223,3 +223,20 @@ class TestEconomy:
     def test_confirmview_defined(self):
         """Verify ConfirmView view is defined in the module."""
         assert hasattr(economy_cog, 'ConfirmView')
+
+    def test_updatestock_exists(self):
+        """Verify updatestock command exists on the cog."""
+        assert hasattr(economy_cog.Economy, 'updatestock')
+
+    def test_updatestock_has_help(self):
+        """Verify updatestock command has help text."""
+        method = getattr(economy_cog.Economy, 'updatestock')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    def test_resolve_shop_item_helper(self):
+        """Verify fuzzy resolver helpers exist on the cog."""
+        assert hasattr(economy_cog.Economy, '_resolve_shop_item')
+        assert hasattr(economy_cog.Economy, '_resolve_inventory_item')
+        assert hasattr(economy_cog.Economy, '_resolve_item')
+        assert hasattr(economy_cog.Economy, '_ask_item_choice')

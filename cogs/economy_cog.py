@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -24,6 +25,8 @@ from utils.economy_db import (
     get_shop_items,
     get_top_economy_channels,
     remove_shop_item_by_name,
+    search_inventory_items,
+    search_shop_items,
     set_economy_channel_balance,
     transfer_channel_balance,
     update_economy_channel_balance,
@@ -43,6 +46,29 @@ DEFAULT_SHOP_ITEMS = [
 
 # Maximum value accepted by .setcollect to prevent accidental huge payouts.
 MAX_COLLECT_AMOUNT = 10_000
+
+
+def _split_trailing_qty(text: str) -> tuple[str, int]:
+    """Split "item [qty]" text into (query, quantity). The last numeric token is the quantity."""
+    parts = text.strip().split()
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i].isdigit():
+            qty = int(parts[i])
+            if qty > 0:
+                return " ".join(parts[:i]).strip(), qty
+    return text.strip(), 1
+
+
+def _stock_text(item: dict) -> str:
+    """Short stock indicator: '' for unlimited (0), otherwise 'N left'."""
+    stock = item.get("stock", 0) or 0
+    return "" if stock <= 0 else f" · **{stock} left**"
+
+# Matches an emoji at the start of an item name: custom Discord emoji
+# (<:name:id> / <a:name:id>) or a unicode emoji glyph.
+_ITEM_EMOJI_RE = re.compile(
+    r"<a?:\w+:\d+>|[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2190-\u21FF\uFE0F\u200D]"
+)
 
 
 def _is_rolechat_category(
@@ -525,10 +551,13 @@ class ShopItemSelect(Select):
     def __init__(self, items: list[dict], page_offset: int):
         options = []
         for i, item in enumerate(items, start=page_offset + 1):
+            desc = f"{item['price']:,} coins"
+            if (item.get("stock") or 0) > 0:
+                desc += f" · {item['stock']} left"
             options.append(
                 discord.SelectOption(
                     label=f"{i}. {item['name']}",
-                    description=f"{item['price']:,} coins",
+                    description=desc,
                     value=str(item["id"]),
                 )
             )
@@ -640,8 +669,12 @@ class ShopView(View):
                 f"Need **{item['price']:,}**, have **{bal:,}**.", ephemeral=True
             )
 
-        ok, new_qty = buy_shop_item(self.guild_id, self.channel_id, item["id"], item["price"], 1)
+        ok, new_qty, reason = buy_shop_item(self.guild_id, self.channel_id, item["id"], item["price"], 1)
         if not ok:
+            if reason == "stock":
+                return await interaction.response.send_message(
+                    "Not enough of that item in stock.", ephemeral=True
+                )
             return await interaction.response.send_message(
                 "Purchase failed. That item may have just been removed from the shop.", ephemeral=True
             )
@@ -768,6 +801,80 @@ class Economy(commands.Cog):
                 is_default=True,
             )
 
+    async def _resolve_shop_item(self, ctx: commands.Context, query: str) -> dict | None:
+        """Fuzzy-match a shop item by name (resolves ambiguity by asking the user)."""
+        return await self._resolve_item(
+            ctx,
+            search_shop_items(ctx.guild.id, query),
+            f"No shop item matches `{query}`.",
+        )
+
+    async def _resolve_inventory_item(self, ctx: commands.Context, channel_id: int, query: str) -> dict | None:
+        """Fuzzy-match an item this inventory actually owns (resolves ambiguity by asking the user)."""
+        return await self._resolve_item(
+            ctx,
+            search_inventory_items(ctx.guild.id, channel_id, query),
+            f"You don't have any item matching `{query}` here.",
+        )
+
+    async def _resolve_item(self, ctx: commands.Context, candidates: list[dict], not_found: str) -> dict | None:
+        """Shared resolution: an unambiguous winner is used directly, otherwise the user picks.
+
+        Sends its own error/prompt messages and returns the chosen item dict,
+        or None when nothing matched / was cancelled.
+        """
+        if not candidates:
+            await ctx.send(not_found)
+            return None
+        pick = candidates[0]
+        if len(candidates) > 1:
+            top, second = candidates[0], candidates[1]
+            unambiguous = top["score"] == 1.0 or (top["score"] - second["score"]) >= 0.1
+            if not unambiguous:
+                pick = await self._ask_item_choice(ctx, candidates)
+                if pick is None:
+                    return None
+        return pick
+
+    async def _ask_item_choice(self, ctx: commands.Context, candidates: list[dict]) -> dict | None:
+        """Send a numbered list of candidates and wait (30s) for the user's pick."""
+        lines = []
+        for i, it in enumerate(candidates, 1):
+            line = f"**{i}.** {it['name']}"
+            if it.get("price") is not None:
+                line += f" — **{it['price']:,}** coins"
+            stock_line = _stock_text(it)
+            if stock_line:
+                line += stock_line
+            if it.get("quantity") and it["quantity"] > 0:
+                line += f" · you own **{it['quantity']}**"
+            if it.get("description"):
+                line += f"\n> {it['description']}"
+            lines.append(line)
+        await ctx.send(
+            "Multiple items matched. Reply with the **number** of the one you meant "
+            "(or re-run with a clearer name):\n" + "\n".join(lines)
+        )
+
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
+
+        try:
+            msg = await ctx.bot.wait_for("message", check=check, timeout=30)
+        except asyncio.TimeoutError:
+            await ctx.send("Timed out — cancelled.")
+            return None
+
+        content = msg.content.strip()
+        if not content.isdigit():
+            await ctx.send(f"`{content}` isn't a number — cancelled. Re-run with a clearer name.")
+            return None
+        idx = int(content)
+        if not 1 <= idx <= len(candidates):
+            await ctx.send(f"Number must be between **1** and **{len(candidates)}** — cancelled.")
+            return None
+        return candidates[idx - 1]
+
     def _resolve_fireworks_house(self, guild, user, guild_data) -> tuple[discord.TextChannel | None, str]:
         houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
         if not houses_cat:
@@ -872,7 +979,7 @@ class Economy(commands.Cog):
         await self._ensure_default_items(ctx.guild)
         items = get_shop_items(ctx.guild.id)
         if not items:
-            return await ctx.send("The shop is empty. Admins can add items with `.additem <price> <name>`.")
+            return await ctx.send("The shop is empty. Admins can add items with `.additem <name> <price> [description] [stock]`.")
 
         per_page = 10
         pages = []
@@ -883,6 +990,9 @@ class Economy(commands.Cog):
             lines = []
             for idx, it in enumerate(chunk, start=i + 1):
                 line = f"**{idx}.** **{it['name']}** — **{it['price']:,}**"
+                stock_line = _stock_text(it)
+                if stock_line:
+                    line += stock_line
                 if it.get("description"):
                     line += f"\n> {it['description']}"
                 lines.append(line)
@@ -892,29 +1002,38 @@ class Economy(commands.Cog):
         await ctx.send(embed=view._build_embed(), view=view)
 
     @commands.command(name="buy")
-    async def buy(self, ctx: commands.Context, item_name: str, quantity: int = 1):
-        """Buy an item by name (partial match). Only in rolechats."""
+    async def buy(self, ctx: commands.Context, *, text: str):
+        """Buy an item by name (fuzzy match). Only in rolechats. Usage: .buy <item> [qty]"""
         guild_data = load_guild_data(ctx.guild.id)
         if not _is_rolechat_category(ctx, guild_data=guild_data):
             return await ctx.send("Buy items only in a RoleChat channel.")
+        query, quantity = _split_trailing_qty(text)
         if quantity <= 0:
-            return await ctx.send("Quantity must be at least 1. Usage: `.buy <item_name> [quantity]`.")
+            return await ctx.send("Quantity must be at least 1. Usage: `.buy <item> [quantity]`.")
+        if not query:
+            return await ctx.send("Usage: `.buy <item> [quantity]`.")
 
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send("Item not found. Use a part of the name (e.g. `.buy fumo`).")
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
+
+        if (item.get("stock") or 0) > 0 and quantity > item["stock"]:
+            return await ctx.send(f"Only **{item['stock']}× {item['name']}** left in stock — you asked for **{quantity}**.")
 
         cost = item["price"] * quantity
         bal = get_economy_channel_balance(ctx.guild.id, ctx.channel.id)
         if cost > bal:
             return await ctx.send(f"You don't have enough coins. You need **{cost:,}**, have **{bal:,}**.")
 
-        ok, new_qty = buy_shop_item(ctx.guild.id, ctx.channel.id, item["id"], item["price"], quantity)
+        ok, new_qty, reason = buy_shop_item(ctx.guild.id, ctx.channel.id, item["id"], item["price"], quantity)
         if not ok:
-            still_exists = any(i["id"] == item["id"] for i in get_shop_items(ctx.guild.id))
-            if not still_exists:
-                return await ctx.send("Item not found. Use a part of the name (e.g. `.buy fumo`).")
-            return await ctx.send(f"You don't have enough coins. You need **{cost:,}**, have **{bal:,}**.")
+            if reason == "stock":
+                cur = next((i for i in get_shop_items(ctx.guild.id) if i["id"] == item["id"]), None)
+                left = cur["stock"] if cur and cur["stock"] is not None else 0
+                return await ctx.send(f"Not enough **{item['name']}** in stock — only **{left}** left.")
+            if reason == "balance":
+                return await ctx.send(f"You don't have enough coins. You need **{cost:,}**, have **{bal:,}**.")
+            return await ctx.send("Item not found. Use a part of the name (e.g. `.buy fumo`).")
 
         embed = success_embed(
             title="✅ Purchase successful",
@@ -1069,7 +1188,7 @@ class Economy(commands.Cog):
                 pass
 
     @commands.command(name="trade")
-    async def giveitem_player(self, ctx: commands.Context, member: discord.Member, item_name: str, quantity: int = 1):
+    async def giveitem_player(self, ctx: commands.Context, member: discord.Member, *, text: str):
         """Give an item to another player. Usage: .trade @player <item> [qty]"""
         guild_data = load_guild_data(ctx.guild.id)
 
@@ -1111,12 +1230,15 @@ class Economy(commands.Cog):
         if sender_rc == target_rc:
             return await ctx.send("You can't give items to someone in the same rolechat.")
 
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send(f"Item `{item_name}` not found.")
-
+        query, quantity = _split_trailing_qty(text)
         if quantity <= 0:
             return await ctx.send("Quantity must be greater than 0.")
+        if not query:
+            return await ctx.send("Usage: `.trade @player <item> [quantity]`.")
+
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
 
         sender_inv = get_inventory_channel(ctx.guild.id, sender_rc.id)
         sender_item = next((i for i in sender_inv if i["item_id"] == item["id"]), None)
@@ -1138,55 +1260,136 @@ class Economy(commands.Cog):
 
     @commands.command(name="additem")
     @commands.has_permissions(administrator=True)
-    async def additem(self, ctx: commands.Context, price: int, *, name: str):
-        """Add a shop item. Usage: .additem <price> <name>"""
+    async def additem(self, ctx: commands.Context, *, text: str):
+        """Add a shop item. Usage: .additem <name> <price> [description] [stock].
+        The name must start with an emoji. Avoid numbers in the name — the first
+        number is read as the price. If a number is needed, wrap the name in
+        quotes, e.g. .additem 🪵 "Axe 3" 500 Powerful axe. Trailing number = stock."""
+        parts = text.strip().split()
+        if not parts:
+            return await ctx.send("Usage: `.additem <name> <price> [description] [stock]` — item name must start with an emoji.")
+
+        price_pos = -1
+        for i, part in enumerate(parts):
+            try:
+                int(part)
+            except ValueError:
+                continue
+            price_pos = i
+            break
+
+        if price_pos <= 0:
+            return await ctx.send(
+                "Couldn't find a price. Usage: `.additem <name> <price> [description] [stock]` "
+                "— e.g. `.additem 🪵 Log 1000000 Ominous looking log 50`. "
+                "If your name contains a number, wrap it in quotes, e.g. `.additem 🪵 \"Axe 3\" 500 Powerful axe`."
+            )
+
+        price = int(parts[price_pos])
         if price <= 0:
-            return await ctx.send("Price must be greater than 0. Usage: `.additem <price> <name>`.")
-        name = name.strip()
+            return await ctx.send("Price must be greater than 0. Usage: `.additem <name> <price> [description] [stock]`.")
+
+        stock = 0
+        remainder = parts[price_pos + 1:]
+        if remainder and remainder[-1].isdigit():
+            remainder, stock = remainder[:-1], int(remainder[-1])
+
+        name = " ".join(t.strip("'\"") for t in parts[:price_pos]).strip()
         if not name:
             return await ctx.send("Item name cannot be empty.")
-        add_shop_item(ctx.guild.id, name=name, description="", price=price, is_default=False)
-        embed = success_embed(title="🛒 Item added", description=f"**{name}** for **{price:,}** coins.")
+        if not _ITEM_EMOJI_RE.match(name):
+            return await ctx.send(
+                f"Item name must start with an emoji. Usage: `.additem <name> <price> [description] [stock]` — "
+                f"e.g. `.additem 🪵 Log 1000000 Ominous looking log`."
+            )
+
+        description = " ".join(remainder).strip()
+        add_shop_item(ctx.guild.id, name=name, description=description, price=price, is_default=False, stock=stock)
+        stock_note = f"\nStock: **{stock}**" if stock > 0 else "\nStock: **unlimited**"
+        embed = success_embed(title="🛒 Item added", description=f"**{name}** for **{price:,}** coins.{stock_note}")
         await ctx.send(embed=embed)
+
+    @commands.command(name="updatestock")
+    @commands.has_permissions(administrator=True)
+    async def updatestock(self, ctx: commands.Context, *, text: str):
+        """Set how many units of an item are in stock. 0 = unlimited. Usage: .updatestock <item> <stock>"""
+        stock = None
+        parts = text.strip().split()
+        if parts and parts[-1].lstrip("-").isdigit():
+            stock = int(parts[-1])
+            query = " ".join(parts[:-1])
+        else:
+            query = text.strip()
+        if stock is None:
+            return await ctx.send("Usage: `.updatestock <item> <stock>` — e.g. `.updatestock Log 100` (0 = unlimited).")
+        if stock < 0:
+            return await ctx.send("Stock must be >= 0 (0 = unlimited).")
+
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
+
+        ok = update_shop_item_by_name(ctx.guild.id, item["name"], stock=stock)
+        if not ok:
+            return await ctx.send("Could not update that item's stock.")
+        if stock == 0:
+            await ctx.send(f"**{item['name']}** is now **unlimited** (no stock limit).")
+        else:
+            await ctx.send(f"**{item['name']}** stock → **{stock}**.")
 
     @commands.command(name="edititem")
     @commands.has_permissions(administrator=True)
     async def edititem(self, ctx: commands.Context, field: str, item_name: str, *, new_value: str):
-        """Edit an item: .edititem price/name/description <item_name> <new_value>"""
+        """Edit an item: .edititem price/name/description/stock <item_name> <new_value>"""
         field = field.lower()
-        if field not in ("price", "name", "description"):
-            return await ctx.send("Field must be price, name, or description.")
-        if field == "price":
+        if field not in ("price", "name", "description", "stock"):
+            return await ctx.send("Field must be price, name, description, or stock.")
+        if field in ("price", "stock"):
             try:
                 val = int(new_value.strip())
             except ValueError:
-                return await ctx.send("New price must be a number.")
+                return await ctx.send("Value must be a number.")
             if val < 0:
-                return await ctx.send("Price must be >= 0.")
-            ok = update_shop_item_by_name(ctx.guild.id, item_name, price=val)
+                return await ctx.send("Value must be >= 0 (stock 0 = unlimited).")
+
+        item = await self._resolve_shop_item(ctx, item_name)
+        if item is None:
+            return
+
+        if field == "price":
+            ok = update_shop_item_by_name(ctx.guild.id, item["name"], price=val)
+            label = f"price → **{val:,}**"
+        elif field == "stock":
+            ok = update_shop_item_by_name(ctx.guild.id, item["name"], stock=val)
+            label = f"stock → **{val}** (0 = unlimited)" if val == 0 else f"stock → **{val}**"
         elif field == "name":
             new_name = new_value.strip()
             if not new_name:
                 return await ctx.send("Item name cannot be empty.")
-            if update_shop_item_by_name(ctx.guild.id, item_name, name=new_name):
-                return await ctx.send("Updated **name** for that item.")
-            if get_shop_item_by_name(ctx.guild.id, item_name) is None:
-                return await ctx.send("Item not found. Use a part of the name.")
+            if not _ITEM_EMOJI_RE.match(new_name):
+                return await ctx.send("New item name must start with an emoji.")
+            if update_shop_item_by_name(ctx.guild.id, item["name"], name=new_name):
+                return await ctx.send(f"Updated **{item['name']}** — new name: **{new_name}**.")
             return await ctx.send("An item with that name already exists.")
         else:
-            ok = update_shop_item_by_name(ctx.guild.id, item_name, description=new_value.strip())
+            ok = update_shop_item_by_name(ctx.guild.id, item["name"], description=new_value.strip())
+            label = f"description updated for **{item['name']}**"
+
         if not ok:
             return await ctx.send("Item not found. Use a part of the name.")
-        await ctx.send(f"Updated **{field}** for that item.")
+        await ctx.send(f"Updated **{item['name']}** — {label}.")
 
     @commands.command(name="delitem")
     @commands.has_permissions(administrator=True)
     async def delitem(self, ctx: commands.Context, *, item_name: str):
         """Remove an item from the shop by name."""
-        ok = remove_shop_item_by_name(ctx.guild.id, item_name.strip())
+        item = await self._resolve_shop_item(ctx, item_name)
+        if item is None:
+            return
+        ok = remove_shop_item_by_name(ctx.guild.id, item["name"])
         if not ok:
             return await ctx.send("Item not found. Use a part of the name.")
-        await ctx.send("Item removed from the shop.")
+        await ctx.send(f"Item removed from the shop: **{item['name']}**.")
 
     @commands.command(name="reseteconomy", aliases=["re"])
     @commands.has_permissions(administrator=True)
@@ -1410,21 +1613,20 @@ class Economy(commands.Cog):
         if not _is_rolechat_category(ctx, guild_data=guild_data):
             return await ctx.send("Sell items only in a RoleChat channel. Usage: `.sell <item_name>`.")
 
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send("Item not found. Usage: `.sell <item_name>`.")
+        owned = await self._resolve_inventory_item(ctx, ctx.channel.id, item_name)
+        if owned is None:
+            return
 
-        inv = get_inventory_channel(ctx.guild.id, ctx.channel.id)
-        owned = next((i for i in inv if i["item_id"] == item["id"] and i["quantity"] > 0), None)
-        if not owned:
-            return await ctx.send("You don't own that item.")
+        shop_item = get_shop_item_by_name(ctx.guild.id, owned["name"])
+        if not shop_item:
+            return await ctx.send("That item is no longer in the shop, so it can't be sold back.")
 
-        refund = item["price"] // 2
-        add_inventory_item_channel(ctx.guild.id, ctx.channel.id, item["id"], -1)
+        refund = shop_item["price"] // 2
+        add_inventory_item_channel(ctx.guild.id, ctx.channel.id, owned["item_id"], -1)
         update_economy_channel_balance(ctx.guild.id, ctx.channel.id, refund)
 
         await ctx.send(
-            f"Sold **{item['name']}** for **{refund:,}** coins (50% of shop price)."
+            f"Sold **{owned['name']}** for **{refund:,}** coins (50% of shop price)."
         )
 
     @commands.command(name="add-money-role", aliases=["add_money_role", "addmrole"])
@@ -1507,10 +1709,6 @@ class Economy(commands.Cog):
             if not _is_rolechat_category(ctx, guild_data=guild_data):
                 return await ctx.send("Use items only in a RoleChat channel. Usage: `.use <item_name>`.")
 
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send("Item not found. Usage: `.use <item_name>`.")
-
         # Determine which channel's inventory to check and deduct from.
         # Broom/Peep Hole in houses: look up the user's rolechat instead of the house channel.
         inv_channel_id = ctx.channel.id
@@ -1529,12 +1727,11 @@ class Economy(commands.Cog):
                 return await ctx.send("Could not find your rolechat to check inventory.")
             inv_channel_id = found.id
 
-        inv = get_inventory_channel(ctx.guild.id, inv_channel_id)
-        owned = next((i for i in inv if i["item_id"] == item["id"] and i["quantity"] > 0), None)
-        if not owned:
-            return await ctx.send("You don't have that item. Buy it first with `.buy` or get it from an Overseer.")
+        owned = await self._resolve_inventory_item(ctx, inv_channel_id, item_name)
+        if owned is None:
+            return
 
-        name_lower = item["name"].lower()
+        name_lower = owned["name"].lower()
         ok = False
 
         if "firework" in name_lower:
@@ -1550,11 +1747,11 @@ class Economy(commands.Cog):
         elif "peep" in name_lower:
             ok = await self._trigger_peephole(ctx)
         else:
-            await ctx.send(f"Used **{item['name']}**.")
+            await ctx.send(f"Used **{owned['name']}**.")
             ok = True
 
         if ok:
-            add_inventory_item_channel(ctx.guild.id, inv_channel_id, item["id"], -1)
+            add_inventory_item_channel(ctx.guild.id, inv_channel_id, owned["item_id"], -1)
 
     async def _trigger_fireworks(self, ctx: commands.Context) -> bool:
         """Reveal the caller's position in announcements."""
@@ -1831,9 +2028,8 @@ class Economy(commands.Cog):
             if qty <= 0:
                 await ctx.send(f"Quantity for `{pair}` must be greater than 0.")
                 continue
-            item = get_shop_item_by_name(ctx.guild.id, name_part)
-            if not item:
-                await ctx.send(f"Item `{name_part}` not found, skipping.")
+            item = await self._resolve_shop_item(ctx, name_part)
+            if item is None:
                 continue
             items_to_add.append((item["id"], item["name"], qty))
 
@@ -1863,14 +2059,17 @@ class Economy(commands.Cog):
 
     @commands.command(name="removeitem", aliases=["rmitem"])
     @commands.has_permissions(administrator=True)
-    async def removeitem(self, ctx: commands.Context, channel: discord.TextChannel, item_name: str, quantity: int = 1):
+    async def removeitem(self, ctx: commands.Context, channel: discord.TextChannel, *, text: str):
         """Remove items from a rolechat's inventory. Usage: .removeitem #rolechannel <item> [qty]"""
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send(f"Item `{item_name}` not found.")
-
+        query, quantity = _split_trailing_qty(text)
         if quantity <= 0:
             return await ctx.send("Quantity must be positive.")
+        if not query:
+            return await ctx.send("Usage: `.removeitem #rolechannel <item> [qty]`.")
+
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
 
         old_qty = add_inventory_item_channel(ctx.guild.id, channel.id, item["id"], 0)
         if old_qty == 0:
@@ -1882,7 +2081,7 @@ class Economy(commands.Cog):
 
     @commands.command(name="giveitem")
     @commands.has_permissions(administrator=True)
-    async def giveitem(self, ctx: commands.Context, member: discord.Member, item_name: str, quantity: int = 1):
+    async def giveitem(self, ctx: commands.Context, member: discord.Member, *, text: str):
         """Give items to a player. Usage: .giveitem @player <item> [qty]"""
         guild_data = load_guild_data(ctx.guild.id)
 
@@ -1903,19 +2102,22 @@ class Economy(commands.Cog):
         if not target_rc:
             return await ctx.send(f"Could not find a rolechat for {member.mention}.")
 
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send(f"Item `{item_name}` not found.")
-
+        query, quantity = _split_trailing_qty(text)
         if quantity <= 0:
             return await ctx.send("Quantity must be greater than 0.")
+        if not query:
+            return await ctx.send("Usage: `.giveitem @player <item> [qty]`.")
+
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
 
         new_qty = add_inventory_item_channel(ctx.guild.id, target_rc.id, item["id"], quantity)
         await ctx.send(f"Gave **{quantity}× {item['name']}** to {member.mention} in #{target_rc.name}. They now have **{new_qty}**.")
 
     @commands.command(name="removeitemplayer", aliases=["rip"])
     @commands.has_permissions(administrator=True)
-    async def removeitemplayer(self, ctx: commands.Context, member: discord.Member, item_name: str, quantity: int = 1):
+    async def removeitemplayer(self, ctx: commands.Context, member: discord.Member, *, text: str):
         """Remove items from a player's inventory. Usage: .removeitemplayer @player <item> [qty]"""
         guild_data = load_guild_data(ctx.guild.id)
 
@@ -1936,12 +2138,15 @@ class Economy(commands.Cog):
         if not target_rc:
             return await ctx.send(f"Could not find a rolechat for {member.mention}.")
 
-        item = get_shop_item_by_name(ctx.guild.id, item_name)
-        if not item:
-            return await ctx.send(f"Item `{item_name}` not found.")
-
+        query, quantity = _split_trailing_qty(text)
         if quantity <= 0:
             return await ctx.send("Quantity must be greater than 0.")
+        if not query:
+            return await ctx.send("Usage: `.removeitemplayer @player <item> [qty]`.")
+
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
 
         old_qty = add_inventory_item_channel(ctx.guild.id, target_rc.id, item["id"], 0)
         if old_qty == 0:
