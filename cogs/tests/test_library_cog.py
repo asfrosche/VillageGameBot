@@ -72,6 +72,22 @@ class TestGameLibrary:
     def test_overseersearchmodal_class(self):
         assert hasattr(library_cog, 'OverseerSearchModal')
 
+    def test_gamesearch_exists(self):
+        assert hasattr(library_cog.GameLibrary, 'gamesearch')
+
+    def test_gamesearch_has_help(self):
+        method = getattr(library_cog.GameLibrary, 'gamesearch')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    def test_gamesearchn_exists(self):
+        assert hasattr(library_cog.GameLibrary, 'gamesearchn')
+
+    def test_gamesearchn_has_help(self):
+        method = getattr(library_cog.GameLibrary, 'gamesearchn')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
 
 SEED_DATA = [
     (1, 'game-one',   1, 'Villager',   1, 'Alice',   100, 'Asfro', 691, 0, 1, 0),
@@ -227,3 +243,361 @@ class TestLibraryDatabaseOverseer:
         assert history[0]["game_name"] == "game-four"
         assert history[0]["team"] == 1
         assert history[0]["mvp"] is False
+
+
+class TestParticipationIncludesOverseered:
+    """Overseered (hosted) games must count toward participation stats."""
+
+    @pytest.fixture(autouse=True)
+    def setup_db(self, tmp_path):
+        db_path = os.path.join(tmp_path, "test_participation.db")
+        self.db = seed_db(db_path)
+        # Game 6: Gear (365) oversees/hosts it without playing or sponsoring it.
+        with self.db._connect() as conn:
+            conn.execute(
+                f"INSERT INTO roles ({COLUMNS}) VALUES ({PLACEHOLDERS})",
+                (6, 'game-six', 1, 'Villager', 1, 'Nora', 113, 'Zed', 999, 1, 1, 0),
+            )
+            conn.execute(
+                f"INSERT INTO game_hosts ({HOST_COLUMNS}) VALUES ({','.join(['?'] * 4)})",
+                (6, 'Gear', 365, 1),
+            )
+            conn.commit()
+
+    def test_games_played_includes_hosted_games(self):
+        games = self.db.get_games_played(365)
+        assert 6 in games
+
+    def test_games_played_hosted_games_keeps_order(self):
+        games = self.db.get_games_played(365)
+        assert games == [3, 6]  # hosted game 3 + hosted game 6
+
+    def test_games_played_player_games_unaffected(self):
+        games = self.db.get_games_played(100)
+        assert games == [1, 2, 4]
+
+    def test_total_participations_includes_hosted_games(self):
+        stats = self.db.get_player_stats(365)
+        assert stats["total_participations"] == 2  # sponsored game 3 + hosted game 6
+
+    def test_total_participations_union_dedupes(self):
+        stats = self.db.get_player_stats(691)
+        assert stats["total_participations"] == 4  # sponsor+host overlap in games 1, 2, 4, 5
+
+
+class TestRelationBetween:
+    """`.relations @player` shows pairwise relations between two players.
+
+    Alice (100) and Bob (101) are never on the same team (games 1, 2, 4);
+    Bob won game 1 while Alice lost. Alice and Eve (104) share team 1 in game 1
+    (both losses).
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_db(self, tmp_path):
+        db_path = os.path.join(tmp_path, "test_relation_between.db")
+        self.db = seed_db(db_path)
+
+    def test_no_shared_games_all_zeros(self):
+        row = self.db.get_relation_between(100, 99999)
+        assert row["same_wins"] == row["same_games"] == 0
+        assert row["diff_games"] == row["my_wins_vs"] == row["their_wins_vs"] == 0
+
+    def test_teammate_counts(self):
+        row = self.db.get_relation_between(100, 104)
+        assert row["same_games"] == 1
+        assert row["same_wins"] == 0
+        assert row["diff_games"] == 0
+        assert row["my_wins_vs"] == 0
+        assert row["their_wins_vs"] == 0
+
+    def test_opponents_counts(self):
+        row = self.db.get_relation_between(100, 101)
+        assert row["same_games"] == 0
+        assert row["same_wins"] == 0
+        assert row["diff_games"] == 3
+        assert row["my_wins_vs"] == 0
+        assert row["their_wins_vs"] == 1
+
+    def test_symmetric_opponents(self):
+        row = self.db.get_relation_between(101, 100)
+        assert row["diff_games"] == 3
+        assert row["my_wins_vs"] == 1
+        assert row["their_wins_vs"] == 0
+
+
+class TestGameSearch:
+    """Tests for `.gamesearch` query parsing, evaluation, and the summary source."""
+
+    # Seed-data compositions:
+    # game 1: Village 4, Evil 1        -> winners [2]
+    # game 2: Village 1, Evil 1, Neutral 1 -> winners [1, 2]
+    # game 3: Village 1, Evil 1, RK 1  -> winners [1, 3]
+    # game 4: Village 1, Evil 1, Neutral 1 -> winners [4]
+    # game 5: Village 1, Evil 1, RK 1  -> winners [2, 3]
+
+    @pytest.fixture(autouse=True)
+    def setup_db(self, tmp_path):
+        db_path = os.path.join(tmp_path, "test_gamesearch.db")
+        self.db = seed_db(db_path)
+        self.summaries = self.db.get_all_game_summaries()
+        self.by_num = {g["game_number"]: g for g in self.summaries}
+
+    def test_all_game_summaries_sorted_newest_first(self):
+        nums = [g["game_number"] for g in self.summaries]
+        assert nums == [5, 4, 3, 2, 1]
+
+    def test_all_game_summaries_team_counts(self):
+        g5 = self.by_num[5]
+        assert g5["team_counts"][1] == 1
+        assert g5["team_counts"][2] == 1
+        assert g5["team_counts"][3] == 1
+        assert g5["total_roles"] == 3
+        assert sorted(g5["winning_teams"]) == [2, 3]
+
+    def test_parse_percent_condition(self):
+        terms, err = library_cog.parse_game_search_query("Village > 69% AND Evil > 22% AND RK Win")
+        assert err is None
+        assert terms[0] == {"kind": "percent", "team": 1, "op": "gt", "value": 69.0}
+        assert terms[1] == "AND"
+        assert terms[2] == {"kind": "percent", "team": 2, "op": "gt", "value": 22.0}
+        assert terms[3] == "AND"
+        assert terms[4] == {"kind": "outcome", "team": 3, "outcome": "win"}
+
+    def test_parse_or_and_less_than(self):
+        terms, err = library_cog.parse_game_search_query("Neutral Win OR Evil < 40%")
+        assert err is None
+        assert terms[0] == {"kind": "outcome", "team": 4, "outcome": "win"}
+        assert terms[1] == "OR"
+        assert terms[2] == {"kind": "percent", "team": 2, "op": "lt", "value": 40.0}
+
+    def test_parse_random_killer_two_words(self):
+        terms, err = library_cog.parse_game_search_query("Random Killer Win")
+        assert err is None
+        assert terms == [{"kind": "outcome", "team": 3, "outcome": "win"}]
+
+    def test_parse_no_query_returns_usage_error(self):
+        terms, err = library_cog.parse_game_search_query("")
+        assert terms is None and err is not None
+
+    def test_parse_single_team_invalid(self):
+        terms, err = library_cog.parse_game_search_query("Village")
+        assert terms is None and "Malformed condition" in err
+
+    def test_parse_missing_percentage(self):
+        terms, err = library_cog.parse_game_search_query("Village >")
+        assert terms is None and "Missing percentage" in err
+
+    def test_parse_unknown_token(self):
+        terms, err = library_cog.parse_game_search_query("Village > 50% AND Bogus Win")
+        assert terms is None and "Unknown token" in err
+
+    def test_parse_out_of_range_percentage(self):
+        terms, err = library_cog.parse_game_search_query("Village > 150%")
+        assert terms is None and "between 0 and 100" in err
+
+    def test_parse_village_count_condition(self):
+        terms, err = library_cog.parse_game_search_query("VillageCount > 3")
+        assert err is None
+        assert terms == [{"kind": "count", "team": 1, "op": "gt", "value": 3.0}]
+
+    def test_parse_total_players_condition(self):
+        terms, err = library_cog.parse_game_search_query("Players > 9")
+        assert err is None
+        assert terms == [{"kind": "count", "team": None, "op": "gt", "value": 9.0}]
+
+    def test_parse_count_aliases_and_joiners(self):
+        terms, err = library_cog.parse_game_search_query("villages > 1 AND neutralcount < 2 OR totalplayers < 4")
+        assert err is None
+        assert terms[0] == {"kind": "count", "team": 1, "op": "gt", "value": 1.0}
+        assert terms[2] == {"kind": "count", "team": 4, "op": "lt", "value": 2.0}
+        assert terms[4] == {"kind": "count", "team": None, "op": "lt", "value": 4.0}
+
+    def test_parse_count_out_of_range(self):
+        terms, err = library_cog.parse_game_search_query("VillageCount > 5000")
+        assert terms is None and "between 0 and 1000" in err
+
+    def test_parse_count_rejects_percentage(self):
+        terms, err = library_cog.parse_game_search_query("VillageCount > 20%")
+        assert terms is None and "Percentages don't apply" in err
+
+    def test_parse_count_rejects_outcome(self):
+        terms, err = library_cog.parse_game_search_query("Players Win")
+        assert terms is None and "role-count filter" in err
+
+    def test_parse_count_missing_number(self):
+        terms, err = library_cog.parse_game_search_query("Players >")
+        assert terms is None and "Missing number" in err
+
+    def test_parse_count_malformed(self):
+        terms, err = library_cog.parse_game_search_query("EvilCount")
+        assert terms is None and "Malformed condition" in err
+
+    def test_parse_count_mixed_with_percent_and_outcome(self):
+        terms, err = library_cog.parse_game_search_query("VillageCount > 3 AND Village > 50% AND RK Win")
+        assert err is None
+        assert terms[0] == {"kind": "count", "team": 1, "op": "gt", "value": 3.0}
+        assert terms[2] == {"kind": "percent", "team": 1, "op": "gt", "value": 50.0}
+        assert terms[4] == {"kind": "outcome", "team": 3, "outcome": "win"}
+
+    def test_usage_documents_count_variables(self):
+        usage = library_cog.GAME_SEARCH_USAGE
+        assert "VillageCount" in usage
+        assert "EvilCount" in usage
+        assert "RKCount" in usage
+        assert "NeutralCount" in usage
+        assert "Players" in usage
+        assert "VillageCount > 15 AND Players > 25" in usage
+
+    def test_parse_leading_joiner(self):
+        terms, err = library_cog.parse_game_search_query("AND Village Win")
+        assert terms is None and "Unexpected" in err
+
+    def test_parse_trailing_joiner(self):
+        terms, err = library_cog.parse_game_search_query("Village Win OR")
+        assert terms is None and "cannot end" in err
+
+    def test_parse_missing_joiner(self):
+        terms, err = library_cog.parse_game_search_query("Village Win Evil Win")
+        assert terms is None and "Missing `AND` or `OR`" in err
+
+    def test_evaluate_percentage_gt(self):
+        terms, err = library_cog.parse_game_search_query("Village > 69%")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [1]
+
+    def test_evaluate_percentage_lt(self):
+        terms, err = library_cog.parse_game_search_query("Village < 40%")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [5, 4, 3, 2]
+
+    def test_evaluate_village_count_gt(self):
+        terms, err = library_cog.parse_game_search_query("VillageCount > 3")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [1]
+
+    def test_evaluate_neutral_count_gt(self):
+        terms, err = library_cog.parse_game_search_query("NeutralCount > 0")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [4, 2]
+
+    def test_evaluate_rk_count_gt(self):
+        terms, err = library_cog.parse_game_search_query("RKCount > 0")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [5, 3]
+
+    def test_evaluate_evil_count_lt(self):
+        terms, err = library_cog.parse_game_search_query("EvilCount < 2")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [5, 4, 3, 2, 1]
+
+    def test_evaluate_total_players(self):
+        gt_terms, err = library_cog.parse_game_search_query("Players > 4")
+        assert err is None
+        lt_terms, err = library_cog.parse_game_search_query("Players < 4")
+        assert err is None
+        gt = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(gt_terms, g)]
+        lt = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(lt_terms, g)]
+        assert gt == [1]
+        assert lt == [5, 4, 3, 2]
+
+    def test_evaluate_count_mixed_with_outcome(self):
+        terms, err = library_cog.parse_game_search_query("VillageCount > 1 AND Evil Win")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [1]
+
+    def test_count_unaffected_by_no_neutrals(self):
+        terms, err = library_cog.parse_game_search_query("NeutralCount > 0 AND Players > 2")
+        assert err is None
+        std = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        no_n = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g, no_neutrals=True)]
+        assert std == no_n == [4, 2]
+
+    def test_condition_matches_count_on_empty_game(self):
+        game = {"game_number": 99, "game_name": "empty", "team_counts": {}, "total_roles": 0, "winning_teams": []}
+        assert library_cog.evaluate_game_search([{"kind": "count", "team": None, "op": "lt", "value": 1.0}], game) is True
+        assert library_cog.evaluate_game_search([{"kind": "count", "team": None, "op": "gt", "value": 0.0}], game) is False
+        assert library_cog.evaluate_game_search([{"kind": "count", "team": 1, "op": "gt", "value": 0.0}], game) is False
+
+    def test_evaluate_outcome_win(self):
+        terms, err = library_cog.parse_game_search_query("RK Win")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [5, 3]
+
+    def test_evaluate_outcome_lose(self):
+        terms, err = library_cog.parse_game_search_query("Evil Lose")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [4, 3]
+
+    def test_evaluate_and_joiner(self):
+        terms, err = library_cog.parse_game_search_query("Village Win AND Evil Win")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [2]
+
+    def test_evaluate_or_joiner(self):
+        terms, err = library_cog.parse_game_search_query("Village > 69% OR RK Win")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        assert matches == [5, 3, 1]
+
+    def test_evaluate_and_binds_tighter_than_or(self):
+        terms, err = library_cog.parse_game_search_query("Neutral Win OR Evil Win AND Village < 1%")
+        assert err is None
+        matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        # AND binds tighter: NeutralWin OR (EvilWin AND Village<1%) -> only the Neutral win.
+        assert matches == [4]
+
+    def test_condition_matches_empty_total_roles(self):
+        game = {"game_number": 99, "game_name": "empty", "team_counts": {}, "total_roles": 0, "winning_teams": []}
+        assert library_cog.evaluate_game_search([{"kind": "percent", "team": 1, "op": "lt", "value": 50.0}], game) is True
+        assert library_cog.evaluate_game_search([{"kind": "percent", "team": 1, "op": "gt", "value": 0.0}], game) is False
+
+    def test_game_search_total_standard(self):
+        game = self.by_num[2]
+        assert library_cog._game_search_total(game, no_neutrals=False) == 3
+
+    def test_game_search_total_excludes_neutrals(self):
+        game = self.by_num[2]
+        assert library_cog._game_search_total(game, no_neutrals=True) == 2
+
+    def test_gamesearchn_recalculates_percentages(self):
+        standard, err = library_cog.parse_game_search_query("Village > 40%")
+        assert err is None
+        no_n, err = library_cog.parse_game_search_query("Village > 40%")
+        assert err is None
+        std_matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(standard, g)]
+        no_n_matches = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(no_n, g, no_neutrals=True)]
+        # Standard: only game 1 (Village 80%). No-neutrals also boosts games 2/4 from 33% -> 50%.
+        assert std_matches == [1]
+        assert no_n_matches == [4, 2, 1]
+
+    def test_gamesearchn_keeps_outcomes_unchanged(self):
+        terms, err = library_cog.parse_game_search_query("Neutral Win")
+        assert err is None
+        std = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g)]
+        no_n = [g["game_number"] for g in self.summaries if library_cog.evaluate_game_search(terms, g, no_neutrals=True)]
+        assert std == no_n == [4]
+
+    def test_format_result_no_neutrals_omits_neutral(self):
+        line = library_cog._format_game_search_result(self.by_num[2], no_neutrals=True)
+        assert "V 50%" in line and "E 50%" in line
+        assert "⚖️ N " not in line
+
+    def test_format_result_shows_role_count(self):
+        line = library_cog._format_game_search_result(self.by_num[2])
+        assert "👥 3 roles" in line
+
+    def test_format_result_no_neutrals_keeps_empty_total(self):
+        game = {"game_number": 99, "game_name": "empty", "team_counts": {}, "total_roles": 0, "winning_teams": []}
+        line = library_cog._format_game_search_result(game, no_neutrals=True)
+        assert "V 0% (0)" in line

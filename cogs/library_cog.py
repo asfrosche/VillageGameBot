@@ -30,6 +30,7 @@ LIBRARIAN_IDS = [
     629760692660207626,  # valerio
     514728129395294210,  # Edoardo64
     760039727314239488,  # m.p
+    677235023270772745,  # richi 
 ] 
 # LIBRARIAN_IDS = [321117543378976771, 365954082281881600, 887214529170268190, 1234829080898310197, 320504417520582664, 197169839863758848, 450772749829537793, 570023325653270548, 691180618402234399, 538814265599983617, 319848617814917120, 556911428712398869, 9556911428712398869, 629760692660207626, 514728129395294210, 760039727314239488]
 EMBED_COLOR = 0xff3fb9
@@ -62,6 +63,467 @@ def add_fields_paginated(embed: discord.Embed, name: str, lines: list, inline: b
         value="".join(chunk) or "*No content.*",
         inline=inline,
     )
+
+
+# ============================================================================
+# GAME SEARCH — parsing & evaluation for `.gamesearch`
+# ============================================================================
+
+SEARCH_TEAM_ALIASES = {
+    "village": 1,
+    "evil": 2,
+    "rk": 3,
+    "randomkiller": 3,
+    "random": 3,
+    "neutral": 4,
+}
+
+SEARCH_TEAM_EMOJI = {1: "🏘️", 2: "😈", 3: "🔪", 4: "⚖️"}
+
+SEARCH_TEAM_ABBR = {1: "V", 2: "E", 3: "RK", 4: "N"}
+
+SEARCH_COUNT_ALIASES = {
+    "villagecount": 1,
+    "villages": 1,
+    "villagecounts": 1,
+    "evilcount": 2,
+    "evils": 2,
+    "evilcounts": 2,
+    "rkcount": 3,
+    "randomkillercount": 3,
+    "randomkillercounts": 3,
+    "neutralcount": 4,
+    "neutrals": 4,
+    "neutralcounts": 4,
+}
+
+SEARCH_PLAYER_ALIASES = {"players", "playercount", "totalplayers", "total", "totalcount"}
+
+COUNT_DISPLAY_NAMES = {
+    1: "Village count",
+    2: "Evil count",
+    3: "RK count",
+    4: "Neutral count",
+}
+
+MAX_ROLE_COUNT = 1000
+
+GAME_SEARCH_USAGE = (
+    "**Usage:** `.gamesearch <condition> [AND|OR <condition> ...]`\n"
+    "`.gamesearchn` uses the same syntax but recalculates percentages excluding Neutral roles (role counts stay the same).\n\n"
+    "**Conditions (percentages):**\n"
+    "• `<Team> > <percent>%` — team made up more than `<percent>%` of the roles\n"
+    "• `<Team> < <percent>%` — team made up less than `<percent>%` of the roles\n"
+    "• `<Team> Win` — team was among the winners\n"
+    "• `<Team> Lose` — team was not among the winners\n\n"
+    "**Conditions (role counts):**\n"
+    "• `<Variable> > <count>` — variable has more than `<count>` roles\n"
+    "• `<Variable> < <count>` — variable has fewer than `<count>` roles\n\n"
+    "**Teams:** `Village`, `Evil`, `RK`, `Neutral`\n"
+    "**Role-count variables:** `VillageCount`, `EvilCount`, `RKCount`, `NeutralCount`, `Players` (total roles in the game)\n"
+    "*(use `AND` / `OR` between conditions)*\n\n"
+    "**Stats lines use abbreviations:** `V` = Village · `E` = Evil · `RK` = Random Killer · `N` = Neutral\n\n"
+    "**Examples:**\n"
+    "• `.gamesearch Village > 69% AND Evil > 22% AND RK Win`\n"
+    "• `.gamesearchn Village > 69% AND Evil > 22% AND RK Win`\n"
+    "• `.gamesearch Evil > 40% OR Neutral Win`\n"
+    "• `.gamesearch Village Lose AND Evil < 30%`\n"
+    "• `.gamesearch VillageCount > 15 AND Players > 25`\n"
+    "• `.gamesearch NeutralCount > 2 OR RKCount < 1`"
+)
+
+
+def _tokenize_game_search(query: str):
+    """Split a `.gamesearch` query into tagged tokens.
+
+    Returns (tokens, error). Tokens are tuples like
+    ('team', team_id), ('op', 'gt'|'lt'), ('num', value),
+    ('win', None), ('lose', None), ('and', None), ('or', None)."""
+    tokens = []
+    words = query.strip().split()
+    i = 0
+    while i < len(words):
+        w = words[i]
+        low = w.lower()
+
+        if low in ("and", "or"):
+            tokens.append((low, None))
+            i += 1
+            continue
+
+        if low == "random" and i + 1 < len(words) and words[i + 1].lower() == "killer":
+            tokens.append(("team", 3))
+            i += 2
+            continue
+
+        team_id = SEARCH_TEAM_ALIASES.get(low)
+        if team_id is not None:
+            tokens.append(("team", team_id))
+            i += 1
+            continue
+
+        count_team = SEARCH_COUNT_ALIASES.get(low)
+        if count_team is not None:
+            tokens.append(("count", count_team))
+            i += 1
+            continue
+
+        if low in SEARCH_PLAYER_ALIASES:
+            tokens.append(("total", None))
+            i += 1
+            continue
+
+        if low in ("win", "won"):
+            tokens.append(("win", None))
+            i += 1
+            continue
+
+        if low in ("lose", "lost", "loss"):
+            tokens.append(("lose", None))
+            i += 1
+            continue
+
+        if w.startswith(">") or w.startswith("<"):
+            op = "gt" if w.startswith(">") else "lt"
+            rest = w[1:].strip()
+            pct = False
+            value = None
+            if rest:
+                if rest.endswith("%"):
+                    pct = True
+                    rest = rest[:-1]
+                try:
+                    value = float(rest)
+                except ValueError:
+                    return None, f"❌ Invalid number `{w}` — use a number like `69`, `69%` or `20`."
+            tokens.append(("op", op))
+            if value is not None:
+                tokens.append(("num", value, pct))
+            i += 1
+            continue
+
+        if w == "%":
+            if tokens and tokens[-1][0] == "num":
+                kind, val, _ = tokens[-1]
+                tokens[-1] = (kind, val, True)
+                i += 1
+                continue
+            return None, "❌ A bare `%` needs a number before it, e.g. `69%`."
+
+        pct = False
+        candidate = w
+        if candidate.endswith("%"):
+            pct = True
+            candidate = candidate[:-1]
+        try:
+            num = float(candidate)
+            tokens.append(("num", num, pct))
+            i += 1
+            continue
+        except ValueError:
+            pass
+
+        return None, (
+            f"❌ Unknown token `{w}`\n\n"
+            f"Valid teams: `Village`, `Evil`, `RK`, `Neutral`\n"
+            f"Role-count variables: `VillageCount`, `EvilCount`, `RKCount`, `NeutralCount`, `Players`\n"
+            f"Joiners: `AND`, `OR`\n\n{GAME_SEARCH_USAGE}"
+        )
+
+    return tokens, None
+
+
+def parse_game_search_query(query: str):
+    """Parse a `.gamesearch` query into an evaluable term list.
+
+    Returns (terms, error). `terms` is a list alternating between
+    condition dicts ({kind: 'percent'|'outcome', team, ...}) and the
+    joiners 'AND' / 'OR'. On failure `terms` is None and `error` is a
+    human-readable message to show the user."""
+    tokens, err = _tokenize_game_search(query)
+    if err:
+        return None, err
+
+    terms = []
+    expect_condition = True
+    i = 0
+    n = len(tokens)
+    while i < n:
+        kind = tokens[i][0]
+
+        if kind in ("and", "or"):
+            if expect_condition:
+                return None, f"❌ Unexpected `{kind.upper()}` — joiners go between conditions.\n\n{GAME_SEARCH_USAGE}"
+            terms.append(kind.upper())
+            expect_condition = True
+            i += 1
+            continue
+
+        if not expect_condition:
+            return None, f"❌ Missing `AND` or `OR` between conditions.\n\n{GAME_SEARCH_USAGE}"
+
+        if kind == "team":
+            team_id = tokens[i][1]
+            display = TEAMS.get(team_id, "Team")
+
+            if i + 1 < n and tokens[i + 1][0] in ("win", "lose"):
+                outcome = "win" if tokens[i + 1][0] == "win" else "lose"
+                terms.append({"kind": "outcome", "team": team_id, "outcome": outcome})
+                expect_condition = False
+                i += 2
+                continue
+
+            if i + 2 < n and tokens[i + 1][0] == "op" and tokens[i + 2][0] == "num":
+                op = tokens[i + 1][1]
+                value = tokens[i + 2][1]
+                if not (0 <= value <= 100):
+                    return None, f"❌ Percentage must be between 0 and 100, got `{value:g}`."
+                terms.append({"kind": "percent", "team": team_id, "op": op, "value": value})
+                expect_condition = False
+                i += 3
+                continue
+
+            if i + 1 < n and tokens[i + 1][0] == "op":
+                arrow = ">" if tokens[i + 1][1] == "gt" else "<"
+                return None, (
+                    f"❌ Missing percentage after `{display} {arrow}`.\n\n"
+                    f"Example: `.gamesearch {display} {arrow} 50%`"
+                )
+
+            return None, (
+                f"❌ Malformed condition for **{display}**.\n\n"
+                f"Use one of:\n"
+                f"• `{display} > 50%`\n"
+                f"• `{display} < 50%`\n"
+                f"• `{display} Win`\n"
+                f"• `{display} Lose`"
+            )
+
+        if kind in ("count", "total"):
+            team_id = tokens[i][1] if kind == "count" else None
+            display = COUNT_DISPLAY_NAMES.get(team_id, "Total player count")
+
+            if i + 1 < n and tokens[i + 1][0] in ("win", "lose"):
+                return None, (
+                    f"❌ `{display}` is a role-count filter — `Win`/`Lose` only applies to teams.\n\n"
+                    f"Example: `.gamesearch {display} > 20`"
+                )
+
+            if i + 2 < n and tokens[i + 1][0] == "op" and tokens[i + 2][0] == "num":
+                op = tokens[i + 1][1]
+                value = tokens[i + 2][1]
+                if tokens[i + 2][2]:
+                    return None, (
+                        f"❌ Percentages don't apply to `{display}` — use a plain number.\n\n"
+                        f"Example: `.gamesearch {display} > 20`"
+                    )
+                if not (0 <= value <= MAX_ROLE_COUNT):
+                    return None, f"❌ Role count must be between 0 and {MAX_ROLE_COUNT}, got `{value:g}`."
+                terms.append({"kind": "count", "team": team_id, "op": op, "value": value})
+                expect_condition = False
+                i += 3
+                continue
+
+            if i + 1 < n and tokens[i + 1][0] == "op":
+                arrow = ">" if tokens[i + 1][1] == "gt" else "<"
+                return None, (
+                    f"❌ Missing number after `{display} {arrow}`.\n\n"
+                    f"Example: `.gamesearch {display} {arrow} 20`"
+                )
+
+            return None, (
+                f"❌ Malformed condition for **{display}**.\n\n"
+                f"Use `{display} > 20` or `{display} < 20`."
+            )
+
+        return None, f"❌ Expected a team (`Village`, `Evil`, `RK`, `Neutral`) or a role-count filter here.\n\n{GAME_SEARCH_USAGE}"
+
+    if not terms:
+        return None, f"❌ The query has no valid conditions.\n\n{GAME_SEARCH_USAGE}"
+    if terms[-1] in ("AND", "OR"):
+        return None, f"❌ The query cannot end with `{terms[-1]}`.\n\n{GAME_SEARCH_USAGE}"
+    return terms, None
+
+
+def _game_search_total(game: dict, no_neutrals: bool = False) -> int:
+    """Total roles used as the percentage denominator.
+
+    In no-neutrals mode the Neutral roster is excluded, so Village/Evil/RK
+    percentages are recalculated over the remaining pool."""
+    total = game["total_roles"]
+    if no_neutrals:
+        total = total - game["team_counts"].get(4, 0)
+    return total
+
+
+def _game_condition_matches(cond: dict, game: dict, no_neutrals: bool = False) -> bool:
+    """Evaluate a single parsed condition against a game stats dict."""
+    if cond["kind"] == "percent":
+        total = _game_search_total(game, no_neutrals)
+        pct = (game["team_counts"].get(cond["team"], 0) / total * 100) if total else 0.0
+        if cond["op"] == "gt":
+            return pct > cond["value"]
+        return pct < cond["value"]
+
+    if cond["kind"] == "count":
+        value = game["total_roles"] if cond["team"] is None else game["team_counts"].get(cond["team"], 0)
+        if cond["op"] == "gt":
+            return value > cond["value"]
+        return value < cond["value"]
+
+    won = cond["team"] in game["winning_teams"]
+    return won if cond["outcome"] == "win" else not won
+
+
+def evaluate_game_search(terms: list, game: dict, no_neutrals: bool = False) -> bool:
+    """Evaluate parsed terms against a game with AND binding tighter than OR."""
+    out = []
+    op_stack = []
+    precedence = {"AND": 2, "OR": 1}
+    for item in terms:
+        if isinstance(item, dict):
+            out.append(_game_condition_matches(item, game, no_neutrals=no_neutrals))
+        else:
+            while op_stack and precedence[op_stack[-1]] >= precedence[item]:
+                out.append(op_stack.pop())
+            op_stack.append(item)
+    while op_stack:
+        out.append(op_stack.pop())
+
+    stack = []
+    for tok in out:
+        if isinstance(tok, bool):
+            stack.append(tok)
+        elif tok == "AND":
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(a and b)
+        else:
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(a or b)
+    return stack[0] if stack else True
+
+
+def _build_game_search_wins_summary(results: list) -> str:
+    """Count team wins across all matching games (full team names)."""
+    wins = {team_id: 0 for team_id in (1, 2, 3, 4)}
+    for game in results:
+        for team_id in game.get("winning_teams", []):
+            if team_id in wins:
+                wins[team_id] += 1
+    parts = [
+        f"{SEARCH_TEAM_EMOJI.get(t, '')}{TEAMS.get(t, f'Team {t}')} {wins[t]}"
+        for t in (1, 2, 3, 4)
+    ]
+    return "🏆 Wins: " + " · ".join(parts)
+
+
+def _format_game_search_result(game: dict, no_neutrals: bool = False) -> str:
+    """Render a single game with its compact stats line for the results embed."""
+    team_parts = []
+    for team_id in (1, 2, 3, 4):
+        if no_neutrals and team_id == 4:
+            continue
+        cnt = game["team_counts"].get(team_id, 0)
+        pct = (cnt / _game_search_total(game, no_neutrals) * 100) if _game_search_total(game, no_neutrals) else 0
+        team_parts.append(
+            f"{SEARCH_TEAM_EMOJI.get(team_id, '')} "
+            f"{SEARCH_TEAM_ABBR.get(team_id, '?')} {pct:.0f}% ({cnt})"
+        )
+
+    if game["winning_teams"]:
+        winner_names = ", ".join(
+            f"{SEARCH_TEAM_EMOJI.get(t, '')}{TEAMS.get(t, f'Team {t}')}"
+            for t in game["winning_teams"]
+        )
+        winner_text = f"🏆 **Winners:** {winner_names}"
+    else:
+        winner_text = "🏆 **Winners:** _not set_"
+
+    return (
+        f"**#{game['game_number']} — {game['game_name'].replace('-', ' ').title()}** · 👥 {game['total_roles']} roles\n"
+        f"{' · '.join(team_parts)}\n"
+        f"{winner_text}"
+    )
+
+
+class GameSearchResultView(discord.ui.View):
+    """Paginated result view for `.gamesearch`."""
+
+    PAGE_SIZE = 8
+
+    def __init__(self, results: list, query: str, no_neutrals: bool = False):
+        super().__init__(timeout=300)
+        self.results = results
+        self.query = query
+        self.no_neutrals = no_neutrals
+        self.page = 0
+        self.max_page = max(0, (len(results) - 1) // self.PAGE_SIZE)
+        self._rebuild_buttons()
+
+    def _rebuild_buttons(self):
+        for child in list(self.children):
+            self.remove_item(child)
+        self.prev_btn = discord.ui.Button(
+            label="◀ Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page == 0,
+            row=0,
+        )
+        self.prev_btn.callback = self._prev_page
+        self.add_item(self.prev_btn)
+        self.add_item(discord.ui.Button(
+            label=f"Page {self.page + 1}/{self.max_page + 1}",
+            style=discord.ButtonStyle.secondary,
+            disabled=True,
+            row=0,
+        ))
+        self.next_btn = discord.ui.Button(
+            label="Next ▶",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.page >= self.max_page,
+            row=0,
+        )
+        self.next_btn.callback = self._next_page
+        self.add_item(self.next_btn)
+
+    def build_embed(self) -> discord.Embed:
+        start = self.page * self.PAGE_SIZE
+        items = self.results[start:start + self.PAGE_SIZE]
+        embed = discord.Embed(
+            title=f"🔍 Game Search Results — {len(self.results)} match(es)",
+            color=EMBED_COLOR,
+        )
+        embed.description = "\n".join(
+        [
+            f"Query: `{self.query}`"
+            + (" *(percentages exclude Neutrals)*" if self.no_neutrals else ""),
+            _build_game_search_wins_summary(self.results),
+            "",
+            *(
+                _format_game_search_result(g, no_neutrals=self.no_neutrals)
+                for g in items
+            ),
+        ]
+    )
+        embed.set_footer(
+            text=f"{EMBED_FOOTER_TEXT} | Tip: use `.lib search <game#>` to view a game's full roles",
+            icon_url=EMBED_FOOTER_ICON,
+        )
+        return embed
+
+    async def _prev_page(self, interaction: discord.Interaction):
+        if self.page > 0:
+            self.page -= 1
+            self._rebuild_buttons()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _next_page(self, interaction: discord.Interaction):
+        if self.page < self.max_page:
+            self.page += 1
+            self._rebuild_buttons()
+            await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
 # ============================================================================
 # DATABASE CLASS
@@ -409,6 +871,50 @@ class LibraryDatabase:
             winning_teams = [row[0] for row in cursor.fetchall()]
 
         return {"team_counts": team_counts, "total_roles": total_roles, "winning_teams": winning_teams}
+
+    def get_all_game_summaries(self) -> List[dict]:
+        """Return stats dicts for every recorded game, newest first.
+
+        Used by `.gamesearch`. Percentages are computed over all roles in a
+        game (including bonus roles), matching the in-game role list;
+        `winning_teams` holds numeric team ids."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT game_number, team, COUNT(*) AS cnt
+                FROM roles
+                GROUP BY game_number, team
+            """)
+            team_map = {}
+            for row in cursor.fetchall():
+                team_map.setdefault(row["game_number"], {})[row["team"]] = row["cnt"]
+
+            cursor.execute("""
+                SELECT game_number, COUNT(*) AS total
+                FROM roles
+                GROUP BY game_number
+            """)
+            totals = {row["game_number"]: row["total"] for row in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT DISTINCT game_number, team
+                FROM roles
+                WHERE win = 1
+            """)
+            winners = {}
+            for row in cursor.fetchall():
+                winners.setdefault(row["game_number"], []).append(row["team"])
+
+        summaries = []
+        for game_number, game_name in self.get_all_games():
+            summaries.append({
+                "game_number": game_number,
+                "game_name": game_name or f"Game {game_number}",
+                "team_counts": team_map.get(game_number, {}),
+                "total_roles": totals.get(game_number, 0),
+                "winning_teams": winners.get(game_number, []),
+            })
+        return summaries
 
     def get_hosts_for_game(self, game_number: int):
         """Return host names for a game."""
@@ -792,12 +1298,18 @@ class LibraryDatabase:
             sr = cursor.fetchone()
 
             # Unique participations — counts a game only once even if the person
-            # was both player AND sponsor in the same game.
+            # was both player AND sponsor in the same game. Overseered (hosted)
+            # games count toward participation too.
             cursor.execute("""
                 SELECT COUNT(DISTINCT game_number)
-                FROM roles
-                WHERE (player_id = ? OR sponsor_id = ?) AND count = 1 AND team != 5
-            """, (player_id, player_id))
+                FROM (
+                    SELECT game_number FROM roles
+                    WHERE (player_id = ? OR sponsor_id = ?) AND count = 1 AND team != 5
+                    UNION
+                    SELECT game_number FROM game_hosts
+                    WHERE host_id = ? AND count = 1
+                )
+            """, (player_id, player_id, player_id))
             total_participations = cursor.fetchone()[0]
 
             # Total counted non-bonus games in the database
@@ -1005,19 +1517,39 @@ class LibraryDatabase:
         return stats
 
     def get_winrate_stats(self) -> dict:
-        """Return win/loss totals and winrate per team."""
+        """Return win/loss totals and winrate per team.
+
+        Team roles (Village/Evil/RK) are counted per game: a team win marks
+        every role on that team in the DB, so totals and wins use distinct
+        game numbers. Neutrals win as individuals, so they stay per role.
+        Each entry carries total_games (the shared counted game pool) for the
+        split display.
+        """
         with self._connect() as conn:
             cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(DISTINCT game_number) AS total_games "
+                "FROM roles WHERE count = 1 AND team != 5"
+            )
+            total_games = cursor.fetchone()["total_games"]
             stats = {}
             for team_id, team_name in TEAMS.items():
                 if team_id == 5:
                     continue
-                cursor.execute("""
-                    SELECT COUNT(*) AS total,
-                        SUM(CASE WHEN win = 1 THEN 1 ELSE 0 END) AS wins
-                    FROM roles
-                    WHERE team = ? AND count = 1
-                """, (team_id,))
+                if team_id == 4:
+                    cursor.execute("""
+                        SELECT COUNT(*) AS total,
+                            SUM(CASE WHEN win = 1 THEN 1 ELSE 0 END) AS wins
+                        FROM roles
+                        WHERE team = ? AND count = 1
+                    """, (team_id,))
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT game_number) AS total,
+                            COUNT(DISTINCT CASE WHEN win = 1 THEN game_number END) AS wins
+                        FROM roles
+                        WHERE team = ? AND count = 1
+                    """, (team_id,))
                 row = cursor.fetchone()
                 total = row["total"]
                 wins = row["wins"] or 0
@@ -1025,8 +1557,21 @@ class LibraryDatabase:
                     "total": total,
                     "wins": wins,
                     "winrate": (wins / total * 100) if total else 0.0,
+                    "total_games": total_games,
                 }
         return stats
+
+    def get_team_win_games(self, team_id: int) -> List[Tuple[int, str]]:
+        """Return the (game_number, game_name) of games a team won, newest first."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT game_number, game_name
+                FROM roles
+                WHERE team = ? AND win = 1 AND count = 1
+                ORDER BY game_number DESC
+            """, (team_id,))
+            return [(row[0], row[1]) for row in cursor.fetchall()]
 
     def get_first_game_played(self, player_id: int):
         """Return (game_number, game_name) of the first counted game for a player."""
@@ -1041,14 +1586,18 @@ class LibraryDatabase:
             return (row["game_number"], row["game_name"]) if row else (None, None)
 
     def get_games_played(self, player_id: int):
-        """Return an ordered list of game numbers the player appeared in."""
+        """Return an ordered list of game numbers the player appeared in
+        (played games plus games they overseered as host)."""
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT DISTINCT game_number FROM roles
+                SELECT game_number FROM roles
                 WHERE player_id = ? AND count = 1 AND team != 5
+                UNION
+                SELECT game_number FROM game_hosts
+                WHERE host_id = ? AND count = 1
                 ORDER BY game_number ASC
-            """, (player_id,))
+            """, (player_id, player_id))
             return [row[0] for row in cursor.fetchall()]
 
     def get_player_game_history(self, player_id: int):
@@ -1160,7 +1709,7 @@ class LibraryDatabase:
     @staticmethod
     def _rank_rows(rows, threshold: int, top_n: int, key_fn, reverse=True):
         """Sort and fill rows into strong / backup / tiny tiers."""
-        MIN_SAMPLE = 5
+        MIN_SAMPLE = 3
         strong, backup, tiny = [], [], []
         for pid, pname, primary_stat, games in rows:
             if games <= 0:
@@ -1203,7 +1752,7 @@ class LibraryDatabase:
         if total == 0:
             return []
         threshold = math.ceil(total * 0.15)
-        MIN_SAMPLE = 5
+        MIN_SAMPLE = 3
         TOP_N = 5
 
         strong, backup, tiny = [], [], []
@@ -1252,7 +1801,7 @@ class LibraryDatabase:
         if total == 0:
             return []
         threshold = math.ceil(total * 0.15)
-        MIN_SAMPLE = 5
+        MIN_SAMPLE = 3
 
         strong, backup, tiny = [], [], []
         for pid, pname, wins, games in self._get_teammate_rows(player_id):
@@ -1282,6 +1831,37 @@ class LibraryDatabase:
         threshold = math.ceil(total * 0.15)
         rows = self._get_opponent_rows(player_id)
         return self._rank_rows(rows, threshold, len(rows), key_fn=lambda x: (x[4], x[3]), reverse=True)
+
+    def get_relation_between(self, player_id: int, other_id: int):
+        """Return pairwise relation counts between two players.
+
+        Returns a row with ``same_wins``/``same_games`` (played on the same
+        team, won together) and ``diff_games``/``my_wins_vs``/``their_wins_vs``
+        (opposite teams, games I won / games they won). Uses the same
+        counted-role filters (count=1, team!=5) as the ally/nemesis lists.
+        """
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    COUNT(DISTINCT CASE WHEN r1.team = r2.team AND r1.win = 1 AND r2.win = 1
+                                        THEN r1.game_number END) AS same_wins,
+                    COUNT(DISTINCT CASE WHEN r1.team = r2.team THEN r1.game_number END)
+                        AS same_games,
+                    COUNT(DISTINCT CASE WHEN r1.team != r2.team THEN r1.game_number END)
+                        AS diff_games,
+                    COUNT(DISTINCT CASE WHEN r1.team != r2.team AND r1.win = 1 AND r2.win = 0
+                                        THEN r1.game_number END) AS my_wins_vs,
+                    COUNT(DISTINCT CASE WHEN r1.team != r2.team AND r2.win = 1 AND r1.win = 0
+                                        THEN r1.game_number END) AS their_wins_vs
+                FROM roles r1
+                JOIN roles r2 ON r1.game_number = r2.game_number
+                WHERE r1.player_id = ?
+                  AND r2.player_id = ?
+                  AND r1.count = 1 AND r2.count = 1
+                  AND r1.team != 5 AND r2.team != 5
+            """, (player_id, other_id))
+            return cursor.fetchone()
 
     # -------------------------------------------------------------------------
     # Account management
@@ -2949,6 +3529,48 @@ class MigrateConfirmView(discord.ui.View):
         await interaction.response.defer()
 
 # ============================================================================
+# TEAM WINS BUTTONS
+# ============================================================================
+
+class TeamWinsView(discord.ui.View):
+    """Buttons under .winrate that list every game each team won."""
+
+    def __init__(self, db: LibraryDatabase):
+        super().__init__(timeout=300)
+        self.db = db
+
+    async def _show_team_games(self, interaction: discord.Interaction, team_id: int):
+        games = self.db.get_team_win_games(team_id)
+        team_name = TEAMS.get(team_id, str(team_id))
+        if not games:
+            await interaction.response.send_message(
+                f"No games won by **{team_name}**.", ephemeral=True
+            )
+            return
+        description = "\n".join(f"`#{num}` {name}" for num, name in games)
+        if len(description) > 4000:
+            description = description[:3997] + "..."
+        embed = discord.Embed(
+            title=f"🏆 {team_name} Wins ({len(games)})",
+            description=description,
+            color=EMBED_COLOR,
+        )
+        embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Village Wins", style=discord.ButtonStyle.success)
+    async def village_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_team_games(interaction, 1)
+
+    @discord.ui.button(label="Evil Wins", style=discord.ButtonStyle.danger)
+    async def evil_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_team_games(interaction, 2)
+
+    @discord.ui.button(label="RK Wins", style=discord.ButtonStyle.blurple)
+    async def rk_wins(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._show_team_games(interaction, 3)
+
+# ============================================================================
 # COMMANDS COG
 # ============================================================================
 
@@ -4302,6 +4924,50 @@ class GameLibrary(commands.Cog):
         view = OverseerStatsView(self.db, stats, history, sponsor_name, avatar_url)
         await ctx.send(embed=view.get_embed(), view=view)
 
+    async def _run_gamesearch(self, ctx, query: str | None, no_neutrals: bool = False):
+        """Shared backend for `.gamesearch` / `.gamesearchn`."""
+        if ctx.guild is None:
+            return await ctx.send("This command is not available in DMs.")
+        if not query:
+            await ctx.send(GAME_SEARCH_USAGE)
+            return
+
+        terms, error = parse_game_search_query(query)
+        if error:
+            await ctx.send(error)
+            return
+
+        await ctx.typing()
+        games = self.db.get_all_game_summaries()
+        if not games:
+            await ctx.send("❌ No games recorded in the library yet!")
+            return
+
+        results = [
+            game for game in games
+            if evaluate_game_search(terms, game, no_neutrals=no_neutrals)
+        ]
+        if not results:
+            await ctx.send(
+                "❌ **No games matched your query.**\n\n"
+                f"**Query:** `{query}`\n\n"
+                "Tip: use `.winrate` or `.lib` to browse what the library contains."
+            )
+            return
+
+        view = GameSearchResultView(results, query, no_neutrals=no_neutrals)
+        await ctx.send(embed=view.build_embed(), view=view)
+
+    @commands.command(name="gamesearch")
+    async def gamesearch(self, ctx, *, query: str = None):
+        """Search past games by team stats, outcomes & role counts — Usage: .gamesearch <team> > <pct>% / <team> Win|Lose / <var> > <count> (vars: VillageCount, EvilCount, RKCount, NeutralCount, Players)"""
+        await self._run_gamesearch(ctx, query)
+
+    @commands.command(name="gamesearchn")
+    async def gamesearchn(self, ctx, *, query: str = None):
+        """Search past games with percentages excluding Neutral roles (role counts unchanged) — Usage: .gamesearchn <team> > <pct>% / <team> Win|Lose / <var> > <count>"""
+        await self._run_gamesearch(ctx, query, no_neutrals=True)
+
     @commands.command(name="winrate")
     async def winrate(self, ctx):
         """View overall team winrates."""
@@ -4314,17 +4980,48 @@ class GameLibrary(commands.Cog):
         for team_name, data in stats.items():
             embed.add_field(
                 name=team_name,
-                value=f"**Games:** {data['total']}\n**Wins:** {data['wins']}\n**Winrate:** {data['winrate']:.1f}%",
+                value=f"**Games:** {data['total']}\n"
+                      f"**Split:** {data['wins']}/{data['total_games']}\n"
+                      f"**Wins:** {data['wins']}\n"
+                      f"**Winrate:** {data['winrate']:.1f}%",
                 inline=True,
             )
         embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=TeamWinsView(self.db))
 
     @commands.command(name="relations")
     async def relations(self, ctx, member: discord.Member = None):
-        """View full list of allies, worst allies, and nemeses - Usage: .relations [@player]"""
-        if member is None:
-            member = ctx.author
+        """View your relations with a mentioned player, or your full allies, worst allies, and nemeses - Usage: .relations [@player]"""
+        if member is not None and member.id != ctx.author.id:
+            row = self.db.get_relation_between(ctx.author.id, member.id)
+            same_wins, same_games, diff_games, my_wins, their_wins = row
+            if same_games == 0 and diff_games == 0:
+                await ctx.send(
+                    f"❌ No relation data found between {ctx.author.display_name} and {member.display_name}!"
+                )
+                return
+            lines = []
+            if same_games:
+                wr = same_wins / same_games * 100
+                lines.append(
+                    f"**Allies** — {same_games} game{'s' if same_games != 1 else ''} together: "
+                    f"**{same_wins}W** ({wr:.1f}%)"
+                )
+            if diff_games:
+                my_wr = my_wins / diff_games * 100
+                lines.append(
+                    f"**Opponents** — {diff_games} game{'s' if diff_games != 1 else ''} against each other: "
+                    f"you **{my_wins}W** / them **{their_wins}W** ({my_wr:.1f}%)"
+                )
+            embed = discord.Embed(
+                title=f"Relations: {ctx.author.display_name} ⇄ {member.display_name}",
+                description="\n".join(lines),
+                color=discord.Color.blurple(),
+            )
+            await ctx.send(embed=embed)
+            return
+
+        member = ctx.author
 
         allies = self.db.get_all_allies2(member.id)
         worst_allies = self.db.get_all_worst_allies2(member.id)

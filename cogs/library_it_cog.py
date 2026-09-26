@@ -79,9 +79,14 @@ class ItalianLibraryDatabase(LibraryDatabase):
 
             cursor.execute("""
                 SELECT COUNT(DISTINCT game_number)
-                FROM roles
-                WHERE (player_id = ? OR sponsor_id = ?) AND count = 1 AND team != 5
-            """, (player_id, player_id))
+                FROM (
+                    SELECT game_number FROM roles
+                    WHERE (player_id = ? OR sponsor_id = ?) AND count = 1 AND team != 5
+                    UNION
+                    SELECT game_number FROM game_hosts
+                    WHERE host_id = ? AND count = 1
+                )
+            """, (player_id, player_id, player_id))
             total_participations = cursor.fetchone()[0]
 
             cursor.execute("SELECT COUNT(DISTINCT game_number) FROM roles WHERE count = 1 AND team != 5")
@@ -175,14 +180,17 @@ class ItalianLibraryDatabase(LibraryDatabase):
             return (row["game_number"], row["game_name"]) if row else (None, None)
 
     def get_games_played(self, player_id: int):
-        """Return an ordered list of game numbers the player appeared in (sponsor games included)."""
+        """Return an ordered list of game numbers the player appeared in (sponsor games and games overseered as host included)."""
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT DISTINCT game_number FROM roles
+                SELECT game_number FROM roles
                 WHERE (player_id = ? OR sponsor_id = ?) AND count = 1 AND team != 5
+                UNION
+                SELECT game_number FROM game_hosts
+                WHERE host_id = ? AND count = 1
                 ORDER BY game_number ASC
-            """, (player_id, player_id))
+            """, (player_id, player_id, player_id))
             return [row[0] for row in cursor.fetchall()]
 
     def get_player_game_history(self, player_id: int):
@@ -1180,7 +1188,10 @@ class GameLibraryIT(commands.Cog):
         for team_name, data in stats.items():
             embed.add_field(
                 name=team_name,
-                value=f"**Partite:** {data['total']}\n**Vittorie:** {data['wins']}\n**Winrate:** {data['winrate']:.1f}%",
+                value=f"**Partite:** {data['total']}\n"
+                      f"**Split:** {data['wins']}/{data['total_games']}\n"
+                      f"**Vittorie:** {data['wins']}\n"
+                      f"**Winrate:** {data['winrate']:.1f}%",
                 inline=True,
             )
         embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
