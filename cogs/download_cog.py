@@ -17,10 +17,10 @@ sent.
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -51,7 +51,47 @@ try:
 except Exception:
     _IMPERSONATE_TARGET = None
 
-from utils.embeds import error_embed
+from utils.embeds import error_embed as _raw_error_embed
+
+
+def _safe_error_embed(
+    *, title: str = "Error", description: str | None = None, **kwargs
+):
+    # Cap every embed this cog sends at Discord's limits so a long Detail/error
+    # string can never 400 us with "50035 Invalid Form Body".
+    if description and len(description) > 4096:
+        description = description[:4093] + "..."
+    if title and len(title) > 256:
+        title = title[:253] + "..."
+    return _raw_error_embed(title=title, description=description, **kwargs)
+
+
+error_embed = _safe_error_embed
+
+# ---------------------------------------------------------------------------
+# Hard-coded bot token (single-file deployment override)
+#
+# The token normally comes from config.py (env vars DISCORD_TOKEN / TOKEN).
+# For deployments where pasting it into the code is preferred, put it below
+# and it is injected into the running main script (`python main.py`, whose
+# `bot.run(TOKEN)` reads its own module global). If the bot is launched some
+# other way the main module has no `TOKEN` global and this is a silent no-op
+# (config.py / env vars still apply). Leave the placeholder alone to keep the
+# current behaviour.
+# ---------------------------------------------------------------------------
+BOT_TOKEN_OVERRIDE = "PASTE_YOUR_BOT_TOKEN_HERE"
+
+
+def _inject_bot_token() -> None:
+    token = (BOT_TOKEN_OVERRIDE or "").strip()
+    if not token or token.startswith("PASTE_"):
+        return
+    main_module = sys.modules.get("__main__")
+    if main_module is not None:
+        setattr(main_module, "TOKEN", token)
+
+
+_inject_bot_token()
 
 DEFAULT_UPLOAD_LIMIT = 25 * 1024 * 1024  # 25 MiB (DMs / unknown guild limit)
 DOWNLOAD_TIMEOUT_SECONDS = 600
@@ -78,14 +118,10 @@ _OG_RE = re.compile(
     r'<meta[^>]+property="(?P<prop>og:title|og:description)"[^>]+content="(?P<value>[^"]*)"'
 )
 
-# Douyin blocks every non-browser request to its video endpoints since the
-# 2026-09-14 policy change (edge WAF "ArgusSecurity ... Uifid Not Found"),
-# which is why yt-dlp's DouyinIE is broken upstream. Douyin URLs are therefore
-# handled by a real-browser Playwright path (implemented in this file, below)
-# that captures the SDK-signed detail response and downloads the CDN URL. yt-dlp is
-# kept as fallback in case the policy relaxes, then the block is explained
-# instead of leaking an opaque error. Detection is host-based so any link
-# shape works.
+# Douyin is not supported: its edge WAF (ArgusSecurity) only serves videos to
+# real browsers, and this host can't provide the Chromium system libraries a
+# real browser needs. Douyin links are still detected so the commands explain
+# that kindly instead of crashing on a raw yt-dlp error.
 _DOUYIN_HOSTS = {
     "douyin.com",
     "www.douyin.com",
@@ -95,29 +131,10 @@ _DOUYIN_HOSTS = {
     "www.iesdouyin.com",
     "v.iesdouyin.com",
 }
-_DOUYIN_ERROR_HINTS = (
-    "uifid",
-    "argus",
-    "aweme",
-    "douyin",
-    "s_v_web_id",
-    "fresh cookies",
-    "verify_center",
-    "secsdk",
-    "style check",
-    "403",
-)
-_DOUYIN_BLOCK_MESSAGE = (
-    "Douyin now blocks automated downloads.\n\n"
-    "Since September 14, 2026 Douyin's anti-bot gate (ArgusSecurity) rejects "
-    "every non-browser request to video links with `403 Uifid Not Found`, so "
-    "yt-dlp and similar tools can't fetch the video anymore. This affects all "
-    "downloaders, not just this bot.\n\n"
-    "What still works:\n"
-    "- Open the link in the Douyin app or website and save it there.\n"
-    "- Use a browser-based downloader (Douyin's own share/download flow or a "
-    "desktop tool like Douzy), which the gate allows.\n\n"
-    "`.dl` will keep trying automatically in case Douyin relaxes the block."
+_DOUYIN_UNSUPPORTED_MESSAGE = (
+    "Douyin isn't supported on this host: its gate only serves video to real "
+    "browsers, and the host lacks the Chromium system libraries needed to run "
+    "one. Try a YouTube or other link instead."
 )
 
 _PRIVATE_KEYWORDS = (
@@ -137,9 +154,6 @@ _PRIVATE_KEYWORDS = (
     "subscription",
 )
 
-# Prefix for errors raised by the Playwright Douyin path. It lets the .dl
-# command show the specific browser error instead of the generic block text.
-_DOUYIN_PW_PREFIX = "**Douyin:** "
 
 _NETWORK_KEYWORDS = (
     "network",
@@ -158,430 +172,32 @@ _NETWORK_KEYWORDS = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Douyin real-browser path.
-#
-# Since 2026-09-14 Douyin's edge WAF (ArgusSecurityPlugin) rejects every
-# non-browser request with ``403 Uifid Not Found``, which broke yt-dlp's
-# DouyinIE and every pure-HTTP approach (a_bogus/x_bogus can't mint the
-# ``uifid`` cookie the SDK signature needs). The only route that still works is
-# to load the video page in a real browser:
-#
-# 1. Open the ``/video/{aweme_id}`` page in Chrome; the page's own JS SDK
-#    signs the ``/aweme/v1/web/aweme/detail`` request.
-# 2. Capture that JSON response and take the highest bit-rate, no-watermark
-#    ``play_addr`` URL.
-# 3. Download the (already CDN-signed) URL over plain HTTPS with a browser
-#    Referer — CDN URLs don't need the SDK.
-#
-# If the API response is never observed (SDK change, captcha), the currently
-# playing ``<video>`` element's ``currentSrc`` is used as a fallback.
-#
-# The sync Playwright API is used so the whole flow can run inside a worker
-# thread (see DownloadCog._download_blocking). A module-level threading.Lock
-# serializes access to the shared browser process, which is also what keeps the
-# thread-unsafe Playwright sync API safe.
-# ---------------------------------------------------------------------------
-
-try:
-    from curl_cffi import requests as _slash_requests
-except Exception:
-    _slash_requests = None
-
-# uuu_265.mp4 is Douyin's always-on placeholder/preload clip, not the target
-# video. Skip any currentSrc that matches it.
-_PLACEHOLDER_SRC = "uuu_265.mp4"
-
-# Playwright sync API is thread-unsafe; one download at a time.
-_BROWSER_LOCK = threading.Lock()
-_BROWSER = None
-_PLA = None
-
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
-
-_AWEME_ID_RES = (
-    re.compile(r"/video/(?P<id>\d{18,20})"),
-    re.compile(r"/note/(?P<id>\d{18,20})"),
-    re.compile(r"modal_id=(?P<id>\d{18,20})"),
-    re.compile(r"/(?P<id>\d{18,20})(?:[?/]|$)"),
-)
-
-_SHORT_LINK_HOSTS = {
-    "v.douyin.com",
-    "v.iesdouyin.com",
-    "iesdouyin.com",
-}
-
-# Playwright names for installed real browsers.
-_CHANNEL_PATHS = (
-    ("C:/Program Files/Google/Chrome/Application/chrome.exe", "chrome"),
-    ("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe", "chrome"),
-    ("C:/Program Files/Google/Chrome/Application/msedge.exe", "msedge"),
-    ("C:/Program Files (x86)/Google/Chrome/Application/msedge.exe", "msedge"),
-    ("C:/Program Files/Microsoft/Edge/Application/msedge.exe", "msedge"),
-    ("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "msedge"),
-    ("/usr/bin/google-chrome", "chrome"),
-    ("/usr/bin/google-chrome-stable", "chrome"),
-    ("/usr/bin/chromium", "chromium"),
-    ("/usr/bin/chromium-browser", "chromium"),
-    ("/snap/bin/chromium", "chromium"),
-)
-
-# Rootless/container hosts can't raise the Chromium seccomp sandbox; without
-# this flag the browser refuses to start there.
-_LINUX_EXTRA_ARGS = ("--no-sandbox", "--disable-dev-shm-usage")
 
 
-class DouyinDownloadError(Exception):
-    def __init__(self, message: str):
-        self.message = message
-        super().__init__(message)
-
-
-def _safe_name(title: str, maxlen: int = 80) -> str:
-    """Restricted, ASCII-only filename so unicode titles can't break Windows."""
-    cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "_", title or "Douyin video")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._")
-    return cleaned[:maxlen] or "Douyin_video"
-
-
-def extract_aweme_id(url: str) -> str | None:
-    """Extract the Douyin aweme id from any link shape (short links resolved)."""
-    if not url:
-        return None
-    url = url.split("#")[0].split("?")[0] if "modal_id" not in url else url
-    for pattern in _AWEME_ID_RES:
-        match = pattern.search(url)
-        if match:
-            return match.group("id")
-
-    host = (urllib.parse.urlparse(url).hostname or "").lower()
-    if host in _SHORT_LINK_HOSTS:
-        resolved = _resolve_short_link(url)
-        if resolved and resolved != url:
-            for pattern in _AWEME_ID_RES:
-                match = pattern.search(resolved)
-                if match:
-                    return match.group("id")
-    return None
-
-
-def _resolve_short_link(url: str, timeout: int = 20) -> str | None:
-    """Follow Douyin share short-link redirects to the canonical page URL."""
-    try:
-        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.geturl()
-    except Exception:
-        return None
-
-
-def _detect_channel() -> str | None:
-    """Return a Playwright channel name for an installed real browser, else None."""
-    for path, name in _CHANNEL_PATHS:
-        if os.path.isfile(path):
-            return name
-    exe = shutil.which("google-chrome") or shutil.which("chromium-browser") or shutil.which("microsoft-edge")
-    if exe:
-        name = os.path.basename(exe).lower()
-        for key, channel in (("chrome", "chrome"), ("chromium", "chromium"), ("edge", "msedge")):
-            if key in name:
-                return channel
-    return None
-
-
-def is_ready() -> bool:
-    """Return whether a browser backend is available for Douyin downloads."""
-    if not importlib.util.find_spec("playwright"):
-        return False
-    if _detect_channel() is None:
-        # Bundled Chromium (installed via `python -m playwright install chromium`)
-        # is the fallback for hosts without a system browser.
-        browsers_dir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-        if not browsers_dir:
-            if sys.platform == "win32":
-                local = os.environ.get("LOCALAPPDATA")
-                browsers_dir = os.path.join(local, "ms-playwright") if local else None
-            else:
-                browsers_dir = (
-                    str(Path.home() / ".cache" / "ms-playwright")
-                    if Path.home()
-                    else None
-                )
-        if not browsers_dir or not os.path.isdir(browsers_dir):
-            return False
-        if not any("chromium" in name for name in os.listdir(browsers_dir)):
-            return False
-        return True
-    return True
-
-
-def _resolve_headless() -> bool:
-    """Headless mode. Defaults to headed (a real window) because Douyin's WAF
-    is harsher on automated contexts; set DOUYIN_HEADED=0 to force headless."""
-    return os.environ.get("DOUYIN_HEADED", "1") != "1"
-
-
-def _get_browser(playwright):
-    """Launch (once) and return the shared browser instance."""
-    global _BROWSER
-    if _BROWSER is not None:
-        return _BROWSER
-    channel = _detect_channel()
-    extra_args = list(_LINUX_EXTRA_ARGS) if sys.platform != "win32" else []
-    launch_kwargs = {
-        "headless": _resolve_headless(),
-        "args": [
-            "--disable-blink-features=AutomationControlled",
-            "--lang=zh-CN",
-            "--mute-audio",
-            *extra_args,
-        ],
-    }
-    if channel:
-        launch_kwargs["channel"] = channel
-    try:
-        _BROWSER = playwright.chromium.launch(**launch_kwargs)
-    except Exception as exc:
-        raise DouyinDownloadError(
-            "Couldn't start a browser for Douyin. "
-            "Install Google Chrome/Edge or run `python -m playwright install chromium`."
-        ) from exc
-    return _BROWSER
-
-
-def _is_http_url(u: str | None) -> bool:
-    return bool(u and (u.startswith("http://") or u.startswith("https://")))
-
-
-def _pick_video_url(detail: dict, current_src: str | None) -> str | None:
-    """Choose the best no-watermark URL from the detail JSON, else currentSrc.
-
-    Some ``play_addr`` entries are ``blob:`` in-memory stream URLs that can't be
-    fetched outside the browser, so only real http(s) URLs are considered.
-    """
-    if detail:
-        ad = detail.get("aweme_detail") or {}
-        video = ad.get("video") or {}
-        bit_rates = video.get("bit_rate") or []
-        urls: list[tuple[int, str]] = []
-        for b in bit_rates:
-            pa = (b.get("play_addr") or {}).get("url_list") or []
-            for u in pa:
-                if _is_http_url(u):
-                    urls.append((b.get("bit_rate") or 0, u))
-        urls.sort(reverse=True)
-        for _br, u in urls:
-            return u
-        pa = (video.get("play_addr") or {}).get("url_list") or []
-        for u in pa:
-            if _is_http_url(u):
-                return u
-    if current_src:
-        wide_url = current_src.replace("\\/", "/")
-        if _is_http_url(wide_url) and _PLACEHOLDER_SRC not in wide_url:
-            return wide_url
-    return None
-
-
-def _stream_download(url: str, dest: Path, max_filesize: int, cancel_event) -> None:
-    """Download a CDN URL to ``dest``, enforcing the size limit and mp4 sanity."""
-    headers = {
-        "User-Agent": _UA,
-        "Referer": "https://www.douyin.com/",
-        "Accept": "*/*",
-    }
-    if _slash_requests is not None:
-        resp = _slash_requests.get(url, impersonate="chrome", headers=headers, timeout=60, stream=True)
-        status = resp.status_code
-        length = resp.headers.get("content-length")
-        if status != 200:
-            raise DouyinDownloadError(f"Douyin CDN returned HTTP {status} while downloading.")
-        if length and int(length) > max_filesize:
-            raise DouyinDownloadError("The media is too large to send on Discord.")
-        with open(dest, "wb") as fh:
-            for chunk in resp.iter_content(65536):
-                if cancel_event is not None and cancel_event.is_set():
-                    raise DouyinDownloadError("Download timed out.")
-                if chunk:
-                    fh.write(chunk)
-        _check_mp4(dest)
-        return
-
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
-        length = resp.headers.get("Content-Length")
-        if length and int(length) > max_filesize:
-            raise DouyinDownloadError("The media is too large to send on Discord.")
-        while True:
-            chunk = resp.read(65536)
-            if not chunk:
-                break
-            if cancel_event is not None and cancel_event.is_set():
-                raise DouyinDownloadError("Download timed out.")
-            fh.write(chunk)
-    _check_mp4(dest)
-
-
-def _check_mp4(path: Path) -> None:
-    try:
-        with open(path, "rb") as fh:
-            head = fh.read(16)
-        if head and head[4:8] != b"ftyp":
-            raise DouyinDownloadError("Douyin returned a non-video response.")
-    except OSError as exc:
-        raise DouyinDownloadError("Couldn't write the Douyin download.") from exc
-
-
-def _ensure_playwright():
-    """Start the shared Playwright driver once (thread-safe under _BROWSER_LOCK)."""
-    global _PLA
-    if _PLA is None:
-        from playwright.sync_api import sync_playwright
-
-        _PLA = sync_playwright().start()
-    return _PLA
-
-
-def download_douyin_video(
-    url: str,
-    workdir: Path,
-    max_filesize: int,
-    cancel_event=None,
-) -> tuple[Path, dict]:
-    """Download a Douyin video through a real browser.
-
-    Returns ``(path, info)`` where ``info`` has ``title``/``author``/``duration``.
-    Raises :class:`DouyinDownloadError` with a user-facing message on failure.
-    """
-    if not importlib.util.find_spec("playwright"):
-        raise DouyinDownloadError(
-            "Douyin needs a real browser (Playwright) to download. "
-            "Install it on the host with `pip install playwright && python -m playwright install chromium`."
-        )
-
-    workdir = Path(workdir)
-    aweme_id = extract_aweme_id(url)
-    if not aweme_id:
-        raise DouyinDownloadError("Couldn't find the video id in that Douyin link.")
-
-    video_url: str | None = None
-    detail: dict | None = None
-    with _BROWSER_LOCK:
-        pw = _ensure_playwright()
-        browser = _get_browser(pw)
-        context = browser.new_context(
-            user_agent=_UA,
-            viewport={"width": 1680, "height": 1050},
-            locale="zh-CN",
-        )
-        page = context.new_page()
-
-        def _on_response(resp) -> None:
-            nonlocal detail
-            if detail is None and "aweme/v1/web/aweme/detail" in resp.url and resp.status == 200:
-                import json
-
-                try:
-                    detail = json.loads(resp.text())
-                except Exception:
-                    return
-
-        page.on("response", _on_response)
-        try:
-            try:
-                page.goto(
-                    f"https://www.douyin.com/video/{aweme_id}",
-                    wait_until="domcontentloaded",
-                    timeout=45000,
-                )
-            except Exception:
-                pass
-
-            current_src: str | None = None
-            start = time.time()
-            src_seen_at: float | None = None
-            while time.time() - start < 30:
-                if cancel_event is not None and cancel_event.is_set():
-                    raise DouyinDownloadError("Download timed out.")
-                if detail is not None:
-                    break
-                page.wait_for_timeout(1000)
-                # A small nudge over the player triggers Douyin's hover-play.
-                page.mouse.move(840, 525)
-                try:
-                    cs = page.evaluate(
-                        "() => { const v = document.querySelector('video'); return v ? (v.currentSrc || v.src) || null : null; }"
-                    )
-                except Exception:
-                    cs = None
-                if cs and _PLACEHOLDER_SRC not in cs:
-                    current_src = cs
-                    if src_seen_at is None:
-                        src_seen_at = time.time()
-                # currentSrc is good enough; give the SDK a few more seconds
-                # to answer with the no-watermark detail first.
-                if src_seen_at is not None and time.time() - src_seen_at > 12:
-                    break
-
-            video_url = _pick_video_url(detail, current_src)
-            if not video_url:
-                raise DouyinDownloadError(_verify_or_timeout_message(page))
-        finally:
-            try:
-                context.close()
-            except Exception:
-                pass
-
-    raw_title = (detail or {}).get("aweme_detail", {}).get("desc") or ""
-    author = (detail or {}).get("aweme_detail", {}).get("author", {}).get("nickname", "")
-    duration = (detail or {}).get("aweme_detail", {}).get("duration", 0)
-
-    # ASCII-only filenames (Windows cp1252 hosts). When the title is mostly
-    # non-ASCII it would collapse to near-empty, so fall back to the id.
-    if len(re.sub(r"[^A-Za-z0-9]", "", raw_title)) < 3:
-        name = f"Douyin_{aweme_id}"
-    else:
-        name = _safe_name(raw_title)
-    dest = workdir / f"{name}.mp4"
-    _stream_download(video_url, dest, max_filesize, cancel_event)
-
-    info = {"title": raw_title[:80] or name, "author": author, "duration": duration}
-    return dest, info
-
-
-def _verify_or_timeout_message(page) -> str:
-    """Distinguish 'show us a check' from a plain timeout."""
-    try:
-        text = page.content()[:4096]
-        low = text.lower()
-        if any(marker in low for marker in ("verify_center", "secsdk", "captcha", "验证")):
-            if _resolve_headless():
-                return (
-                    "Douyin asked for a visual check. The browser has no visible "
-                    "window here (host is headless), so it can't be solved from "
-                    "Discord — retry later, or try again from the desktop machine "
-                    "where the browser window is visible."
-                )
-            return (
-                "Douyin asked for a visual check. This is shown in the browser "
-                "window the bot opened; solve it once and retry the command."
-            )
-    except Exception:
-        pass
-    return (
-        "Douyin didn't answer within a reasonable time (the video page needs to "
-        "load and autoplay in the browser window). Please retry in a moment."
-    )
 
 
 class DownloadError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(message)
+
+
+class FileTooLargeError(DownloadError):
+    """Oversized media.
+
+    Carries the measured size, the current server upload limit, and the media
+    length so the command can report how much of the file would actually fit.
+    When the file is already on disk ``filepath``/``media_info`` are attached so
+    it can be cut down and re-sent after the user confirms.
+    """
+
+    def __init__(self, size: int, limit: int, duration_seconds: float | None = None):
+        self.size = size
+        self.limit = limit
+        self.duration_seconds = duration_seconds
+        self.filepath: Path | None = None
+        self.media_info: dict | None = None
+        super().__init__("The media is too large to send on Discord.")
 
 
 def extract_url(text: str) -> str | None:
@@ -602,26 +218,6 @@ def _is_douyin_url(url: str) -> bool:
     return host in _DOUYIN_HOSTS
 
 
-def _douyin_failure_message(error_message: str) -> str | None:
-    """Map a Douyin download failure to the block explanation, else None."""
-    low = (error_message or "").lower()
-    if any(hint in low for hint in _DOUYIN_ERROR_HINTS):
-        return _DOUYIN_BLOCK_MESSAGE
-    return None
-
-
-def _douyin_user_message(error_message: str, is_douyin: bool) -> str:
-    """Pick the message to show for a failed download.
-
-    Douyin errors from the Playwright path carry _DOUYIN_PW_PREFIX and are
-    specific enough to show directly; errors from the yt-dlp fallback map to
-    the generic block explanation.
-    """
-    if not is_douyin:
-        return error_message
-    if error_message.startswith(_DOUYIN_PW_PREFIX):
-        return error_message[len(_DOUYIN_PW_PREFIX):]
-    return _douyin_failure_message(error_message) or error_message
 
 
 def _is_spotify_url(url: str) -> bool:
@@ -794,6 +390,450 @@ def map_download_error(exc: Exception) -> str:
     return "Couldn't download this media."
 
 
+def _format_mb(size_bytes: int) -> str:
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _format_duration(total_seconds: float) -> str:
+    total_seconds = int(round(total_seconds))
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def _duration_seconds(info) -> float | None:
+    """Media length in seconds from a yt-dlp info dict.
+
+    Some providers report milliseconds, so any absurdly large value (>1 day)
+    is normalised to seconds.
+    """
+    try:
+        duration = float((info or {}).get("duration") or 0)
+    except (TypeError, ValueError):
+        return None
+    if duration <= 0:
+        return None
+    if duration > 86400:
+        duration /= 1000.0
+    return duration
+
+
+def _too_large_embed(error: FileTooLargeError) -> discord.Embed:
+    """Embed reporting an oversized download and the largest chunk that fits.
+
+    Uses the *current* server limit (boost-aware), so the answer changes as the
+    server's upload allowance does.
+    """
+    size_mb = error.size / (1024 * 1024)
+    limit_mb = error.limit / (1024 * 1024)
+    duration = error.duration_seconds
+    lines = [
+        "**This media is too big to send on Discord.**",
+        "",
+        f"File size: {size_mb:.1f} MB",
+        f"Server limit: {limit_mb:.1f} MB (varies with this server's boost level)",
+        "Total length: " + (_format_duration(duration) if duration else "unknown"),
+        "",
+    ]
+    if duration and error.size > 0:
+        first_region = duration * (error.limit / error.size)
+        lines.append(
+            f"Largest chunk that fits from the start: ~{_format_duration(first_region)}"
+        )
+    else:
+        lines.append("Couldn't estimate the largest chunk — the length is unknown.")
+    lines.extend(
+        [
+            "",
+            "A uniform split of the whole media into equal parts is the next "
+            "step; it will ask for confirmation before sending the parts.",
+        ]
+    )
+    return error_embed(description="\n".join(lines))
+
+
+def _trim_first_region(
+    source: Path, limit: int, duration_seconds: float | None
+) -> tuple[Path, float]:
+    """Cut the largest prefix of ``source`` that fits under ``limit``.
+
+    Returns ``(clip_path, clipped_seconds)``. The first attempt copies streams
+    (fast, no re-encode); keyframe granularity can push the result a few
+    percent over the target, so the region is shortened and retried. If the
+    copy fails entirely the clip is re-encoded instead.
+    """
+    ffmpeg = _find_ffmpeg()
+    if ffmpeg is None:
+        raise DownloadError(
+            "ffmpeg is required to send only the first part of this video."
+        )
+    total = source.stat().st_size
+    region = duration_seconds or 0.0
+    if total > 0 and region > 0:
+        region = region * (limit / total)
+    if region <= 0:
+        raise DownloadError("Couldn't work out how much of the video to cut.")
+    out = source.parent / "first_part.mp4"
+
+    def _run(cmd: list[str]) -> None:
+        try:
+            subprocess.run(cmd, check=False, capture_output=True, timeout=600)
+        except Exception:
+            pass
+
+    for attempt in range(6):
+        _run(
+            [
+                ffmpeg, "-y",
+                "-ss", "0",
+                "-i", str(source),
+                "-t", f"{region:.2f}",
+                "-c", "copy",
+                str(out),
+            ]
+        )
+        if out.exists():
+            if out.stat().st_size <= limit:
+                return out, region
+            region *= 0.92  # slightly over: shorten and retry
+        else:
+            # Stream-copy failed for this container; fall back to a re-encode.
+            if attempt == 0:
+                _run(
+                    [
+                        ffmpeg, "-y",
+                        "-ss", "0",
+                        "-i", str(source),
+                        "-t", f"{region:.2f}",
+                        "-c:v", "libx264",
+                        "-preset", "veryfast",
+                        "-c:a", "aac",
+                        str(out),
+                    ]
+                )
+                if out.exists() and out.stat().st_size <= limit:
+                    return out, region
+            region *= 0.92
+    if out.exists():
+        return out, region
+    raise DownloadError("Couldn't cut the first part of this video.")
+
+
+class FirstPartConfirmView(discord.ui.View):
+    """\"Confirm first, then send\": lets the requester cut and send just the
+    first region of a video that was too big for Discord."""
+
+    def __init__(
+        self,
+        *,
+        channel,
+        author_id: int,
+        filepath: Path,
+        limit: int,
+        duration_seconds: float | None,
+        title: str | None,
+        sender_name: str | None,
+    ):
+        super().__init__(timeout=300)
+        self._channel = channel
+        self._author_id = author_id
+        self._filepath = filepath
+        self._limit = limit
+        self._duration_seconds = duration_seconds
+        self._title = (title or "Downloaded media")[:80]
+        self._sender_name = sender_name or "Unknown"
+        self._done = False
+
+    def _cleanup(self) -> None:
+        if self._filepath is None:
+            return
+        try:
+            if self._filepath.parent.is_dir():
+                _retry_rmtree(self._filepath.parent)
+        finally:
+            self._filepath = None
+
+    async def on_timeout(self) -> None:
+        self._cleanup()
+
+    @discord.ui.button(label="Send the first part", style=discord.ButtonStyle.secondary)
+    async def _send_first_part(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if interaction.user.id != self._author_id:
+            await interaction.response.send_message(
+                "Only the person who requested this download can confirm.",
+                ephemeral=True,
+            )
+            return
+        if self._done:
+            return
+        self._done = True
+        await interaction.response.defer()
+        try:
+            loop = asyncio.get_running_loop()
+            clip_path, clip_seconds = await loop.run_in_executor(
+                None,
+                _trim_first_region,
+                self._filepath,
+                self._limit,
+                self._duration_seconds,
+            )
+        except Exception as exc:
+            message = exc.message if isinstance(exc, DownloadError) else map_download_error(exc)
+            await self._channel.send(embed=error_embed(description=message))
+            self._cleanup()
+        else:
+            file = discord.File(clip_path, filename=clip_path.name)
+            try:
+                await self._channel.send(
+                    content=(
+                        f"**{self._sender_name} -> {self._title}** "
+                        f"(first {_format_duration(clip_seconds)})"
+                    ),
+                    file=file,
+                )
+            finally:
+                file.close()
+            self._cleanup()
+        try:
+            await interaction.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+
+
+_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+
+def _ffmpeg_duration(path: Path) -> float | None:
+    """Probe media length (seconds) from ffmpeg's own header dump."""
+    ffmpeg = _find_ffmpeg()
+    if ffmpeg is None:
+        return None
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-i", str(path)], capture_output=True, timeout=60
+        )
+        match = _DURATION_RE.search(result.stderr.decode("utf-8", "replace"))
+    except Exception:
+        return None
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return float(hours) * 3600 + float(minutes) * 60 + float(seconds)
+
+
+def _split_into_parts(
+    source: Path,
+    n_parts: int,
+    workdir: Path,
+    duration_seconds: float | None = None,
+) -> list[Path]:
+    """Evenly split ``source`` into ``n_parts`` equal-duration mp4 segments.
+
+    A per-part seek+cut with stream copy (fast) is tried first. Keyframe
+    granularity can make exact boundaries impossible to honour with ``-c copy``,
+    so if no parts come out the whole file is re-encoded with keyframes forced
+    at every boundary and cut again. Returns the ``part_*.mp4`` paths.
+    """
+    ffmpeg = _find_ffmpeg()
+    if ffmpeg is None:
+        raise DownloadError(
+            "Splitting a video needs ffmpeg to be installed "
+            "(`apt install ffmpeg` on Linux, or keep `imageio-ffmpeg`)."
+        )
+    n_parts = max(1, int(n_parts))
+    duration = duration_seconds or _ffmpeg_duration(source)
+    if not duration or duration <= 0:
+        raise DownloadError(
+            "Couldn't read the video's length, so it can't be split evenly."
+        )
+    segment_time = duration / n_parts
+
+    for stale in workdir.glob("part_*.mp4"):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+    def _cut(src: Path, start: float, length: float, out: Path, transcode: bool) -> None:
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", f"{start:.3f}",
+            "-i", str(src),
+            "-t", f"{length:.3f}",
+        ]
+        if transcode:
+            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+        else:
+            cmd += ["-c", "copy"]
+        cmd.append(str(out))
+        try:
+            subprocess.run(cmd, check=False, capture_output=True, timeout=1800)
+        except Exception:
+            pass
+
+    for i in range(n_parts):
+        start = i * segment_time
+        if start >= duration - 0.05:
+            break
+        _cut(source, start, segment_time, workdir / f"part_{i + 1:03d}.mp4", transcode=False)
+
+    parts = sorted(workdir.glob("part_*.mp4"))
+    if parts:
+        return parts
+
+    # Nothing cut with stream copy: force keyframes at every boundary, then cut.
+    encoded = workdir / "_encoded.mp4"
+    boundaries = ",".join(
+        f"{i * segment_time:.3f}" for i in range(1, n_parts)
+    )
+    try:
+        subprocess.run(
+            [
+                ffmpeg, "-y",
+                "-i", str(source),
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-c:a", "aac",
+                "-force_key_frames", boundaries,
+                str(encoded),
+            ],
+            check=False,
+            capture_output=True,
+            timeout=3600,
+        )
+    except Exception:
+        pass
+    if encoded.exists():
+        for i in range(n_parts):
+            start = i * segment_time
+            if start >= duration - 0.05:
+                break
+            _cut(encoded, start, segment_time, workdir / f"part_{i + 1:03d}.mp4", transcode=False)
+        parts = sorted(workdir.glob("part_*.mp4"))
+        if parts:
+            return parts
+    raise DownloadError("Couldn't split the media into parts.")
+
+
+def _split_plan_embed(
+    size: int,
+    limit: int,
+    duration_seconds: float | None,
+    n_parts: int,
+) -> discord.Embed:
+    lines = [
+        "**Splitting this media into equal parts**",
+        "",
+        f"File size: {_format_mb(size)}",
+        f"Server limit: {_format_mb(limit)} (varies with this server's boost level)",
+        f"Parts: {n_parts} (≈ {size / max(1, n_parts) / (1024 * 1024):.1f} MB each)",
+    ]
+    if duration_seconds:
+        lines.append(f"≈ {_format_duration(duration_seconds / max(1, n_parts))} each")
+    lines.extend(["", "Press the button to send all parts."])
+    return error_embed(description="\n".join(lines))
+
+
+def _split_min_parts_embed(
+    size: int,
+    limit: int,
+    duration_seconds: float | None,
+    min_parts: int,
+) -> discord.Embed:
+    lines = [
+        "**Not enough parts for this server's limit**",
+        "",
+        f"File size: {_format_mb(size)}",
+        f"Server limit: {_format_mb(limit)}",
+        f"This needs at least **{min_parts}** equal parts to fit.",
+    ]
+    if duration_seconds:
+        lines.append(f"≈ {_format_duration(duration_seconds / max(1, min_parts))} per part")
+    lines.extend(["", f"Try `.dsplit {min_parts}`."])
+    return error_embed(description="\n".join(lines))
+
+
+class SplitConfirmView(discord.ui.View):
+    """Confirm-first view that sends every part of a split download."""
+
+    def __init__(
+        self,
+        *,
+        channel,
+        author_id: int,
+        workdir: Path,
+        parts: list[Path],
+        title: str | None,
+        sender_name: str | None,
+        n_parts: int,
+    ):
+        super().__init__(timeout=600)
+        self._channel = channel
+        self._author_id = author_id
+        self._workdir = workdir
+        self._parts = parts
+        self._title = (title or "Downloaded media")[:80]
+        self._sender_name = sender_name or "Unknown"
+        self._n_parts = max(1, n_parts)
+        self._done = False
+
+    def _cleanup(self) -> None:
+        if self._workdir is None:
+            return
+        try:
+            if self._workdir.is_dir():
+                _retry_rmtree(self._workdir)
+        finally:
+            self._workdir = None
+            self._parts = []
+
+    async def on_timeout(self) -> None:
+        self._cleanup()
+
+    @discord.ui.button(label="Send all parts", style=discord.ButtonStyle.secondary)
+    async def _send_all(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if interaction.user.id != self._author_id:
+            await interaction.response.send_message(
+                "Only the person who requested this download can confirm.",
+                ephemeral=True,
+            )
+            return
+        if self._done:
+            return
+        self._done = True
+        await interaction.response.defer()
+        try:
+            total = len(self._parts)
+            for idx, part in enumerate(self._parts, start=1):
+                if not part.exists():
+                    continue
+                file = discord.File(part, filename=part.name)
+                try:
+                    await self._channel.send(
+                        content=(
+                            f"**{self._sender_name} -> {self._title}** "
+                            f"(part {idx}/{self._n_parts})"
+                        ),
+                        file=file,
+                    )
+                finally:
+                    file.close()
+                if idx < total:
+                    await asyncio.sleep(0.5)  # breathing room for Discord limits
+        finally:
+            self._cleanup()
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+
+
 class DownloadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -813,6 +853,30 @@ class DownloadCog(commands.Cog):
             return max(guild.filesize_limit or DEFAULT_UPLOAD_LIMIT, 1)
         return DEFAULT_UPLOAD_LIMIT
 
+    async def _handle_too_large(
+        self,
+        ctx: commands.Context,
+        error: FileTooLargeError,
+        sender_name: str,
+    ) -> None:
+        """Report an oversized download and offer to cut+send the first part."""
+        embed = _too_large_embed(error)
+        if error.filepath is None or error.duration_seconds is None:
+            # The size was known before download (or the length is unknown), so
+            # there is no parked file to cut — just report the numbers.
+            await ctx.send(embed=embed)
+            return
+        view = FirstPartConfirmView(
+            channel=ctx.channel,
+            author_id=ctx.author.id,
+            filepath=error.filepath,
+            limit=error.limit,
+            duration_seconds=error.duration_seconds,
+            title=(error.media_info or {}).get("title"),
+            sender_name=sender_name,
+        )
+        await ctx.send(embed=embed, view=view)
+
     @staticmethod
     def _download_blocking(
         url: str,
@@ -820,21 +884,14 @@ class DownloadCog(commands.Cog):
         max_filesize: int,
         cancel_event: threading.Event | None = None,
         audio_only: bool = False,
+        audio_codec: str | None = None,
     ) -> tuple[Path, dict]:
         def _check_cancel(d: dict) -> None:
             if cancel_event is not None and cancel_event.is_set():
                 raise DownloadError("Download timed out.")
 
-        # Douyin blocks every non-browser request (Argus WAF, "Uifid Not
-        # Found"), so it gets the real-browser Playwright path first. yt-dlp
-        # remains as fallback for other sites and in case the policy relaxes.
-        if _is_douyin_url(url) and is_ready():
-            try:
-                return download_douyin_video(
-                    url, workdir, max_filesize=max_filesize, cancel_event=cancel_event
-                )
-            except DouyinDownloadError as exc:
-                raise DownloadError(_DOUYIN_PW_PREFIX + exc.message) from None
+        if _is_douyin_url(url):
+            raise DownloadError(_DOUYIN_UNSUPPORTED_MESSAGE)
 
         opts: dict = {
             "outtmpl": str(workdir / "%(title).80B.%(ext)s"),
@@ -850,7 +907,26 @@ class DownloadCog(commands.Cog):
             "restrictfilenames": True,
         }
         ffmpeg_path = _find_ffmpeg()
-        if audio_only:
+        if audio_codec:
+            # Full audio re-encode (e.g. MP3): pull the best audio stream and
+            # convert it with ffmpeg, which is a hard requirement here.
+            if ffmpeg_path is None:
+                raise DownloadError(
+                    "MP3 downloads need ffmpeg to convert the audio. Install it "
+                    "on the host (`apt install ffmpeg` on Linux, or keep "
+                    "`imageio-ffmpeg` installed)."
+                )
+            opts["format"] = "bestaudio/best"
+            opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": audio_codec,
+                    "preferredquality": "192",
+                }
+            ]
+            if os.path.dirname(ffmpeg_path):
+                opts["ffmpeg_location"] = os.path.dirname(ffmpeg_path)
+        elif audio_only:
             # Music-only downloads prefer a small, Discord-playable file. The
             # video/audio merge and 1080p video selection only apply otherwise.
             opts["format"] = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
@@ -887,7 +963,7 @@ class DownloadCog(commands.Cog):
         req = (info.get("requested_downloads") or [{}])[0]
         size = size or req.get("filesize") or req.get("filesize_approx") or 0
         if size and size > max_filesize:
-            raise DownloadError("The media is too large to send on Discord.")
+            raise FileTooLargeError(size, max_filesize, _duration_seconds(info))
 
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -900,10 +976,11 @@ class DownloadCog(commands.Cog):
             raise DownloadError("Downloaded file not found.")
         return max(files, key=lambda p: p.stat().st_size), info
 
-    async def _download_and_send(self, ctx: commands.Context, url: str, audio_only: bool = False, sender_name: str | None = None) -> None:
+    async def _download_and_send(self, ctx: commands.Context, url: str, audio_only: bool = False, audio_codec: str | None = None, sender_name: str | None = None) -> None:
         limit = self._upload_limit(ctx)
         workdir = Path(tempfile.mkdtemp(prefix="village_dl_"))
         processing_msg = await ctx.send("Downloading…")
+        pending_cleanup = True
         try:
             loop = asyncio.get_running_loop()
             cancel_event = threading.Event()
@@ -918,6 +995,7 @@ class DownloadCog(commands.Cog):
                             limit,
                             cancel_event,
                             audio_only,
+                            audio_codec,
                         ),
                         timeout=DOWNLOAD_TIMEOUT_SECONDS,
                     )
@@ -931,7 +1009,13 @@ class DownloadCog(commands.Cog):
 
             size = filepath.stat().st_size
             if size > limit:
-                raise DownloadError("The media is too large to send on Discord.")
+                # Park the file so the user can confirm cutting the first part
+                # that fits; cleanup is then deferred to the confirm view.
+                err = FileTooLargeError(size, limit, _duration_seconds(info))
+                err.filepath = filepath
+                err.media_info = info
+                pending_cleanup = False
+                raise err
 
             filename = filepath.name
             # Passing the path means File opens (and owns) the handle: media is
@@ -941,7 +1025,7 @@ class DownloadCog(commands.Cog):
             file = discord.File(filepath, filename=filename)
             try:
                 await ctx.send(
-                    content=f"**{sender_name or 'Unknown'} -> {info.get('title') or 'Downloaded media'}**",
+                    content=f"**{(sender_name or 'Unknown')[:100]} -> {str(info.get('title') or 'Downloaded media')[:1500]}**",
                     file=file,
                 )
             finally:
@@ -953,7 +1037,8 @@ class DownloadCog(commands.Cog):
                 await processing_msg.delete()
             except discord.HTTPException:
                 pass
-            _retry_rmtree(workdir)
+            if pending_cleanup:
+                _retry_rmtree(workdir)
 
     @commands.command(name="dl")
     async def dl(self, ctx: commands.Context):
@@ -1017,17 +1102,18 @@ class DownloadCog(commands.Cog):
                 await ctx.send(embed=error_embed(description=e.message))
                 return
 
-        douyin_url = _is_douyin_url(url)
         try:
             await self._download_and_send(
                 ctx, url, audio_only=audio_only, sender_name=replied.author.display_name
             )
+        except FileTooLargeError as e:
+            await self._handle_too_large(ctx, e, replied.author.display_name)
+            return
         except DownloadError as e:
-            await ctx.send(embed=error_embed(description=_douyin_user_message(e.message, douyin_url)))
+            await ctx.send(embed=error_embed(description=e.message))
             return
         except Exception as e:
-            message = _douyin_user_message(map_download_error(e), douyin_url)
-            await ctx.send(embed=error_embed(description=message))
+            await ctx.send(embed=error_embed(description=map_download_error(e)))
             print(f"DL error: {e}")
             return
 
@@ -1043,6 +1129,215 @@ class DownloadCog(commands.Cog):
             except discord.HTTPException:
                 pass
 
+    @commands.command(name="mdl")
+    async def mdl(self, ctx: commands.Context):
+        """Reply to a message with a link to get its audio as an MP3 (YouTube, Spotify, and other providers). Removes the link message and command on success."""
+        if yt_dlp is None:
+            await ctx.send(
+                embed=error_embed(
+                    description=(
+                        "The `yt-dlp` package isn't installed, so downloads are "
+                        "disabled.\n\nOn the host run:\n```\npip install -r requirements.txt\n```"
+                    )
+                )
+            )
+            return
+
+        if _find_ffmpeg() is None:
+            await ctx.send(
+                embed=error_embed(
+                    description=(
+                        "MP3 downloads need ffmpeg to convert the audio. Install "
+                        "it on the host (`apt install ffmpeg` on Linux, or keep "
+                        "`imageio-ffmpeg` installed)."
+                    )
+                )
+            )
+            return
+
+        reference = ctx.message.reference
+        replied = None
+        if reference is not None and reference.message_id is not None:
+            try:
+                replied = await ctx.channel.fetch_message(reference.message_id)
+            except (discord.HTTPException, discord.Forbidden):
+                replied = reference.resolved
+        if replied is None or not isinstance(replied, discord.Message):
+            await ctx.send(
+                embed=error_embed(
+                    description="Reply to a message containing a media link.",
+                )
+            )
+            return
+
+        url = extract_url(replied.content)
+        if url is None and replied.attachments:
+            url = replied.attachments[0].url
+        if url is None:
+            await ctx.send(
+                embed=error_embed(
+                    description="Reply to a message containing a media link.",
+                )
+            )
+            return
+        if url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com"):
+            url = url.split("?")[0]
+
+        if _is_spotify_url(url):
+            try:
+                url = _spotify_search_query(url)
+            except DownloadError as e:
+                await ctx.send(embed=error_embed(description=e.message))
+                return
+
+        try:
+            await self._download_and_send(
+                ctx,
+                url,
+                audio_codec="mp3",
+                sender_name=replied.author.display_name,
+            )
+        except FileTooLargeError as e:
+            await self._handle_too_large(ctx, e, replied.author.display_name)
+            return
+        except DownloadError as e:
+            await ctx.send(embed=error_embed(description=e.message))
+            return
+        except Exception as e:
+            await ctx.send(embed=error_embed(description=map_download_error(e)))
+            print(f"MDL error: {e}")
+            return
+
+        # Only reached on success: remove the reply header plus the command
+        # message so the channel only shows the resulting MP3.
+        for msg in (replied, ctx.message):
+            try:
+                await msg.delete()
+            except discord.HTTPException:
+                pass
+
+    @commands.command(name="dsplit")
+    async def dsplit(self, ctx: commands.Context, parts: int | None = None):
+        """Reply to a message with a link to download it and send it split into N equal parts. `.dsplit 2` = 2 parts; without a number it uses the minimum parts that fit Discord's upload limit. Confirms before sending."""
+        if yt_dlp is None:
+            await ctx.send(
+                embed=error_embed(
+                    description=(
+                        "The `yt-dlp` package isn't installed, so downloads are "
+                        "disabled.\n\nOn the host run:\n```\npip install -r requirements.txt\n```"
+                    )
+                )
+            )
+            return
+
+        if _find_ffmpeg() is None:
+            await ctx.send(
+                embed=error_embed(
+                    description=(
+                        "Splitting a video needs ffmpeg to be installed "
+                        "(`apt install ffmpeg` on Linux, or keep "
+                        "`imageio-ffmpeg` installed)."
+                    )
+                )
+            )
+            return
+
+        reference = ctx.message.reference
+        replied = None
+        if reference is not None and reference.message_id is not None:
+            try:
+                replied = await ctx.channel.fetch_message(reference.message_id)
+            except (discord.HTTPException, discord.Forbidden):
+                replied = reference.resolved
+        if replied is None or not isinstance(replied, discord.Message):
+            await ctx.send(
+                embed=error_embed(
+                    description="Reply to a message containing a media link.",
+                )
+            )
+            return
+
+        url = extract_url(replied.content)
+        if url is None and replied.attachments:
+            url = replied.attachments[0].url
+        if url is None:
+            await ctx.send(
+                embed=error_embed(
+                    description="Reply to a message containing a media link.",
+                )
+            )
+            return
+        if url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com"):
+            url = url.split("?")[0]
+
+        if _is_spotify_url(url):
+            try:
+                url = _spotify_search_query(url)
+            except DownloadError as e:
+                await ctx.send(embed=error_embed(description=e.message))
+                return
+
+        limit = self._upload_limit(ctx)
+        workdir = Path(tempfile.mkdtemp(prefix="village_split_"))
+        processing_msg = await ctx.send("Downloading…")
+        parked = False
+        try:
+            loop = asyncio.get_running_loop()
+            filepath, info = await loop.run_in_executor(
+                None,
+                self._download_blocking,
+                url,
+                workdir,
+                10 * 1024**3,  # don't refuse on size: the split handles it
+                None,
+                False,
+                None,
+            )
+            size = filepath.stat().st_size
+            duration = _duration_seconds(info)
+            # A small margin absorbs keyframe drift from stream-copy cuts so a
+            # part can't sneak just over the limit.
+            per_part_limit = int(limit * 0.94)
+            min_parts = max(1, (size + per_part_limit - 1) // per_part_limit)
+            n_parts = parts if parts and parts > 0 else min_parts
+            if n_parts < min_parts:
+                await ctx.send(embed=_split_min_parts_embed(size, limit, duration, min_parts))
+                return
+
+            part_files = await loop.run_in_executor(
+                None, _split_into_parts, filepath, n_parts, workdir, duration
+            )
+            if any(p.stat().st_size > limit for p in part_files):
+                await ctx.send(embed=_split_min_parts_embed(size, limit, duration, min_parts))
+                return
+
+            parked = True
+            view = SplitConfirmView(
+                channel=ctx.channel,
+                author_id=ctx.author.id,
+                workdir=workdir,
+                parts=part_files,
+                title=info.get("title"),
+                sender_name=replied.author.display_name,
+                n_parts=n_parts,
+            )
+            await ctx.send(embed=_split_plan_embed(size, limit, duration, n_parts), view=view)
+        except FileTooLargeError as e:
+            await ctx.send(embed=_too_large_embed(e))
+        except DownloadError as e:
+            await ctx.send(embed=error_embed(description=e.message))
+        except Exception as e:
+            await ctx.send(embed=error_embed(description=map_download_error(e)))
+            print(f"DSPLIT error: {e}")
+        finally:
+            try:
+                await processing_msg.delete()
+            except discord.HTTPException:
+                pass
+            if not parked:
+                _retry_rmtree(workdir)
+
 
 def setup(bot):
     bot.add_cog(DownloadCog(bot))
+    print("[download_cog] loaded")
