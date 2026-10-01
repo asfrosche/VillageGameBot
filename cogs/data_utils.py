@@ -1,3 +1,5 @@
+import discord
+
 from utils import bot_db as _bot_db
 
 base_variables = {
@@ -9,6 +11,7 @@ base_variables = {
     "alt_role_name": 'Alt',
     "log_channel_name": 'log-visits',
     "actions_log_channel_name": 'log-actions',
+    "economy_log_channel_name": 'logs-economy',
     "edit_del_logs": 'edit-and-del-logs',
     "join_and_leave_logs": 'join-leave-logs',
     "announcements_channel_name": '❗│announcements',
@@ -17,7 +20,14 @@ base_variables = {
     "megaphone_channel_name": '📢│megaphone',
     "lynch_channel_name1": '🗳│vote-session-1',
     "lynch_channel_name2": '🗳│vote-session-2',
+    "lynch_channel_name3": '🗳│vote-session-3',
+    "lynch_channel_name4": '🗳│vote-session-4',
     "leader_channel_name": '👑│leader-election',
+    "lynch_channel_id1": None,
+    "lynch_channel_id2": None,
+    "lynch_channel_id3": None,
+    "lynch_channel_id4": None,
+    "leader_channel_id": None,
     "vote_count_name": '📊│vote-count',
     "house_prefix": '🏡│house-',
     "overseer_category_name": 'OVERSEER',
@@ -60,6 +70,8 @@ base_variables = {
     "infos": {},
     "lynch_votes1": {},
     "lynch_votes2": {},
+    "lynch_votes3": {},
+    "lynch_votes4": {},
     "leader_votes": {},
     "vote_value" : [],
     "houselist": {},
@@ -97,6 +109,53 @@ def save_guild_data(guild_id, data):
 def delete_guild_data(guild_id):
     _ensure_db_ready()
     _bot_db.delete_guild_data(int(guild_id))
+
+
+# Maps the stored *name* key of a lynch-style channel to its ID key.
+LYNCH_CHANNEL_ID_KEYS = {
+    "lynch_channel_name1": "lynch_channel_id1",
+    "lynch_channel_name2": "lynch_channel_id2",
+    "lynch_channel_name3": "lynch_channel_id3",
+    "lynch_channel_name4": "lynch_channel_id4",
+    "leader_channel_name": "leader_channel_id",
+}
+
+
+def get_lynch_channel(guild, guild_data, name_key):
+    """Resolve a lynch/leader channel by ID first, then fall back to its name.
+
+    Channel IDs are stable across renames, so a renamed session keeps working.
+    The name lookup is a fallback for guilds set up before IDs were stored; on
+    a successful name match the ID is back-filled once so later renames are safe.
+    """
+    id_key = LYNCH_CHANNEL_ID_KEYS[name_key]
+    channel_id = guild_data.get(id_key)
+    if channel_id:
+        try:
+            channel = guild.get_channel(int(channel_id))
+        except (TypeError, ValueError):
+            channel = None
+        if channel is not None:
+            return channel
+    name = guild_data.get(name_key)
+    if not name:
+        return None
+    channel = discord.utils.get(guild.channels, name=name)
+    if channel is not None and channel.id != channel_id:
+        # Back-fill (or repair a stale ID) so later renames keep working.
+        guild_data[id_key] = channel.id
+        try:
+            save_guild_data(guild.id, guild_data)
+        except Exception:
+            pass
+    return channel
+
+
+def set_lynch_channel(guild_data, name_key, channel):
+    """Point a lynch-style channel key at *channel*, storing name *and* ID."""
+    id_key = LYNCH_CHANNEL_ID_KEYS[name_key]
+    guild_data[name_key] = channel.name
+    guild_data[id_key] = channel.id
 
 
 _DB_READY = False

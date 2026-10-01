@@ -5,7 +5,7 @@ import discord
 import datetime
 from datetime import datetime, timedelta
 from discord.ext import commands
-from cogs.data_utils import load_guild_data, save_guild_data
+from cogs.data_utils import load_guild_data, save_guild_data, get_lynch_channel
 
 # Duration of a public execution vote ("letale fisica" -> lynch vote), in minutes
 EXECUTION_VOTE_MINUTES = 15
@@ -158,18 +158,23 @@ class Voting(commands.Cog):
                 await ctx.send("You can't vote")
                 return
             if channel is None:
-                if ctx.channel == discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"]):
-                    channel = ctx.channel
-                elif ctx.channel == discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name2"]):
-                    channel = ctx.channel
-                elif ctx.channel == discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"]):
+                l1 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1")
+                l2 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2")
+                l3 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3")
+                l4 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4")
+                leader = get_lynch_channel(ctx.guild, guild_data, "leader_channel_name")
+                if ctx.channel in (l1, l2, l3, l4, leader) and ctx.channel is not None:
                     channel = ctx.channel
                 else:
-                    channel = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"])
+                    channel = l1
             if guild_data["voteinrc"] is False:
                 channel = ctx.channel
-            lynch_channel_names = [guild_data["lynch_channel_name1"], guild_data["lynch_channel_name2"]]
-            lynch_channels = [discord.utils.get(ctx.guild.channels, name=name) for name in lynch_channel_names]
+            lynch_channels = [
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4"),
+            ]
             rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
             is_rc_channel = False
             if rc_category and ctx.channel:
@@ -183,9 +188,9 @@ class Voting(commands.Cog):
                 if is_rc_channel is False:
                     await ctx.send("You can only vote in your RoleChat.")
                     return
-            for lynch_channel in lynch_channels:
+            for lidx, lynch_channel in enumerate(lynch_channels):
                 if lynch_channel and channel.id == lynch_channel.id:
-                    lynch_votes = guild_data["lynch_votes1"] if lynch_channel.name == guild_data["lynch_channel_name1"] else guild_data["lynch_votes2"]
+                    lynch_votes = guild_data[f"lynch_votes{lidx + 1}"]
                     voter_id = str(ctx.author.id)
                     if voter_id in lynch_votes:
                         old_vote_id = lynch_votes.get(voter_id)
@@ -199,7 +204,7 @@ class Voting(commands.Cog):
                     save_guild_data(ctx.guild.id, guild_data)
                     await self.aggiorna_risultati(ctx, channel)
                     return
-            leader_channel = discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"])
+            leader_channel = get_lynch_channel(ctx.guild, guild_data, "leader_channel_name")
             if leader_channel and channel.id == leader_channel.id:
                 leader_votes = guild_data["leader_votes"]
                 voter_id = str(ctx.author.id)
@@ -232,18 +237,23 @@ class Voting(commands.Cog):
                 await ctx.send("You can't abstain")
                 return
             if channel is None:
-                if ctx.channel == discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"]):
-                    channel = ctx.channel
-                elif ctx.channel == discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name2"]):
-                    channel = ctx.channel
-                elif ctx.channel == discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"]):
+                l1 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1")
+                l2 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2")
+                l3 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3")
+                l4 = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4")
+                leader = get_lynch_channel(ctx.guild, guild_data, "leader_channel_name")
+                if ctx.channel in (l1, l2, l3, l4, leader) and ctx.channel is not None:
                     channel = ctx.channel
                 else:
-                    channel = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"])
+                    channel = l1
             if guild_data["voteinrc"] is False:
                 channel = ctx.channel
-            lynch_channel_names = [guild_data["lynch_channel_name1"], guild_data["lynch_channel_name2"]]
-            lynch_channels = [discord.utils.get(ctx.guild.channels, name=name) for name in lynch_channel_names]
+            lynch_channels = [
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4"),
+            ]
             rc_category = discord.utils.get(ctx.guild.categories, name=guild_data["rc_category_name"])
             is_rc_channel = False
             if rc_category and ctx.channel:
@@ -257,9 +267,9 @@ class Voting(commands.Cog):
                 if is_rc_channel is False:
                     await ctx.send("You can only vote in your RoleChat.")
                     return
-            for lynch_channel in lynch_channels:
+            for lidx, lynch_channel in enumerate(lynch_channels):
                 if lynch_channel and channel.id == lynch_channel.id:
-                    lynch_votes = guild_data["lynch_votes1"] if lynch_channel.name == guild_data["lynch_channel_name1"] else guild_data["lynch_votes2"]
+                    lynch_votes = guild_data[f"lynch_votes{lidx + 1}"]
                     voter_id = str(ctx.author.id)
                     if voter_id not in lynch_votes:
                         await ctx.send(f"{ctx.author.display_name}, you didn't vote yet")
@@ -269,7 +279,7 @@ class Voting(commands.Cog):
                     save_guild_data(ctx.guild.id, guild_data)
                     await self.aggiorna_risultati(ctx, channel)
                     return
-            leader_channel = discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"])
+            leader_channel = get_lynch_channel(ctx.guild, guild_data, "leader_channel_name")
             if leader_channel and channel.id == leader_channel.id:
                 leader_votes = guild_data["leader_votes"]
                 voter_id = str(ctx.author.id)
@@ -292,14 +302,18 @@ class Voting(commands.Cog):
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data and ctx.author.guild_permissions.administrator:
             if channel is None:
-                channel = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"])
+                channel = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1")
             if guild_data["voteinrc"] is False:
                 channel = ctx.channel
-            lynch_channel_names = [guild_data["lynch_channel_name1"], guild_data["lynch_channel_name2"]]
-            lynch_channels = [discord.utils.get(ctx.guild.channels, name=name) for name in lynch_channel_names]
-            for lynch_channel in lynch_channels:
+            lynch_channels = [
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4"),
+            ]
+            for lidx, lynch_channel in enumerate(lynch_channels):
                 if lynch_channel and ctx.channel.id == lynch_channel.id:
-                    lynch_votes = guild_data["lynch_votes1"] if lynch_channel.name == guild_data["lynch_channel_name1"] else guild_data["lynch_votes2"]
+                    lynch_votes = guild_data[f"lynch_votes{lidx + 1}"]
                     if str(old_user.id) in lynch_votes:
                         old_vote_id = lynch_votes.get(str(old_user.id))
                         if old_vote_id:
@@ -312,7 +326,7 @@ class Voting(commands.Cog):
                     save_guild_data(ctx.guild.id, guild_data)
                     await self.aggiorna_risultati(ctx, channel)
                     return
-            leader_channel = discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"])
+            leader_channel = get_lynch_channel(ctx.guild, guild_data, "leader_channel_name")
             if leader_channel and ctx.channel.id == leader_channel.id:
                 leader_votes = guild_data["leader_votes"]
                 if str(old_user.id) in leader_votes:
@@ -338,14 +352,18 @@ class Voting(commands.Cog):
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data and ctx.author.guild_permissions.administrator:
             if channel is None:
-                channel = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"])
+                channel = get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1")
             if guild_data["voteinrc"] is False:
                 channel = ctx.channel
-            lynch_channel_names = [guild_data["lynch_channel_name1"], guild_data["lynch_channel_name2"]]
-            lynch_channels = [discord.utils.get(ctx.guild.channels, name=name) for name in lynch_channel_names]
-            for lynch_channel in lynch_channels:
+            lynch_channels = [
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3"),
+                get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4"),
+            ]
+            for lidx, lynch_channel in enumerate(lynch_channels):
                 if lynch_channel and ctx.channel.id == lynch_channel.id:
-                    lynch_votes = guild_data["lynch_votes1"] if lynch_channel.name == guild_data["lynch_channel_name1"] else guild_data["lynch_votes2"]
+                    lynch_votes = guild_data[f"lynch_votes{lidx + 1}"]
                     if str(user.id) not in lynch_votes:
                         await ctx.send(f"{user.display_name} didn't vote yet")
                     else:
@@ -354,7 +372,7 @@ class Voting(commands.Cog):
                     save_guild_data(ctx.guild.id, guild_data)
                     await self.aggiorna_risultati(ctx, channel)
                     return
-            leader_channel = discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"])
+            leader_channel = get_lynch_channel(ctx.guild, guild_data, "leader_channel_name")
             if leader_channel and ctx.channel.id == leader_channel.id:
                 leader_votes = guild_data["leader_votes"]
                 if str(user.id) not in leader_votes:
@@ -398,6 +416,8 @@ class Voting(commands.Cog):
             vote_sessions = [
                 ("lynch_votes1", guild_data.get("lynch_votes1", {})),
                 ("lynch_votes2", guild_data.get("lynch_votes2", {})),
+                ("lynch_votes3", guild_data.get("lynch_votes3", {})),
+                ("lynch_votes4", guild_data.get("lynch_votes4", {})),
                 ("leader_votes", guild_data.get("leader_votes", {})),
             ]
 
@@ -413,13 +433,15 @@ class Voting(commands.Cog):
 
             save_guild_data(self.ctx.guild.id, guild_data)
 
-            lynch_channel1 = discord.utils.get(self.ctx.guild.channels, name=guild_data.get("lynch_channel_name1"))
-            lynch_channel2 = discord.utils.get(self.ctx.guild.channels, name=guild_data.get("lynch_channel_name2"))
-            leader_channel = discord.utils.get(self.ctx.guild.channels, name=guild_data.get("leader_channel_name"))
+            lynch_channel1 = get_lynch_channel(self.ctx.guild, guild_data, "lynch_channel_name1")
+            lynch_channel2 = get_lynch_channel(self.ctx.guild, guild_data, "lynch_channel_name2")
+            lynch_channel3 = get_lynch_channel(self.ctx.guild, guild_data, "lynch_channel_name3")
+            lynch_channel4 = get_lynch_channel(self.ctx.guild, guild_data, "lynch_channel_name4")
+            leader_channel = get_lynch_channel(self.ctx.guild, guild_data, "leader_channel_name")
 
             narration_text = f"All votes involving **{self.user.display_name}** have been removed ({total_removed} vote(s))."
 
-            for channel in [lynch_channel1, lynch_channel2, leader_channel]:
+            for channel in [lynch_channel1, lynch_channel2, lynch_channel3, lynch_channel4, leader_channel]:
                 if channel:
                     try:
                         embed = discord.Embed(
@@ -472,6 +494,8 @@ class Voting(commands.Cog):
         vote_sessions = [
             ("lynch_votes1", guild_data.get("lynch_votes1", {})),
             ("lynch_votes2", guild_data.get("lynch_votes2", {})),
+            ("lynch_votes3", guild_data.get("lynch_votes3", {})),
+            ("lynch_votes4", guild_data.get("lynch_votes4", {})),
             ("leader_votes", guild_data.get("leader_votes", {})),
         ]
 
@@ -534,9 +558,15 @@ class Voting(commands.Cog):
                 if not ctx.author.guild_permissions.administrator:
                     await ctx.send("You can't use this command while voting is allowed only in RoleChats.")
                     return
-            votes_sessions = {"LYNCH SESSION 1": guild_data["lynch_votes1"], "LYNCH SESSION 2": guild_data["lynch_votes2"], "LEADER ELECTION": guild_data["leader_votes"]}
+            votes_sessions = {
+                "LYNCH SESSION 1": guild_data["lynch_votes1"],
+                "LYNCH SESSION 2": guild_data["lynch_votes2"],
+                "LYNCH SESSION 3": guild_data.get("lynch_votes3", {}),
+                "LYNCH SESSION 4": guild_data.get("lynch_votes4", {}),
+                "LEADER ELECTION": guild_data["leader_votes"],
+            }
             embeds = []
-            valid_types = ['lynch1', 'lynch2', 'leader']
+            valid_types = ['lynch1', 'lynch2', 'lynch3', 'lynch4', 'leader']
             for session, votes in votes_sessions.items():
                 if not votes:
                     continue
@@ -580,6 +610,8 @@ class Voting(commands.Cog):
             if guild_data:
                 guild_data["lynch_votes1"] = {}
                 guild_data["lynch_votes2"] = {}
+                guild_data["lynch_votes3"] = {}
+                guild_data["lynch_votes4"] = {}
                 guild_data["leader_votes"] = {}
                 save_guild_data(ctx.guild.id, guild_data)
                 await ctx.send('Votes have been reset')
@@ -589,9 +621,62 @@ class Voting(commands.Cog):
         else:
             await ctx.send("You don't have enough permissions to use this command")
 
+    @commands.command(name="updatevotes", aliases=["uv"])
+    async def updatevotes(self, ctx, channel: discord.TextChannel = None):
+        """Guide to refresh the votecount for a session via .vh (admin only).
+
+        The stored vote tallies live in memory for temporary sessions, so after a
+        restart the readable count comes from the votes still in chat history.
+        Run .vh here to rebuild/show them.
+        """
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        if channel is None:
+            channel = ctx.channel
+
+        lynch_channels = [
+            get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1"),
+            get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2"),
+            get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3"),
+            get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4"),
+            get_lynch_channel(ctx.guild, guild_data, "leader_channel_name"),
+        ]
+        is_fixed = any(c and c.id == channel.id for c in lynch_channels)
+
+        embed = discord.Embed(
+            title=f"🗳 Refresh votecount — {channel.name}",
+            description=(
+                "Use **`.vh`** (alias for `.votehistory`) **in this channel** to rebuild or read the votecount "
+                "from the chat history.\n\n"
+                "• Reply to the **Day Start** message, then `.vh` — counts every vote from that point.\n"
+                "• `.vh range` — same, then pick an **end** message/link to scan a window.\n"
+                "• `.vh grouped` — results grouped by target (last vote per voter wins).\n\n"
+                "`.vh` also tracks `.remvote`, `.removevote` and `.manipulate`, so the count "
+                "matches the live vote-count board even after admin edits."
+            ),
+            color=0xff3fb9,
+        )
+        if not is_fixed:
+            embed.add_field(
+                name="Note",
+                value="This doesn't look like a registered voting channel, but `.vh` still works here to scan this channel's history.",
+                inline=False,
+            )
+        embed.set_footer(text="Village Game")
+        await ctx.send(embed=embed)
+
     @commands.command(aliases=["vh"])
     async def votehistory(self, ctx, mode: str = None):
-        """Scan and display vote history. Modes: grouped (by target), range (with end). Reply to a Day Start message."""
+        """Scan and display vote history. Modes: grouped (by target), range (with end). Reply to a Day Start message.
+
+        Tracks .vote/.abstain plus admin edits: .remvote, .removevote and
+        .manipulate, so the recount matches the live vote-count board.
+        """
         if not ctx.message.reference:
             await ctx.send("Reply to a Day Start message to scan vote history from that point.")
             return
@@ -637,6 +722,36 @@ class Voting(commands.Cog):
         user_actions = {}
         # Track when each voter first cast any action (for chronological sorting)
         voter_first_ts = {}
+        # How many vote entries were dropped by .remvote/.removevote
+        removed_total = [0]
+
+        def active_target(voter_id):
+            """Target of a voter's latest action, or None if they hold no vote."""
+            entry = user_actions.get(voter_id)
+            if not entry:
+                return None
+            actions = entry["actions"]
+            if actions and actions[-1]["type"] == "vote":
+                return actions[-1]["target_id"]
+            return None
+
+        def mark_removed(voter_id, ts):
+            """Void a voter's standing vote, but only if they actually hold one."""
+            entry = user_actions.get(voter_id)
+            if not entry:
+                return
+            actions = entry["actions"]
+            if actions and actions[-1]["type"] == "vote":
+                actions.append({"type": "removed", "ts": ts})
+                removed_total[0] += 1
+
+        def clear_votes_for(target_id, ts, exclude=None):
+            """Void every standing vote cast for *target_id*."""
+            for voter_id in list(user_actions.keys()):
+                if voter_id == exclude:
+                    continue
+                if active_target(voter_id) == target_id:
+                    mark_removed(voter_id, ts)
 
         start_ts = int(start_message.created_at.timestamp())
         range_label = f" (Start: <t:{start_ts}:T>)"
@@ -647,36 +762,58 @@ class Voting(commands.Cog):
                 kwargs["before"] = end_message
                 range_label += f" — End: <t:{int(end_message.created_at.timestamp())}:T>"
             async for message in ctx.channel.history(**kwargs):
-                if message.author.bot:
-                    continue
                 content = message.content.strip()
                 uid = message.author.id
                 lower = content.lower()
                 msg_ts = message.created_at.timestamp()
 
+                # A confirmed .remvote leaves a "Votes Removed" embed in every
+                # session channel, so the removal is picked up even when the
+                # command itself was run elsewhere (e.g. overseer-discussion).
+                if message.author.bot:
+                    for embed in message.embeds:
+                        if embed.title and "votes removed" in embed.title.lower():
+                            removed = self._resolve_removed_player(embed, ctx.guild)
+                            if removed:
+                                mark_removed(removed.id, msg_ts)
+                                clear_votes_for(removed.id, msg_ts, exclude=removed.id)
+                    continue
+
                 if lower.startswith(prefix + "abstain"):
                     if uid not in user_actions:
                         user_actions[uid] = {"actions": []}
                     user_actions[uid]["actions"].append({"type": "abstain", "ts": msg_ts})
+                elif lower.startswith(prefix + "removevote"):
+                    target = self._resolve_target_from_message(
+                        message, content[len(prefix) + len("removevote"):], ctx.guild
+                    )
+                    if target:
+                        mark_removed(target.id, msg_ts)
+                elif lower.startswith(prefix + "remvote"):
+                    target = self._resolve_target_from_message(
+                        message, content[len(prefix) + len("remvote"):], ctx.guild
+                    )
+                    if target:
+                        mark_removed(target.id, msg_ts)
+                        clear_votes_for(target.id, msg_ts, exclude=target.id)
+                elif lower.startswith(prefix + "manipulate"):
+                    if len(message.mentions) >= 2:
+                        old_user, new_user = message.mentions[0], message.mentions[1]
+                        if old_user.id not in user_actions:
+                            user_actions[old_user.id] = {"actions": []}
+                            voter_first_ts[old_user.id] = msg_ts
+                        user_actions[old_user.id]["actions"].append(
+                            {"type": "vote", "target_id": new_user.id, "ts": msg_ts}
+                        )
                 elif lower.startswith(prefix + "vote "):
-                    target_id = None
-                    if message.mentions:
-                        target_id = message.mentions[0].id
-                    else:
-                        name = content[len(prefix) + 5:].strip()
-                        if name:
-                            name_lower = name.lower()
-                            member = discord.utils.find(
-                                lambda m: m.name.lower() == name_lower or m.display_name.lower() == name_lower,
-                                ctx.guild.members
-                            )
-                            if member:
-                                target_id = member.id
-                    if target_id is not None:
+                    target = self._resolve_target_from_message(
+                        message, content[len(prefix) + len("vote"):], ctx.guild
+                    )
+                    if target:
                         if uid not in user_actions:
                             user_actions[uid] = {"actions": []}
                             voter_first_ts[uid] = msg_ts
-                        user_actions[uid]["actions"].append({"type": "vote", "target_id": target_id, "ts": msg_ts})
+                        user_actions[uid]["actions"].append({"type": "vote", "target_id": target.id, "ts": msg_ts})
 
         if not user_actions:
             await ctx.send(f"No votes found in the scanned range.{range_label}")
@@ -750,16 +887,51 @@ class Voting(commands.Cog):
                     if a["type"] == "vote":
                         t = ctx.guild.get_member(a["target_id"])
                         parts.append(t.display_name if t else "Unknown")
-                    else:
+                    elif a["type"] == "abstain":
                         parts.append("Ø")
+                    elif a["type"] == "removed":
+                        parts.append("✕")
                 history_lines.append(f"**{vname}**: {' \u2192 '.join(parts)}")
 
         history_text = "\n".join(history_lines) if history_lines else "No vote history."
+
+        if removed_total[0]:
+            range_label += f" — ✕ {removed_total[0]} removed by .remvote/.removevote"
 
         for embed in self._build_vh_embeds(f"Vote Count{mode_label}", count_text, range_label):
             await ctx.send(embed=embed)
         for embed in self._build_vh_embeds(f"Vote History{mode_label}", history_text, range_label):
             await ctx.send(embed=embed)
+
+    @staticmethod
+    def _resolve_target_from_message(message: discord.Message, name_text: str, guild: discord.Guild):
+        """Resolve a member from a message's first mention, else by name/display_name."""
+        if message.mentions:
+            return message.mentions[0]
+        if name_text:
+            lower = name_text.strip().lower()
+            return discord.utils.find(
+                lambda m: m.name.lower() == lower or m.display_name.lower() == lower,
+                guild.members
+            )
+        return None
+
+    @staticmethod
+    def _resolve_removed_player(embed: discord.Embed, guild: discord.Guild):
+        """Pull the removed player out of a 'Votes Removed' embed description.
+
+        The description reads 'All votes involving **Name** have been removed
+        (N vote(s)).' - the first bolded name is the player whose votes were
+        stripped (both their own vote and every vote cast for them).
+        """
+        match = re.search(r"\*\*(.+?)\*\*", embed.description or "")
+        if not match:
+            return None
+        name = match.group(1).strip().lower()
+        return discord.utils.find(
+            lambda m: m.name.lower() == name or m.display_name.lower() == name,
+            guild.members
+        )
 
     def _extract_end_message_id(self, message: discord.Message) -> int | None:
         if message.reference and message.reference.message_id:
@@ -803,67 +975,62 @@ class Voting(commands.Cog):
 
     async def aggiorna_risultati(self, ctx, channel: discord.TextChannel = None):
         guild_data = load_guild_data(ctx.guild.id)
-        if guild_data:
-            vote_count_channel = discord.utils.get(ctx.guild.channels, name=guild_data["vote_count_name"])
-            if vote_count_channel:
-                lynch_message1 = None
-                lynch_message2 = None
-                leader_message = None
-                lynch_channel1 = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name1"])
-                lynch_channel2 = discord.utils.get(ctx.guild.channels, name=guild_data["lynch_channel_name2"])
-                leader_channel = discord.utils.get(ctx.guild.channels, name=guild_data["leader_channel_name"])
-                async for message in vote_count_channel.history(limit=10):
-                    if message.author != ctx.guild.me:
-                        continue
-                    if message.content.startswith('# LYNCH VOTES 1:'):
-                        lynch_message1 = message
-                    elif message.content.startswith('# LYNCH VOTES 2:'):
-                        lynch_message2 = message
-                    elif message.content.startswith('# LEADER VOTES:'):
-                        leader_message = message
-                lynch_votes1 = {ctx.guild.get_member(user_id) for user_id in guild_data.get("lynch_votes1", {}).values() if ctx.guild.get_member(user_id)}
-                lynch_votes2 = {ctx.guild.get_member(user_id) for user_id in guild_data.get("lynch_votes2", {}).values() if ctx.guild.get_member(user_id)}
-                leader_votes = {ctx.guild.get_member(user_id) for user_id in guild_data.get("leader_votes", {}).values() if ctx.guild.get_member(user_id)}
-                vote_count_lynch1 = {user: list(guild_data["lynch_votes1"].values()).count(user.id) for user in lynch_votes1}
-                vote_count_lynch2 = {user: list(guild_data["lynch_votes2"].values()).count(user.id) for user in lynch_votes2}
-                vote_count_leader = {user: list(guild_data["leader_votes"].values()).count(user.id) for user in leader_votes}
-                results_lynch1 = '\n'.join(f'{user.mention} has **{count}** votes' for user, count in vote_count_lynch1.items())
-                results_lynch2 = '\n'.join(f'{user.mention} has **{count}** votes' for user, count in vote_count_lynch2.items())
-                results_leader = '\n'.join(f'{user.mention} has **{count}** votes' for user, count in vote_count_leader.items())
-                if lynch_channel1:
-                    if lynch_message1:
-                        if channel:
-                            if channel == lynch_channel1:
-                                await lynch_message1.edit(content=f'# LYNCH VOTES 1:\n{results_lynch1}\n')
-                        else:
-                            await lynch_message1.delete()
-                            await vote_count_channel.send(f'# LYNCH VOTES 1:\n{results_lynch1}\n')
-                    else:
-                        lynch_message1 = await vote_count_channel.send(f'# LYNCH VOTES 1:\n{results_lynch1}\n')
-                if lynch_channel2:
-                    if lynch_message2:
-                        if channel:
-                            if channel == lynch_channel2:
-                                await lynch_message2.edit(content=f'# LYNCH VOTES 2:\n{results_lynch2}\n')
-                        else:
-                            await lynch_message2.delete()
-                            await vote_count_channel.send(f'# LYNCH VOTES 2:\n{results_lynch2}\n')
-                    else:
-                        lynch_message2 = await vote_count_channel.send(f'# LYNCH VOTES 2:\n{results_lynch2}\n')
-                if leader_channel:
-                    if leader_message:
-                        if channel:
-                            if channel == leader_channel:
-                                await leader_message.edit(content=f'# LEADER VOTES:\n{results_leader}')
-                        else:
-                            await leader_message.delete()
-                            await vote_count_channel.send(f'# LEADER VOTES:\n{results_leader}')
-                    else:
-                        leader_message = await vote_count_channel.send(f'# LEADER VOTES:\n{results_leader}')
-            else:
-                await ctx.send("Vote count channel not found")
-        else:
+        if not guild_data:
             await ctx.send("Guild data not loaded")
+            return
+        vote_count_channel = discord.utils.get(ctx.guild.channels, name=guild_data["vote_count_name"])
+        if not vote_count_channel:
+            await ctx.send("Vote count channel not found")
+            return
+
+        fixed = [
+            ("# LYNCH VOTES 1:", True, get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name1"), guild_data.get("lynch_votes1", {})),
+            ("# LYNCH VOTES 2:", True, get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name2"), guild_data.get("lynch_votes2", {})),
+            ("# LYNCH VOTES 3:", True, get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name3"), guild_data.get("lynch_votes3", {})),
+            ("# LYNCH VOTES 4:", True, get_lynch_channel(ctx.guild, guild_data, "lynch_channel_name4"), guild_data.get("lynch_votes4", {})),
+            ("# LEADER VOTES:", False, get_lynch_channel(ctx.guild, guild_data, "leader_channel_name"), guild_data.get("leader_votes", {})),
+        ]
+        sessions = list(fixed)
+
+        # history() is newest-first, so keep the first match per prefix and skip
+        # prefixes already found, otherwise a stale duplicate would win.
+        board = {}
+        async for message in vote_count_channel.history(limit=50):
+            if message.author != ctx.guild.me:
+                continue
+            for prefix, _, _, _ in sessions:
+                if prefix in board:
+                    continue
+                if message.content.startswith(prefix):
+                    board[prefix] = message
+                    break
+            if len(board) == len(sessions):
+                break
+
+        for prefix, trailing_newline, session_channel, votes in sessions:
+            if session_channel is None:
+                continue
+            # A vote cast in a session channel only refreshes that session's
+            # board; the other sessions are left exactly as they are.
+            if channel is not None and channel.id != session_channel.id:
+                continue
+            voted = {ctx.guild.get_member(uid) for uid in votes.values() if ctx.guild.get_member(uid)}
+            results = '\n'.join(
+                f'{user.mention} has **{list(votes.values()).count(user.id)}** votes'
+                for user in voted
+            )
+            body = f'{prefix}\n{results}{"\n" if trailing_newline else ""}'
+            existing = board.get(prefix)
+            if existing:
+                if channel is None:
+                    # Full refresh: move the board back to the bottom so the
+                    # sessions stay in order.
+                    await existing.delete()
+                    await vote_count_channel.send(body)
+                else:
+                    await existing.edit(content=body)
+            else:
+                await vote_count_channel.send(body)
 
     # ---- Execution vote ("letali fisiche" mechanic) ----
 

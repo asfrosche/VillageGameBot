@@ -9,3 +9,78 @@ from cogs import data_utils
 
 class TestDataUtilsCommands:
     """Validate all commands exist and have required metadata."""
+
+
+class _FakeChannel:
+    def __init__(self, cid, name):
+        self.id = cid
+        self.name = name
+
+
+class _FakeGuild:
+    def __init__(self, gid, channels):
+        self.id = gid
+        self.channels = channels
+
+    def get_channel(self, cid):
+        return next((c for c in self.channels if c.id == cid), None)
+
+
+class TestGetLynchChannel:
+    """Lynch/leader channels resolve by ID so renames don't break them."""
+
+    def test_resolves_by_id_after_rename(self):
+        """The reported bug: renaming a configured session must not break it."""
+        ch = _FakeChannel(111, "my-cool-session")
+        guild = _FakeGuild(55, [ch])
+        gd = {"lynch_channel_name1": "vote-session-1", "lynch_channel_id1": 111}
+        assert data_utils.get_lynch_channel(guild, gd, "lynch_channel_name1") is ch
+
+    def test_backfills_id_for_legacy_guilds(self):
+        """A guild with no stored ID gets one on first successful name match."""
+        ch = _FakeChannel(111, "vote-session-1")
+        guild = _FakeGuild(55, [ch])
+        gd = {"lynch_channel_name1": "vote-session-1", "lynch_channel_id1": None}
+        with patch.object(data_utils, "save_guild_data") as save:
+            assert data_utils.get_lynch_channel(guild, gd, "lynch_channel_name1") is ch
+        assert gd["lynch_channel_id1"] == 111
+        save.assert_called_once()
+
+    def test_repairs_stale_id(self):
+        """Channel deleted and recreated under the same name: ID is rewritten."""
+        fresh = _FakeChannel(999, "vote-session-1")
+        guild = _FakeGuild(55, [fresh])
+        gd = {"lynch_channel_name1": "vote-session-1", "lynch_channel_id1": 111}
+        with patch.object(data_utils, "save_guild_data"):
+            assert data_utils.get_lynch_channel(guild, gd, "lynch_channel_name1") is fresh
+        assert gd["lynch_channel_id1"] == 999
+
+    def test_malformed_id_falls_back_to_name(self):
+        """A corrupt stored ID must not crash the voting path."""
+        ch = _FakeChannel(111, "session")
+        guild = _FakeGuild(55, [ch])
+        gd = {"lynch_channel_name1": "session", "lynch_channel_id1": "not-an-int"}
+        with patch.object(data_utils, "save_guild_data"):
+            assert data_utils.get_lynch_channel(guild, gd, "lynch_channel_name1") is ch
+
+    def test_unset_returns_none(self):
+        """Missing config yields None instead of raising."""
+        assert data_utils.get_lynch_channel(_FakeGuild(55, []), {}, "lynch_channel_name1") is None
+
+    def test_all_three_keys_covered(self):
+        """Session 1, session 2 and the leader channel all map to ID keys."""
+        assert data_utils.LYNCH_CHANNEL_ID_KEYS == {
+            "lynch_channel_name1": "lynch_channel_id1",
+            "lynch_channel_name2": "lynch_channel_id2",
+            "lynch_channel_name3": "lynch_channel_id3",
+            "lynch_channel_name4": "lynch_channel_id4",
+            "leader_channel_name": "leader_channel_id",
+        }
+
+    def test_set_lynch_channel_stores_name_and_id(self):
+        """.channelset records both so lookups are rename-proof."""
+        ch = _FakeChannel(42, "fancy-session")
+        gd = {}
+        data_utils.set_lynch_channel(gd, "lynch_channel_name1", ch)
+        assert gd["lynch_channel_name1"] == "fancy-session"
+        assert gd["lynch_channel_id1"] == 42

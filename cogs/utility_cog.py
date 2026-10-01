@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from discord.ui import View, Button
 from utils.embeds import warning_embed
-from cogs.data_utils import load_guild_data, save_guild_data, add_player
+from cogs.data_utils import load_guild_data, save_guild_data, add_player, get_lynch_channel
 from cogs.status_cog import (
     check_dead_warning,
     StatusWarningConfirmView,
@@ -759,6 +759,8 @@ class Utility(commands.Cog):
         votes_sessions = {
             "LYNCH SESSION 1": guild_data.get("lynch_votes1", {}),
             "LYNCH SESSION 2": guild_data.get("lynch_votes2", {}),
+            "LYNCH SESSION 3": guild_data.get("lynch_votes3", {}),
+            "LYNCH SESSION 4": guild_data.get("lynch_votes4", {}),
             "LEADER ELECTION": guild_data.get("leader_votes", {}),
         }
         embeds = []
@@ -809,16 +811,20 @@ class Utility(commands.Cog):
                 daychat = discord.utils.get(guild.channels, name=guild_data["daydiscussion_channel_name"])
                 megaphone = discord.utils.get(guild.channels, name=guild_data["megaphone_channel_name"])
                 announcements_channel = discord.utils.get(guild.channels, name=guild_data["announcements_channel_name"])
-                lynch_channel1 = discord.utils.get(guild.channels, name=guild_data["lynch_channel_name1"])
-                lynch_channel2 = discord.utils.get(guild.channels, name=guild_data["lynch_channel_name2"])
-                leader_channel = discord.utils.get(guild.channels, name=guild_data["leader_channel_name"])
+                lynch_channel1 = get_lynch_channel(guild, guild_data, "lynch_channel_name1")
+                lynch_channel2 = get_lynch_channel(guild, guild_data, "lynch_channel_name2")
+                lynch_channel3 = get_lynch_channel(guild, guild_data, "lynch_channel_name3")
+                lynch_channel4 = get_lynch_channel(guild, guild_data, "lynch_channel_name4")
+                leader_channel = get_lynch_channel(guild, guild_data, "leader_channel_name")
                 daychat_channels = [daychat, megaphone]
-                voting_channels = [lynch_channel1, lynch_channel2, leader_channel]
+                voting_channels = [lynch_channel1, lynch_channel2, lynch_channel3, lynch_channel4, leader_channel]
 
                 if allow_messages:
                     # --- DAY START: reset votes and restart message tracking ---
                     guild_data["lynch_votes1"] = {}
                     guild_data["lynch_votes2"] = {}
+                    guild_data["lynch_votes3"] = {}
+                    guild_data["lynch_votes4"] = {}
                     guild_data["leader_votes"] = {}
                     guild_data["tracked_message_counts"] = {}
                     guild_data["message_tracking_enabled"] = True
@@ -1057,7 +1063,7 @@ class Utility(commands.Cog):
                     dead_ids = {str(m.id) for m in alive_members}
                     vote_lines = []
                     removed_votes = []
-                    for vote_dict in [guild_data.get("lynch_votes1", {}), guild_data.get("lynch_votes2", {}), guild_data.get("leader_votes", {})]:
+                    for vote_dict in [guild_data.get("lynch_votes1", {}), guild_data.get("lynch_votes2", {}), guild_data.get("lynch_votes3", {}), guild_data.get("lynch_votes4", {}), guild_data.get("leader_votes", {})]:
                         for voter_id, target_id in list(vote_dict.items()):
                             if voter_id in dead_ids or str(target_id) in dead_ids:
                                 voter = ctx.guild.get_member(int(voter_id))

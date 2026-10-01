@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from discord.ext import commands
 from discord.ui import Button, View, Select
-from cogs.data_utils import load_guild_data, save_guild_data, base_variables
+from cogs.data_utils import load_guild_data, save_guild_data, base_variables, set_lynch_channel
 from cogs.help_misc_cog import COMMON_TIMEZONES
 
 def _utc_offset_str(tz_name: str) -> str:
@@ -216,9 +216,11 @@ class Setup(commands.Cog):
                 await os_relations_category.create_text_channel(name=map_channel_name)
                 await daychat_category.create_text_channel(name=daydiscussion_channel_name)
                 await daychat_category.create_text_channel(name=megaphone_channel_name)
-                await daychat_category.create_text_channel(name=lynch_channel_name1)
-                await daychat_category.create_text_channel(name=lynch_channel_name2)
-                await daychat_category.create_text_channel(name=leader_channel_name)
+                set_lynch_channel(guild_data, "lynch_channel_name1", await daychat_category.create_text_channel(name=lynch_channel_name1))
+                set_lynch_channel(guild_data, "lynch_channel_name2", await daychat_category.create_text_channel(name=lynch_channel_name2))
+                set_lynch_channel(guild_data, "lynch_channel_name3", await daychat_category.create_text_channel(name=guild_data.get("lynch_channel_name3", "🗳│vote-session-3")))
+                set_lynch_channel(guild_data, "lynch_channel_name4", await daychat_category.create_text_channel(name=guild_data.get("lynch_channel_name4", "🗳│vote-session-4")))
+                set_lynch_channel(guild_data, "leader_channel_name", await daychat_category.create_text_channel(name=leader_channel_name))
                 await daychat_category.create_text_channel(name=vote_count_name)
                 await publc_category.create_text_channel(name='duplicate-this')
                 await privc_category.create_text_channel(name='duplicate-this')
@@ -282,7 +284,7 @@ class Setup(commands.Cog):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
-                valid_channels = ['daydiscussion', 'megaphone', 'lynchsession1', 'lynchsession2', 'leaderelection', 'votecount', 'logchannel', 'actionslogchannel', 'announcements', 'map', 'whisperlogs', 'editdellogs', 'joinleavelogs', 'narrationlog']
+                valid_channels = ['daydiscussion', 'megaphone', 'lynchsession1', 'lynchsession2', 'lynchsession3', 'lynchsession4', 'leaderelection', 'votecount', 'logchannel', 'actionslogchannel', 'announcements', 'map', 'whisperlogs', 'editdellogs', 'joinleavelogs', 'narrationlog']
                 if new_channel is None:
                     new_channel = ctx.channel
                 new_channel_name = new_channel.name
@@ -292,11 +294,15 @@ class Setup(commands.Cog):
                     elif channel.lower() == 'megaphone':
                         guild_data['megaphone_channel_name'] = new_channel_name
                     elif channel.lower() == 'lynchsession1':
-                        guild_data['lynch_channel_name1'] = new_channel_name
+                        set_lynch_channel(guild_data, 'lynch_channel_name1', new_channel)
                     elif channel.lower() == 'lynchsession2':
-                        guild_data['lynch_channel_name2'] = new_channel_name
+                        set_lynch_channel(guild_data, 'lynch_channel_name2', new_channel)
+                    elif channel.lower() == 'lynchsession3':
+                        set_lynch_channel(guild_data, 'lynch_channel_name3', new_channel)
+                    elif channel.lower() == 'lynchsession4':
+                        set_lynch_channel(guild_data, 'lynch_channel_name4', new_channel)
                     elif channel.lower() == 'leaderelection':
-                        guild_data['leader_channel_name'] = new_channel_name
+                        set_lynch_channel(guild_data, 'leader_channel_name', new_channel)
                     elif channel.lower() == 'votecount':
                         guild_data['vote_count_name'] = new_channel_name
                     elif channel.lower() == 'logchannel':
