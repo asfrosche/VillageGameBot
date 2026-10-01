@@ -158,22 +158,6 @@ def init_db() -> None:
             """
         )
 
-        # Actions logging (confirmed done actions)
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS actions_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id INTEGER NOT NULL,
-                channel_id INTEGER NOT NULL,
-                player_id INTEGER,
-                message TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                marked_at TEXT NOT NULL,
-                marked_by_id INTEGER NOT NULL
-            )
-            """
-        )
-
         # Invites tracking (migrated from invites.db)
         cur.execute(
             """
@@ -869,39 +853,6 @@ def modify_active_ability(
 # ---------------------------------------------------------------------------
 
 
-def insert_action_log(
-    guild_id: int,
-    channel_id: int,
-    *,
-    player_id: int | None,
-    message: str,
-    created_at: datetime,
-    marked_at: datetime,
-    marked_by_id: int,
-) -> None:
-    _ensure_ready()
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO actions_log (
-                guild_id, channel_id, player_id, message,
-                created_at, marked_at, marked_by_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                guild_id,
-                channel_id,
-                player_id,
-                message,
-                created_at.isoformat(),
-                marked_at.isoformat(),
-                marked_by_id,
-            ),
-        )
-        conn.commit()
-
-
 # ---------------------------------------------------------------------------
 # Auto-visit RC allocation helpers
 # ---------------------------------------------------------------------------
@@ -1133,45 +1084,6 @@ def reset_auto_visit_rc_usage(guild_id: int, channel_id: int) -> None:
             (guild_id, channel_id),
         )
         conn.commit()
-
-
-# ---------------------------------------------------------------------------
-# Actions log helpers
-# ---------------------------------------------------------------------------
-
-
-def get_actions_for_channel(
-    guild_id: int,
-    channel_id: int,
-    *,
-    limit: int = 50,
-    offset: int = 0,
-) -> list[dict]:
-    _ensure_ready()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, player_id, message, created_at, marked_at, marked_by_id
-            FROM actions_log
-            WHERE guild_id = ? AND channel_id = ?
-            ORDER BY marked_at DESC
-            LIMIT ? OFFSET ?
-            """,
-            (guild_id, channel_id, limit, offset),
-        ).fetchall()
-        out: list[dict] = []
-        for r in rows:
-            out.append(
-                {
-                    "id": int(r["id"]),
-                    "player_id": int(r["player_id"]) if r["player_id"] is not None else None,
-                    "message": r["message"],
-                    "created_at": r["created_at"],
-                    "marked_at": r["marked_at"],
-                    "marked_by_id": int(r["marked_by_id"]),
-                }
-            )
-        return out
 
 
 # ---------------------------------------------------------------------------

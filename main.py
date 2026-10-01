@@ -30,7 +30,7 @@ from cogs.game_manager_en import GameManagerEn
 from cogs.game_manager_it import GameManagerIt
 from cogs.economy_cog import Economy
 from cogs.auction_cog import AuctionCog
-from cogs.dashboard_cog import Dashboard
+# from cogs.dashboard_cog import Dashboard  # dashboard disabled
 from cogs.handling_cog import Handling
 from cogs.home_cog import Home
 from cogs.infos_cog import Infos
@@ -700,7 +700,7 @@ async def startcog():
     await bot.add_cog(GameManagerIt(bot))
     await bot.add_cog(Economy(bot))
     await bot.add_cog(AuctionCog(bot))
-    await bot.add_cog(Dashboard(bot))
+    # await bot.add_cog(Dashboard(bot))  # dashboard disabled
     await bot.add_cog(AuxBattle(bot))
     await bot.add_cog(Birthday(bot))
     await bot.add_cog(Meetup(bot))

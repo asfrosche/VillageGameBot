@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select, Modal, TextInput
-from datetime import datetime, timezone
 import json
 import os
 
@@ -111,9 +110,6 @@ def _get_current_house_names(guild: discord.Guild, guild_data: dict, rc_channel:
         if ch.permissions_for(rc_channel.guild.default_role).read_messages is False:
             found_houses.append(ch.name)
     return found_houses
-
-def insert_action_log(guild_id: int, channel_id: int, player_id: int, message: str, created_at, marked_at, marked_by_id):
-    pass
 
 
 # ------------------------------------------------------------------ #
@@ -367,9 +363,6 @@ class Dashboard(commands.Cog):
 
     async def _commit_ability_usage(self, interaction: discord.Interaction, rc_channel: discord.TextChannel, ability: dict, target_info: str, custom_msg: str):
         """Metodo unificato per scalare l'utilizzo solo alla conferma effettiva del target e fornire l'unico feedback finale."""
-        guild = interaction.guild
-        now_time = datetime.now(timezone.utc)
-
         # Riduci gli utilizzi se non infiniti
         ch_config = get_channel_config(rc_channel.id)
         for ab in ch_config.get("abilities", []):
@@ -378,13 +371,6 @@ class Dashboard(commands.Cog):
                     ab["uses"] -= 1
                 break
         update_channel_config(rc_channel.id, ch_config)
-
-        # Inserisci nel registro
-        insert_action_log(
-            guild_id=guild.id, channel_id=rc_channel.id, player_id=interaction.user.id,
-            message=f"✨ [ABILITÀ] {ability.get('id')} ({target_info})",
-            created_at=now_time, marked_at=now_time, marked_by_id=self.bot.user.id
-        )
 
         # Invia l'unico feedback corretto (evita i doppi embed inutili originali)
         if interaction.response.is_done():
@@ -1106,7 +1092,6 @@ class Dashboard(commands.Cog):
     async def _execute_visit(self, interaction: discord.Interaction, rc_channel: discord.TextChannel, visit_type: str, house_name: str):
         guild = interaction.guild
         guild_data = load_guild_data(guild.id)
-        now_time = datetime.now(timezone.utc)
 
         houses_cat = discord.utils.get(guild.categories, name=guild_data.get("houses_category_name"))
         target_channel = next((ch for ch in houses_cat.channels if ch.name == house_name), None) if houses_cat else None
@@ -1133,11 +1118,6 @@ class Dashboard(commands.Cog):
             ctx.author = interaction.user
 
             if visit_type == "normal":
-                insert_action_log(
-                    guild_id=guild.id, channel_id=rc_channel.id, player_id=interaction.user.id,
-                    message=f"🚪 [BUSSATA] Ha bussato alla porta di {target_channel.name}",
-                    created_at=now_time, marked_at=now_time, marked_by_id=self.bot.user.id
-                )
                 if hasattr(moving_cog, "process_knock"):
                     await moving_cog.process_knock(ctx, target_channel, guild_data)
                 
@@ -1147,12 +1127,7 @@ class Dashboard(commands.Cog):
                 is_stealth = (visit_type == "stealth")
                 if hasattr(moving_cog, "process_move"):
                     await moving_cog.process_move(ctx, target_channel, is_stealth=is_stealth, read_only=False)
-                
-                insert_action_log(
-                    guild_id=guild.id, channel_id=rc_channel.id, player_id=interaction.user.id,
-                    message=f"🚪 [INGRESSO DIRECT] Entrato in {target_channel.name} ({visit_type})",
-                    created_at=now_time, marked_at=now_time, marked_by_id=self.bot.user.id
-                )
+
                 # Feedback effimero transitorio silenzioso (le stampe verranno fatte dal cog Moving)
                 await interaction.followup.send(f"✅ **Azione di ingresso inviata per {house_name}.**", ephemeral=True)
         else:
