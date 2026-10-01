@@ -139,18 +139,23 @@ async def _log_economy(
     actor: discord.Member,
     details: str,
 ) -> None:
-    """Post a one-line audit embed to the economy log channel, if configured.
+    """Post a one-line audit embed to the economy log channel.
 
     The channel is identified by the ``economy_log_channel_name`` key in
-    guild_data. If the key is missing or the channel doesn't exist, this
-    is a silent no-op so nothing breaks when logging isn't set up.
+    guild_data (falls back to ``logs-economy``). If the channel doesn't exist
+    yet it is created under the OVERSEER category so logging works without a
+    manual setup step.
     """
-    log_channel_name = guild_data.get("economy_log_channel_name")
+    log_channel_name = guild_data.get("economy_log_channel_name") or "logs-economy"
     if not log_channel_name:
         return
     log_ch = discord.utils.get(guild.text_channels, name=log_channel_name)
-    if not log_ch:
-        return
+    if log_ch is None:
+        overseer_cat = discord.utils.get(guild.categories, name=guild_data.get("overseer_category_name", "OVERSEER"))
+        try:
+            log_ch = await guild.create_text_channel(name=log_channel_name, category=overseer_cat)
+        except discord.HTTPException:
+            return
     embed = discord.Embed(
         color=0xFF3FB9,
         timestamp=datetime.now(timezone.utc),
@@ -233,6 +238,13 @@ class InventoryView(View):
 
         if ok:
             add_inventory_item_channel(interaction.guild_id, self.channel_id, owned["item_id"], -1)
+            await _log_economy(
+                interaction.guild,
+                load_guild_data(interaction.guild_id) or {},
+                action="Item Used",
+                actor=interaction.user,
+                details=f"Used **{owned['name']}** in {interaction.channel.mention} (×1).",
+            )
 
     async def _do_sell(self, interaction: discord.Interaction) -> None:
         owned = self._get_owned(interaction, self.selected_item_id)
@@ -248,6 +260,13 @@ class InventoryView(View):
         refund = item["price"] // 2
         add_inventory_item_channel(interaction.guild_id, self.channel_id, owned["item_id"], -1)
         update_economy_channel_balance(interaction.guild_id, self.channel_id, refund)
+        await _log_economy(
+            interaction.guild,
+            load_guild_data(interaction.guild_id) or {},
+            action="Item Sold",
+            actor=interaction.user,
+            details=f"Sold **{owned['name']}** for **{refund:,}** coins (50% refund) in {interaction.channel.mention}.",
+        )
         await interaction.response.send_message(
             f"Sold **{owned['name']}** for **{refund:,}** coins (50% refund).", ephemeral=True
         )
@@ -476,26 +495,43 @@ class InventoryView(View):
             await interaction.followup.send("I need Manage Messages permission to use the broom here.", ephemeral=True)
             return False
 
+    async def _announce_extra_visit(self, channel, display_name: str) -> bool:
+        """Announce the extra visit in the rolechat where it was used, pinned.
+
+        Extra visits only make sense inside a rolechat, so the announcement is
+        limited to the channel the item was used in — and only if that channel
+        lives in a configured rolechat category. The previous scan posted to the
+        first rolechat the user was a member of, which could be the wrong one.
+        """
+        if not isinstance(channel, discord.TextChannel):
+            return False
+        guild = getattr(channel, "guild", None)
+        if guild is None:
+            return False
+        guild_data = load_guild_data(guild.id)
+        rolechat_cats = {
+            guild_data.get("rc_category_name"),
+            guild_data.get("alt_category_name"),
+            guild_data.get("dead_rc_category_name"),
+        }
+        if getattr(channel, "category", None) is None or channel.category.name not in rolechat_cats:
+            return False
+        try:
+            msg = await channel.send(f"🚪 **{display_name}** used an extra visit!")
+        except discord.HTTPException:
+            return False
+        try:
+            await msg.pin()
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+        return True
+
     async def _do_extra_visit(self, interaction: discord.Interaction) -> bool:
-        guild_data = load_guild_data(interaction.guild_id)
-        rc_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("rc_category_name"))
-        alt_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("alt_category_name"))
-        dead_rc = discord.utils.get(interaction.guild.categories, name=guild_data.get("dead_rc_category_name"))
-        sent = False
-        for cat in (rc_cat, alt_cat, dead_rc):
-            if not cat:
-                continue
-            for ch in cat.text_channels:
-                if interaction.user in ch.members and ch.permissions_for(interaction.user).send_messages:
-                    await ch.send(f"🚪 **{interaction.user.display_name}** used an extra visit!")
-                    sent = True
-                    break
-            if sent:
-                break
-        if not sent:
-            await interaction.response.send_message("Could not find a rolechat to announce the visit.", ephemeral=True)
-        else:
-            await interaction.response.send_message("🚪 Extra visit used!", ephemeral=True)
+        sent = await self._announce_extra_visit(interaction.channel, interaction.user.display_name)
+        await interaction.response.send_message(
+            "🚪 Extra visit used!" if sent else "Extra visits can only be used in a rolechat.",
+            ephemeral=True,
+        )
         return sent
 
     async def _do_will(self, interaction: discord.Interaction) -> bool:
@@ -681,6 +717,13 @@ class ShopView(View):
 
         await interaction.response.send_message(
             f"Bought **{item['name']}** for **{item['price']:,}**. ×{new_qty}", ephemeral=True
+        )
+        await _log_economy(
+            interaction.guild,
+            load_guild_data(self.guild_id) or {},
+            action="Purchase",
+            actor=interaction.user,
+            details=f"Bought **{item['name']}** for **{item['price']:,}** coins in {interaction.channel.mention}. ×{new_qty}",
         )
 
     @discord.ui.button(label="Edit Price", emoji="✏️", style=discord.ButtonStyle.secondary, row=2)
@@ -957,6 +1000,13 @@ class Economy(commands.Cog):
             description=f"Added **{amount:,}** to **{count}** rolechat(s).",
         )
         await ctx.send(embed=embed)
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Collect",
+            actor=ctx.author,
+            details=f"Added **{amount:,}** to **{count}** rolechat(s).",
+        )
 
     @commands.command(name="setcollect")
     @commands.has_permissions(administrator=True)
@@ -1043,6 +1093,13 @@ class Economy(commands.Cog):
             ),
         )
         await ctx.send(embed=embed)
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Purchase",
+            actor=ctx.author,
+            details=f"Bought **{quantity}× {item['name']}** for **{cost:,}** coins in {ctx.channel.mention}. ×{new_qty}",
+        )
 
     @commands.command(name="inventory", aliases=["inv"])
     async def inventory(self, ctx: commands.Context, channel: discord.TextChannel | None = None):
@@ -1159,6 +1216,13 @@ class Economy(commands.Cog):
             if interaction.user.id == self.recipient.id:
                 new_qty = add_inventory_item_channel(self.ctx.guild.id, self.target_rc.id, self.item["id"], self.quantity)
                 add_inventory_item_channel(self.ctx.guild.id, self.sender_rc.id, self.item["id"], -self.quantity)
+                await _log_economy(
+                    self.ctx.guild,
+                    load_guild_data(self.ctx.guild.id) or {},
+                    action="Item Trade",
+                    actor=self.ctx.author,
+                    details=f"Gave **{self.quantity}× {self.item['name']}** to {self.recipient.mention} — #{self.sender_rc.name} → #{self.target_rc.name}.",
+                )
                 await interaction.response.edit_message(
                     content=f"✅ {self.recipient.mention} accepted! **{self.quantity}× {self.item['name']}** transferred.\n"
                             f"They now have **{new_qty}× {self.item['name']}** in #{self.target_rc.name}.",
@@ -1625,6 +1689,13 @@ class Economy(commands.Cog):
         add_inventory_item_channel(ctx.guild.id, ctx.channel.id, owned["item_id"], -1)
         update_economy_channel_balance(ctx.guild.id, ctx.channel.id, refund)
 
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Item Sold",
+            actor=ctx.author,
+            details=f"Sold **{owned['name']}** for **{refund:,}** coins (50% of shop price) in {ctx.channel.mention}.",
+        )
         await ctx.send(
             f"Sold **{owned['name']}** for **{refund:,}** coins (50% of shop price)."
         )
@@ -1650,6 +1721,13 @@ class Economy(commands.Cog):
                 count += 1
 
         await ctx.send(f"Added **{amount:,}** to **{count}** rolechats of members with {role.mention}.")
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Add Money Role",
+            actor=ctx.author,
+            details=f"Added **{amount:,}** to **{count}** rolechat(s) of members with {role.mention}.",
+        )
 
     @commands.command(name="leaderboard", aliases=["lb", "top"])
     async def leaderboard(self, ctx: commands.Context):
@@ -1752,6 +1830,13 @@ class Economy(commands.Cog):
 
         if ok:
             add_inventory_item_channel(ctx.guild.id, inv_channel_id, owned["item_id"], -1)
+            await _log_economy(
+                ctx.guild,
+                guild_data,
+                action="Item Used",
+                actor=ctx.author,
+                details=f"Used **{owned['name']}** in {ctx.channel.mention} (×1).",
+            )
 
     async def _trigger_fireworks(self, ctx: commands.Context) -> bool:
         """Reveal the caller's position in announcements."""
@@ -1938,26 +2023,12 @@ class Economy(commands.Cog):
             return False
 
     async def _trigger_extra_visit(self, ctx: commands.Context) -> bool:
-        """Grants an extra visit and announces in the rolechat."""
-        guild_data = load_guild_data(ctx.guild.id)
-        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
-        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
-        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
-        sent = False
-        for cat in (rc_cat, alt_cat, dead_rc):
-            if not cat:
-                continue
-            for ch in cat.text_channels:
-                if ctx.author in ch.members and ch.permissions_for(ctx.author).send_messages:
-                    await ch.send(f"🚪 **{ctx.author.display_name}** used an extra visit!")
-                    sent = True
-                    break
-            if sent:
-                break
-        if not sent:
-            await ctx.send("Could not find a rolechat to announce the visit.")
-        else:
+        """Grants an extra visit and announces in the rolechat where it was used."""
+        sent = await self._announce_extra_visit(ctx.channel, ctx.author.display_name)
+        if sent:
             await ctx.send("🚪 Extra visit used!")
+        else:
+            await ctx.send("Extra visits can only be used in a rolechat.")
         return sent
 
     async def _trigger_will(self, ctx: commands.Context) -> bool:
@@ -2056,11 +2127,19 @@ class Economy(commands.Cog):
 
         summary = ", ".join(f"{qty}× {name}" for _, name, qty in items_to_add)
         await ctx.send(f"Added {summary} to **{count}** rolechats of members with {role.mention}.")
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Add Items Role",
+            actor=ctx.author,
+            details=f"Added {summary} to **{count}** rolechat(s) of members with {role.mention}.",
+        )
 
     @commands.command(name="removeitem", aliases=["rmitem"])
     @commands.has_permissions(administrator=True)
     async def removeitem(self, ctx: commands.Context, channel: discord.TextChannel, *, text: str):
         """Remove items from a rolechat's inventory. Usage: .removeitem #rolechannel <item> [qty]"""
+        guild_data = load_guild_data(ctx.guild.id)
         query, quantity = _split_trailing_qty(text)
         if quantity <= 0:
             return await ctx.send("Quantity must be positive.")
@@ -2078,6 +2157,13 @@ class Economy(commands.Cog):
         new_qty = add_inventory_item_channel(ctx.guild.id, channel.id, item["id"], -quantity)
         removed = old_qty - new_qty
         await ctx.send(f"Removed **{removed}× {item['name']}** from {channel.mention}.")
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Remove Item",
+            actor=ctx.author,
+            details=f"Removed **{removed}× {item['name']}** from {channel.mention}.",
+        )
 
     @commands.command(name="giveitem")
     @commands.has_permissions(administrator=True)
@@ -2114,6 +2200,13 @@ class Economy(commands.Cog):
 
         new_qty = add_inventory_item_channel(ctx.guild.id, target_rc.id, item["id"], quantity)
         await ctx.send(f"Gave **{quantity}× {item['name']}** to {member.mention} in #{target_rc.name}. They now have **{new_qty}**.")
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Give Item",
+            actor=ctx.author,
+            details=f"Gave **{quantity}× {item['name']}** to {member.mention} in #{target_rc.name}. They now have **{new_qty}**.",
+        )
 
     @commands.command(name="removeitemplayer", aliases=["rip"])
     @commands.has_permissions(administrator=True)
@@ -2155,6 +2248,13 @@ class Economy(commands.Cog):
         new_qty = add_inventory_item_channel(ctx.guild.id, target_rc.id, item["id"], -quantity)
         removed = old_qty - new_qty
         await ctx.send(f"Removed **{removed}× {item['name']}** from {member.mention} in #{target_rc.name}.")
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Remove Item Player",
+            actor=ctx.author,
+            details=f"Removed **{removed}× {item['name']}** from {member.mention} in #{target_rc.name}.",
+        )
 
 
 async def setup(bot: commands.Bot):
