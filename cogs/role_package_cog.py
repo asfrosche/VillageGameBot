@@ -211,6 +211,15 @@ class RolePackageCog(commands.Cog):
     def _guild_data(self, guild: discord.Guild) -> dict | None:
         return load_guild_data(guild.id)
 
+    def _resolve_member(self, guild: discord.Guild, member_id) -> discord.Member | None:
+        """Look up a member from a stored Discord ID, tolerating missing/junk values."""
+        if not member_id:
+            return None
+        try:
+            return guild.get_member(int(member_id))
+        except (TypeError, ValueError):
+            return None
+
     def _is_role_chat(self, channel: discord.abc.GuildChannel, guild_data: dict) -> bool:
         for category_name in (
             guild_data.get("rc_category_name"),
@@ -1031,10 +1040,19 @@ class RolePackageCog(commands.Cog):
         ))
 
     @commands.command(name="reviewteams")
-    async def reviewteams(self, ctx: commands.Context):
+    async def reviewteams(self, ctx: commands.Context, alive: str = None):
+        """Review role teams in the publishing draft.
+
+        Pass `alive` to list only Role Chats whose player currently holds the Alive role."""
         if not await self._require_admin(ctx):
             return
         if not await self._require_overseer(ctx):
+            return
+        show_alive = alive is not None
+        if show_alive and alive.strip().lower() != "alive":
+            await ctx.send(
+                "❌ Usage: `.reviewteams [alive]` — pass `alive` to list only currently alive players."
+            )
             return
         guild_data = self._guild_data(ctx.guild)
         packages = get_role_packages(ctx.guild.id)
@@ -1044,23 +1062,42 @@ class RolePackageCog(commands.Cog):
         channel_slots = guild_data.get("channel_slots", {})
         slot_names = {1: "Village", 2: "Evil", 3: "Rk", 4: "Neutral", 5: "Bonus/Extra"}
 
+        alive_role = None
+        if show_alive:
+            alive_label = guild_data.get("alive_role_name") or "Alive"
+            alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+            if alive_role is None:
+                await ctx.send(
+                    f"❌ No role named `{alive_label}` exists in this server — check `alive_role_name` in your setup."
+                )
+                return
+
         by_team: dict[int, list] = {1: [], 2: [], 3: [], 4: [], 5: []}
         unassigned = []
+        unlinked = 0
 
         for package in packages:
             channel = ctx.guild.get_channel(package["channel_id"])
+            ch_id = channel.id if channel else package["channel_id"]
             ch_name = channel.mention if channel else f"ID {package['channel_id']}"
 
-            stored_info = self._get_channel_slot_info(channel_slots, channel.id)
-            stored_slot = self._get_channel_slot(channel_slots, channel.id)
+            stored_info = self._get_channel_slot_info(channel_slots, ch_id)
+            stored_slot = self._get_channel_slot(channel_slots, ch_id)
 
             player_name = _clean_visual_name(_escape_md(stored_info.get("player_name", "Unknown"))) if stored_info else "Unknown"
             sponsor_name = _clean_visual_name(_escape_md(stored_info.get("sponsor_name", "—"))) if stored_info else "—"
-            team_slot = stored_slot
+
+            if show_alive:
+                player = self._resolve_member(ctx.guild, (stored_info or {}).get("player_id"))
+                if player is None:
+                    unlinked += 1
+                    continue
+                if alive_role not in player.roles:
+                    continue
 
             entry = f"🔹 **{ch_name}** — {player_name} + {sponsor_name}"
-            if team_slot:
-                by_team[team_slot].append(entry)
+            if stored_slot:
+                by_team[stored_slot].append(entry)
             else:
                 unassigned.append(entry)
 
@@ -1119,14 +1156,24 @@ class RolePackageCog(commands.Cog):
             pages.append(current_page)
 
         if not pages:
-            await ctx.send("No role packages to review.")
+            if show_alive:
+                suffix = f" _({unlinked} skipped — no linked player account)_" if unlinked else ""
+                await ctx.send(f"No alive players to review.{suffix}")
+            else:
+                await ctx.send("No role packages to review.")
             return
 
+        title = "Team Review — Alive Players" if show_alive else "Team Review"
         for i, page_text in enumerate(pages):
             await ctx.send(embed=info_embed(
-                title="Team Review" + (f" ({i + 1}/{len(pages)})" if len(pages) > 1 else ""),
+                title=title + (f" ({i + 1}/{len(pages)})" if len(pages) > 1 else ""),
                 description=page_text
             ))
+        if show_alive and unlinked:
+            await ctx.send(
+                f"_Skipped {unlinked} role chat(s) with no linked player account — run "
+                "`.role regteam` so their player_id is stored._"
+            )
 
     @commands.command(name="ps", aliases=["playerspons"])
     async def ps(self, ctx: commands.Context):
@@ -1141,14 +1188,6 @@ class RolePackageCog(commands.Cog):
             return
 
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
-
-        def _member_by_id(member_id):
-            if not member_id:
-                return None
-            try:
-                return ctx.guild.get_member(int(member_id))
-            except (TypeError, ValueError):
-                return None
 
         def _verified_alive(member):
             if alive_role is None:
@@ -1171,7 +1210,7 @@ class RolePackageCog(commands.Cog):
             player_name = _clean_visual_name(_escape_md(stored_info.get("player_name", "Unknown")))
             sponsor_name = _clean_visual_name(_escape_md(stored_info.get("sponsor_name", "—")))
 
-            if not _verified_alive(_member_by_id(stored_info.get("player_id"))) and not _verified_alive(_member_by_id(stored_info.get("sponsor_id"))):
+            if not _verified_alive(self._resolve_member(ctx.guild, stored_info.get("player_id"))) and not _verified_alive(self._resolve_member(ctx.guild, stored_info.get("sponsor_id"))):
                 continue
 
             entries.append(f"🔹 **{ch_name}** — {player_name} + {sponsor_name}")
