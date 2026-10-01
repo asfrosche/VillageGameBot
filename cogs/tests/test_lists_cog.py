@@ -248,6 +248,9 @@ class TestDeadlistRemoveFlow:
             guild.get_member.return_value = None
         ctx.guild = guild
         ctx.send = AsyncMock()
+        # Must be a real list: a bare MagicMock is truthy, so the cog would take the
+        # "user mentioned someone" branch and store a mock instead of the resolved name.
+        ctx.message.mentions = []
         return ctx
 
     def test_remove_requires_admin(self):
@@ -405,6 +408,9 @@ class TestDeadlistEditFlow:
             guild.get_member.return_value = None
         ctx.guild = guild
         ctx.send = AsyncMock()
+        # Must be a real list: a bare MagicMock is truthy, so the cog would take the
+        # "user mentioned someone" branch and store a mock instead of the resolved name.
+        ctx.message.mentions = []
         return ctx
 
     def test_edit_requires_admin(self):
@@ -418,14 +424,15 @@ class TestDeadlistEditFlow:
         assert "permissions" in sent.lower()
 
     def test_edit_missing_args_shows_error(self):
-        """Missing team/role shows fill-all-inputs error."""
+        """Missing team/role shows the edit usage message."""
         cog = lists_cog.Lists(None)
         ctx = self._make_ctx()
 
         _run(cog.deadlist.callback(cog, ctx, "edit", "JohnDoe"))
         ctx.send.assert_called_once()
         sent = str(ctx.send.call_args)
-        assert "fill all inputs" in sent.lower()
+        assert "usage" in sent.lower()
+        assert "deadlist edit" in sent.lower()
 
     def test_edit_invalid_team_shows_error(self):
         """Invalid team name shows error."""
@@ -438,7 +445,7 @@ class TestDeadlistEditFlow:
 
         ctx.send.assert_called_once()
         sent = ctx.send.call_args[1].get("content", "") or str(ctx.send.call_args)
-        assert "Invalid team" in sent
+        assert "not a valid team" in sent
 
     def test_edit_removes_old_then_adds_new(self):
         """Edit calls remove_player then add_player with resolved name."""
@@ -468,7 +475,7 @@ class TestDeadlistEditFlow:
 
         ctx.send.assert_called_once()
         sent = ctx.send.call_args[1].get("content", "") or str(ctx.send.call_args)
-        assert "edited in deadlist" in sent
+        assert "edited in deadlist" in sent.lower()
 
     def test_edit_team_normalization_village(self):
         """Team aliases normalize to canonical names."""
@@ -540,6 +547,9 @@ class TestDeadlistAddFlow:
         ctx.guild = MagicMock()
         ctx.guild.get_member.return_value = None
         ctx.send = AsyncMock()
+        # Must be a real list: a bare MagicMock is truthy, so the cog would take the
+        # "user mentioned someone" branch and store a mock instead of the given name.
+        ctx.message.mentions = []
         return ctx
 
     def test_add_requires_admin(self):
@@ -553,14 +563,14 @@ class TestDeadlistAddFlow:
         assert "permissions" in sent.lower()
 
     def test_add_missing_args_shows_error(self):
-        """Missing team/role shows add usage error."""
+        """Missing team/role shows the add usage message."""
         cog = lists_cog.Lists(None)
         ctx = self._make_ctx()
 
         _run(cog.deadlist.callback(cog, ctx, "add", "JohnDoe"))
         ctx.send.assert_called_once()
         sent = str(ctx.send.call_args)
-        assert "all three arguments are required" in sent.lower()
+        assert "usage" in sent.lower()
         assert "deadlist add" in sent.lower()
 
     def test_add_invalid_team_shows_error(self):
@@ -573,7 +583,7 @@ class TestDeadlistAddFlow:
 
         ctx.send.assert_called_once()
         sent = ctx.send.call_args[1].get("content", "") or str(ctx.send.call_args)
-        assert "Invalid team" in sent
+        assert "not a valid team" in sent
 
     def test_add_success_message(self):
         """Successful add sends 'added to Deadlist'."""

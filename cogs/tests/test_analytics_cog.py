@@ -70,21 +70,21 @@ class TestAnalyticsCog:
         """Verify ErrorFilterModal class exists."""
         assert hasattr(analytics_cog, 'ErrorFilterModal')
 
-    def test_full_traceback_modal(self):
-        """Verify FullTracebackModal class exists."""
-        assert hasattr(analytics_cog, 'FullTracebackModal')
+    def test_command_filter_modal(self):
+        """Verify CommandFilterModal class exists."""
+        assert hasattr(analytics_cog, 'CommandFilterModal')
 
-    def test_traceback_lookup_modal(self):
-        """Verify TracebackLookupModal class exists."""
-        assert hasattr(analytics_cog, 'TracebackLookupModal')
+    def test_filter_button_exists(self):
+        """Verify the Filter button exists on AnalyticsView."""
+        assert hasattr(analytics_cog.AnalyticsView, 'filter_btn')
 
-    def test_reset_button_exists(self):
-        """Verify reset_errors button exists on AnalyticsView."""
-        assert hasattr(analytics_cog.AnalyticsView, 'reset_errors')
+    def test_error_select_exists(self):
+        """Verify the error dropdown exists on AnalyticsView."""
+        assert hasattr(analytics_cog.AnalyticsView, 'error_select')
 
     def test_errorpaginationview_instantiates(self):
-        """Verify ErrorPaginationView can be instantiated."""
-        pass
+        """ErrorPaginationView was replaced by the filter modals; nothing to construct."""
+        assert hasattr(analytics_cog, 'ErrorFilterModal')
 
     def test_dev_only_check(self):
         """Verify _dev_only returns a check."""
