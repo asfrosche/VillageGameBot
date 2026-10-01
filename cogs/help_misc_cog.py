@@ -73,6 +73,24 @@ def _embed_pages(title, footer_text, groups, color):
     return pages
 
 
+def _embed_chunks(embeds, max_embeds=10, max_chars=6000):
+    """Group embeds into as few messages as Discord's per-message limits allow."""
+    chunks = []
+    current = []
+    current_chars = 0
+    for embed in embeds:
+        size = len(embed)
+        if current and (len(current) >= max_embeds or current_chars + size > max_chars):
+            chunks.append(current)
+            current = []
+            current_chars = 0
+        current.append(embed)
+        current_chars += size
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 INTERACTION_GIFS = {
     "poke": [
         "https://tenor.com/view/nekone-utawarerumono-poke-anime-gif-26470052",
@@ -416,8 +434,9 @@ COMMAND_INDEX = [
     (".skipnightvoters <message_id>", "Show voters on a skip-night vote (admin)", "Voting", ["skipnight", "voters", "admin"]),
     (".votelist", "Show all current votes", "Voting", ["vote", "list", "current"]),
     (".resetvotes", "Reset all votes", "Voting", ["reset", "vote", "clear"]),
-    (".votehistory/vh [mode]", "Scan vote history — modes: grouped (by target) or range (reply to end msg)", "Voting", ["history", "vote", "log"]),
+    (".votehistory/vh [mode]", "Scan vote history (tracks .remvote/.removevote/.manipulate) — modes: grouped or range", "Voting", ["history", "vote", "log", "remvote"]),
     (".voteinrc true/false", "Enable voting in RoleChats", "Voting", ["rc", "rolechat", "vote", "toggle"]),
+    (".updatevotes / .uv [#ch]", "Guide to refresh the votecount for a session via .vh (admin)", "Voting", ["updatevotes", "refresh", "votecount", "vh"]),
     (".accuse @player #RC", "Accuse (costs 2 tokens, creates channel)", "Nominations", ["accuse", "nominate", "token"]),
     (".intervene #nom-ch", "Pay 1 token to speak in nomination", "Nominations", ["intervene", "speak", "token"]),
     (".voten #nom-ch yes/no", "Vote guilty or not guilty", "Nominations", ["vote", "guilty", "not", "nomination"]),
@@ -442,7 +461,9 @@ COMMAND_INDEX = [
     (".settarget <channel_id>", "Set target channel (ID, not mention)", "Send Role", ["target", "channel", "set"]),
     (".sendrole/sr <players>", "Reply to a msg to forward it to the target channel (admin)", "Send Role", ["send", "role", "forward"]),
     (".teamroll <n1> \"msg1\" <n2> \"msg2\" ...", "Randomly assigns quoted roles (Admin)", "Send Role", ["team", "roll", "random", "assign", "admin"]),
-    (".dl", "Reply to a link to download the media and send it here", "Utility", ["download", "media", "link", "yt-dlp"]),
+    (".dl", "Reply to a link to download the media and send it here", "Download", ["download", "media", "link", "yt-dlp"]),
+    (".mdl", "Reply to a link to download its audio as an MP3", "Download", ["download", "mp3", "audio", "music", "yt-dlp"]),
+    (".dsplit <N>", "Download and split a video into N equal parts (no number = minimum parts that fit)", "Download", ["download", "split", "parts", "video"]),
     (".day", "Unlock all day channels", "Utility", ["day", "unlock", "phase"]),
     (".night", "Lock all day channels", "Utility", ["night", "lock", "phase"]),
     (".broom", "Delete replied-to messages (logs kept)", "Utility", ["broom", "delete", "clean", "message"]),
@@ -479,7 +500,7 @@ COMMAND_INDEX = [
     (".autostealth", "Toggle stealth mode for auto-visits", "Utility", ["auto", "stealth", "toggle"]),
     (".help [category]", "Show this help menu", "Other", ["help", "menu", "command"]),
     (".who #ch", "List players in a channel", "Other", ["who", "list", "players", "channel"]),
-    (".where #RC", "Show a player's current location", "Other", ["where", "location", "find"]),
+    (".where #RC", "Show a player's current location (staff only, needs confirmation)", "Other", ["where", "location", "find"]),
     (".map", "Show the game map", "Other", ["map", "game", "overview"]),
     (".role", "Show the registered role package (paginated; role card excluded)", "Other", ["role", "package", "pinned", "first", "card"]),
     (".role register <1-4> <role name>", "Register pinned messages as a Role Package", "Other", ["role", "package", "register"]),
@@ -495,6 +516,7 @@ COMMAND_INDEX = [
     (".roll @role <n>", "Random players from a role", "Other", ["roll", "random", "pick"]),
     (".ping", "Bot online check", "Other", ["ping", "bot", "online", "check"]),
     (".ding", "Dong!", "Other", ["ding", "fun", "easter"]),
+    (".line / .banner [lines] [title]", "Draw a clean divider banner between text", "Other", ["line", "banner", "divider", "separator", "gap"]),
     (".narrate #ch <msg>", "Send narration to channels", "Other", ["narrate", "announce", "admin"]),
     (".narration/.n <text>", "Storybook embed (admin, pings)", "Other", ["narration", "story", "embed", "admin"]),
     (".anarration/.na <text>", "Silent narration (admin)", "Other", ["narration", "silent", "admin"]),
@@ -628,7 +650,7 @@ COMMAND_INDEX = [
     (".resolveplayer #channel @player", "Resolve a Role Chat player", "Library & Stats", ["roles", "resolve", "player"]),
     (".resolvesponsor #channel @sponsor", "Choose the Library Sponsor", "Library & Stats", ["roles", "resolve", "sponsor"]),
     (".reviewroles", "Review the role publishing draft", "Library & Stats", ["roles", "review", "publish"]),
-    (".reviewteams", "Review role teams in the publishing draft", "Library & Stats", ["roles", "teams", "review"]),
+    (".reviewteams", "Review role teams in the publishing draft (add `alive` for only alive players)", "Library & Stats", ["roles", "teams", "review", "alive"]),
     (".ps", "Randomized players & sponsors list (no team info)", "Library & Stats", ["players", "sponsors", "review", "list", "random"]),
     (".playerspons", "Alias of `.ps` — randomized players & sponsors list (no team info)", "Library & Stats", ["players", "sponsors", "list", "random"]),
     (".approvepublish", "Approve and publish the role archive", "Library & Stats", ["roles", "approve", "publish"]),
@@ -1152,7 +1174,8 @@ _PLAYER_COMMANDS = [
     (".help economy", "All economy & shop commands"),
     (".help library", "All library & stats commands"),
     (".who #ch", "List players in a channel by role"),
-    (".where", "Check your location (in your RoleChat)"),
+    (".where", "Check your location in your RoleChat (outside a RoleChat: admin-only, reply `yes`)"),
+    (".where #RC", "Check a player's location (staff only, reply `yes`)"),
     (".owner", "List the owners of the current house"),
     (".p ,playerlist", "List all alive players"),
     (".map", "Show the game map"),
@@ -1245,10 +1268,11 @@ class Other(commands.Cog):
 
     @commands.command()
     async def who(self, ctx, channel: discord.TextChannel = None):
-        """List all members in a channel grouped by role (Alive, Dead, Alt)."""
+        """List all members in a channel grouped by role (Alive, Sponsor, Alt, Dead)."""
         guild_data = load_guild_data(ctx.guild.id)
         if guild_data:
             alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name", ""))
+            sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name", ""))
             alt_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alt_role_name", ""))
             dead_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("dead_role_name", ""))
             if channel:
@@ -1260,6 +1284,7 @@ class Other(commands.Cog):
                 channel = ctx.channel
             members = channel.members
             alive_list = []
+            sponsor_list = []
             dead_list = []
             alt_list = []
             for member in members:
@@ -1267,25 +1292,60 @@ class Other(commands.Cog):
                 if permissions.send_messages:
                     if alive_role in member.roles:
                         alive_list.append(f"{member.mention} `[{member.display_name}]`")
+                    if sponsor_role in member.roles:
+                        sponsor_list.append(f"{member.mention} `[{member.display_name}]`")
                     if dead_role in member.roles:
                         dead_list.append(f"{member.mention} `[{member.display_name}]`")
                     if alt_role in member.roles:
                         alt_list.append(f"{member.mention} `[{member.display_name}]`")
-            if alive_list or alt_list or dead_list:
+            if alive_list or sponsor_list or alt_list or dead_list:
+                alive_label = alive_role.name if alive_role else guild_data.get("alive_role_name") or "Alive"
+                sponsor_label = sponsor_role.name if sponsor_role else guild_data.get("sponsor_role_name") or "Sponsor"
+                dead_label = dead_role.name if dead_role else guild_data.get("dead_role_name") or "Dead"
+                alt_label = alt_role.name if alt_role else guild_data.get("alt_role_name") or "Alt"
                 pages = _embed_pages(
                     f"{channel.name} Members:",
                     "Village Game",
-                    [(f"{alive_role.name}:", alive_list), (f"{alt_role.name}:", alt_list), (f"{dead_role.name}:", dead_list)],
+                    [
+                        (f"{alive_label}:", alive_list),
+                        (f"{sponsor_label}:", sponsor_list),
+                        (f"{alt_label}:", alt_list),
+                        (f"{dead_label}:", dead_list),
+                    ],
                     0xff3fb9,
                 )
                 for i in range(0, len(pages), 10):
                     await ctx.send(embeds=pages[i:i + 10])
+                return
+            missing = [
+                f"`{label}`" for role, label in (
+                    (alive_role, guild_data.get("alive_role_name") or "Alive"),
+                    (sponsor_role, guild_data.get("sponsor_role_name") or "Sponsor"),
+                    (dead_role, guild_data.get("dead_role_name") or "Dead"),
+                    (alt_role, guild_data.get("alt_role_name") or "Alt"),
+                ) if role is None
+            ]
+            if missing:
+                await ctx.send(
+                    f"No players found in **{channel.name}**, and these configured roles do not exist "
+                    f"in this server: {', '.join(missing)}. Check the role names in your setup."
+                )
+            else:
+                await ctx.send(
+                    f"No players found in **{channel.name}** — nobody here can send messages while "
+                    "holding the Alive, Sponsor, Alt, or Dead role."
+                )
         else:
             await ctx.send('Guild data not loaded.')
 
     @commands.command()
     async def where(self, ctx, channel: discord.TextChannel = None):
-        """Show the current location (houses, PCs, public channels) of a player in an RC."""
+        """Show the current location (houses, PCs, public channels) of a player in an RC.
+
+        Inside a Role Chat this is a self-check, so your own location needs no confirmation.
+        Listing anyone else's location — via `.where #rc` or from outside a Role Chat — asks
+        you to reply `yes` first, because it reveals other players' locations.
+        """
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded")
@@ -1300,63 +1360,207 @@ class Other(commands.Cog):
         dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
         alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
 
-        is_staff = ctx.author.guild_permissions.administrator or spectator_role in ctx.author.roles
-
-        if channel is not None:
-            # Providing an explicit channel reference is staff-only.
-            if not is_staff:
-                await ctx.send("You don't have enough perms to use this command")
-                return
-            members = channel.members
-        else:
-            # No channel reference. Players may check their own location, but only
-            # from their own RoleChat channel. Staff can use their current channel too.
-            if is_staff:
-                members = ctx.channel.members
-            elif (
-                (alive_role in ctx.author.roles or sponsor_role in ctx.author.roles)
-                and ctx.channel.category in (rc_cat, dead_rc, alt_cat)
-            ):
-                members = [ctx.author]
-            else:
-                await ctx.send("You don't have enough perms to use this command")
-                return
+        is_admin = ctx.author.guild_permissions.administrator
+        is_staff = is_admin or spectator_role in ctx.author.roles
+        in_player_channel = ctx.channel.category in (rc_cat, dead_rc, alt_cat)
 
         category_houses = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name", ""))
         category_pcs = discord.utils.get(ctx.guild.categories, name=guild_data.get("privc_category_name", ""))
         category_publc = discord.utils.get(ctx.guild.categories, name=guild_data.get("publc_category_name", ""))
+
+        # Validate setup before choosing a branch, so a renamed role or category reports the
+        # real problem instead of a misleading "not enough perms".
+        player_roles = tuple(r for r in (alive_role, dead_role, alt_role, sponsor_role) if r is not None)
+        # Sponsors may run .where, but they are staff/observer accounts rather than villagers,
+        # so they are not listed as players in the results.
+        listed_roles = tuple(r for r in (alive_role, dead_role, alt_role) if r is not None)
+        if not player_roles:
+            await ctx.send(
+                "None of the configured player roles (Alive, Dead, Alt, Sponsor) exist in this "
+                "server. Check the role names in your setup."
+            )
+            return
+        if category_houses is None and category_pcs is None and category_publc is None:
+            await ctx.send(
+                "No house, private chat, or public channel category is configured in this server."
+            )
+            return
+
+        if all(c is None for c in (rc_cat, dead_rc, alt_cat)):
+            await ctx.send(
+                "None of the configured player channel categories (RC, dead RC, Alt RC) exist in "
+                "this server. Check the category names in your setup."
+            )
+            return
+
+        self_check = False
+        if channel is not None:
+            # Staff-only, and only ever pointed at a Role Chat.
+            if not is_staff:
+                await ctx.send("You don't have enough perms to use this command")
+                return
+            if channel.category not in (rc_cat, dead_rc, alt_cat):
+                await ctx.send(
+                    f"{channel.mention} is not a Role Chat — `.where` only reports locations for "
+                    "Role Chat channels."
+                )
+                return
+            members = channel.members
+        elif in_player_channel:
+            # Inside a Role Chat this is a self-check only: your own location, nothing else.
+            if any(r in ctx.author.roles for r in player_roles):
+                members = [ctx.author]
+                self_check = True
+            elif is_admin:
+                # Admins can still inspect the Role Chat they're standing in. That reveals other
+                # players, so it goes through the `proceed` gate below like any other bulk share.
+                members = ctx.channel.members
+            else:
+                await ctx.send(
+                    "You don't hold a player role (Alive, Sponsor, Dead or Alt) in this server, "
+                    "so I can't show your location."
+                )
+                return
+        elif is_admin:
+            # Outside a Role Chat this is admin-only, and still gated behind `proceed`.
+            members = ctx.channel.members
+        else:
+            await ctx.send(
+                "`.where` only works inside a Role Chat. Outside one it is admin-only, because it "
+                "shares other players' locations."
+            )
+            return
+        max_reports = 5
+        results = []
+        seen = set()
         for member in members:
-            if alive_role in member.roles or dead_role in member.roles or alt_role in member.roles:
-                houses_list = []
-                if category_houses:
-                    for house in category_houses.channels:
-                        permissions = house.permissions_for(member)
-                        if permissions.send_messages:
-                            houses_list.append(house.mention)
-                pcs_list = []
-                if category_pcs:
-                    for pc in category_pcs.channels:
-                        permissions = pc.permissions_for(member)
-                        if permissions.send_messages:
-                            pcs_list.append(pc.mention)
-                publc_list = []
-                if category_publc:
-                    for pubc in category_publc.channels:
-                        permissions = pubc.permissions_for(member)
-                        if permissions.send_messages:
-                            publc_list.append(pubc.mention)
-                groups = []
-                if houses_list:
-                    groups.append(("🏠 Houses:", houses_list))
-                if pcs_list:
-                    groups.append(("👤 Private Chats:", pcs_list))
-                if publc_list:
-                    groups.append(("🏟️ Public Channels:", publc_list))
-                if groups:
-                    pages = _embed_pages(f"{member.mention} Location:", "Village Game", groups, 0xff3fb9)
-                    for i in range(0, len(pages), 10):
-                        await ctx.send(embeds=pages[i:i + 10])
-                break
+            if member.id in seen:
+                continue
+            seen.add(member.id)
+            # Sponsors are staff/observer accounts rather than villagers, so they are only ever
+            # reported as a lone fallback (see the tier order below), never mixed into the
+            # living-player listing.
+            has_player_role = any(r in member.roles for r in listed_roles)
+            is_sponsor = sponsor_role is not None and sponsor_role in member.roles
+            if not has_player_role and not is_sponsor and member.id != ctx.author.id:
+                continue
+            houses_list = []
+            if category_houses:
+                for house in category_houses.channels:
+                    permissions = house.permissions_for(member)
+                    if permissions.send_messages:
+                        houses_list.append(house.mention)
+            pcs_list = []
+            if category_pcs:
+                for pc in category_pcs.channels:
+                    permissions = pc.permissions_for(member)
+                    if permissions.send_messages:
+                        pcs_list.append(pc.mention)
+            publc_list = []
+            if category_publc:
+                for pubc in category_publc.channels:
+                    permissions = pubc.permissions_for(member)
+                    if permissions.send_messages:
+                        publc_list.append(pubc.mention)
+            groups = []
+            if houses_list:
+                groups.append(("🏠 Houses:", houses_list))
+            if pcs_list:
+                groups.append(("👤 Private Chats:", pcs_list))
+            if publc_list:
+                groups.append(("🏟️ Public Channels:", publc_list))
+            if not groups:
+                continue
+            results.append((member, groups, (tuple(houses_list), tuple(pcs_list), tuple(publc_list))))
+
+        # Report the first tier that has anyone in it: alive players, else a single sponsor,
+        # else the dead, else alts. Sponsors are a fallback and only one is ever shown.
+        def members_with(role):
+            if role is None:
+                return []
+            return [r for r in results if role in r[0].roles]
+
+        if self_check:
+            selected = [(m, g, k) for m, g, k in results if m.id == ctx.author.id]
+        else:
+            selected = []
+            for tier in (alive_role, sponsor_role, dead_role, alt_role):
+                found = members_with(tier)
+                if tier is sponsor_role and found:
+                    found = found[:1]  # a single sponsor, however many exist
+                if found:
+                    selected = found
+                    break
+
+        # Players sharing an identical location get one combined embed instead of one each,
+        # so a shared house/PC doesn't repeat the same channels four times over.
+        grouped = {}
+        order = []
+        for member, member_groups, key in selected:
+            if key not in grouped:
+                grouped[key] = {"members": [], "groups": member_groups}
+                order.append(key)
+            grouped[key]["members"].append(member)
+
+        total_players = sum(len(grouped[key]["members"]) for key in order)
+        entries = []
+        for key in order:
+            grp = grouped[key]
+            group_members = grp["members"]
+            # Name, not mention: a mention renders as the user's profile card, which makes
+            # the title unreadable in the embed list.
+            title = f"{' & '.join(m.display_name for m in group_members)} Location:"
+            entries.append((group_members, _embed_pages(title, "Village Game", grp["groups"], 0xff3fb9)))
+
+        shown = entries[:max_reports]
+        shown_players = sum(len(members) for members, _ in shown)
+        omitted = max(0, total_players - shown_players)
+        results = shown
+        if not results:
+            if self_check:
+                await ctx.send(
+                    "You are not currently in any house, private chat, or public channel you can see."
+                )
+            else:
+                await ctx.send("None of the players in that channel have a location right now.")
+            return
+
+        # Confirmation is required whenever the result reaches outside the caller's own RC.
+        # No gate: a bare `.where` inside a Role Chat (a player's self-check, or an admin
+        # checking the RC they are standing in), and any result that is only the caller.
+        # Gated: an explicit `.where #rc` — it reports on a *different* channel's players,
+        # even when typed from inside an RC — and a bare `.where` outside a Role Chat.
+        is_self_only = len(results) == 1 and results[0][0] == [ctx.author]
+        if not is_self_only and (not in_player_channel or channel is not None):
+            names = ", ".join(member.mention for group_members, _ in results for member in group_members)
+            more = f" (+{omitted} more not shown)" if omitted else ""
+            await ctx.send(
+                f"⚠️ **This is sensitive** — it will show the current location of "
+                f"**{shown_players}** player(s){more}: {names}\n"
+                "Players only ever see their own location; viewing other players' locations "
+                "needs this confirmation.\n"
+                "Reply **yes** within 30 seconds to continue, or anything else to cancel."
+            )
+
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+
+            try:
+                response = await self.bot.wait_for("message", timeout=30, check=check)
+            except asyncio.TimeoutError:
+                return await ctx.send("Timed out. No locations were shared.")
+            if response.content.strip().lower() not in ("yes", "proceed"):
+                return await ctx.send("Cancelled. No locations were shared.")
+
+        embeds = []
+        for _, pages in results:
+            embeds.extend(pages)
+        if omitted:
+            # Folded into the last embed (not a field — that could exceed the 25-field cap)
+            # so the command still answers in a single message.
+            embeds[-1].description = f"_{omitted} more player(s) not shown (limit {max_reports})._"
+        for chunk in _embed_chunks(embeds):
+            await ctx.send(embeds=chunk)
 
     @commands.command()
     async def loc(self, ctx):
@@ -1940,6 +2144,49 @@ class Other(commands.Cog):
         """Fun easter egg command that replies with "Dong!"."""
         await ctx.send("Dong! ||MF||")
 
+    @commands.command(aliases=["banner"])
+    async def line(self, ctx, *args):
+        """Draw a clean banner line to separate text.
+
+        Usage:
+          .line                 → single divider line
+          .line <n>             → stack n divider lines (bigger gap)
+          .line <text>          → single line with a centered title
+          .line <n> <text>      → n divider lines with the title in the middle
+                                  (odd n: title on the middle line;
+                                   even n: title centered in the middle gap)
+        """
+        count = 1
+        title = None
+        if args:
+            first = args[0]
+            if first.isdigit():
+                count = min(int(first), 15)
+                rest = args[1:]
+            else:
+                rest = args
+            if rest:
+                title = " ".join(rest).strip()
+        if count < 1:
+            count = 1
+
+        full = "━" * 36
+        flanked = f"━━ ✦ **{title}** ✦ ━━" if title else full
+        if title:
+            rows = [full] * count
+            if count % 2 == 1:
+                rows[count // 2] = flanked
+            else:
+                rows.insert(count // 2, flanked)
+        else:
+            rows = [full] * count
+        message = "\n".join(rows)
+        try:
+            await ctx.message.delete()
+        except (discord.Forbidden, discord.NotFound):
+            pass
+        await ctx.send(message)
+
     @commands.command()
     async def dice(self, ctx, *args):
         """Roll a random number (1-N) or pick randomly from given options."""
@@ -2144,6 +2391,7 @@ class Other(commands.Cog):
                 "draft": self.help_draft,
                 "sticky": self.help_sticky,
                 "sendrole": self.help_sendrole,
+                "download": self.help_download,
             }
             if category in extra_categories:
                 self._in_help2 = True
@@ -2165,6 +2413,7 @@ class Other(commands.Cog):
         embed.add_field(name="📌 - Sticky", value="5 Commands\n`.help2 sticky`", inline=True)
         embed.add_field(name="🏆 - Draft", value="24 Commands\n`.help2 draft`", inline=True)
         embed.add_field(name="↪ - Send Role", value="3 Commands\n`.help2 sendrole`", inline=True)
+        embed.add_field(name="⬇️ - Downloads", value="3 Commands\n`.help2 download`", inline=True)
         embed.set_footer(text="Village Game • Use `.help2 {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embed, self.help2)
 
@@ -2362,6 +2611,17 @@ class Other(commands.Cog):
             "**`.resetdb`** ─ Reset all setup\n"
             "**`.stealemoji <emoji>`** ─ Copy a custom emoji (animated/static) from another server"
         ), inline=False)
+        embeds.add_field(name="`.channelset` keys", value=(
+            "`daydiscussion` `megaphone` `lynchsession1` `lynchsession2` `lynchsession3`\n"
+            "`lynchsession4` `leaderelection` `votecount` `logchannel` `actionslogchannel`\n"
+            "`announcements` `map` `whisperlogs` `editdellogs` `joinleavelogs`\n"
+            "`narrationlog`\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "↳ `lynchsession1-4` and `leaderelection` also store the channel ID, so you can\n"
+            "rename them freely. The other keys are matched by name — re-run `.channelset`\n"
+            "if you rename those channels.\n"
+            "Lynch sessions 3 and 4 are optional extra voting slots."
+        ), inline=False)
         embeds.add_field(name="Toggles & Flags", value=(
             "**`.showwhispersender`** ─ Show/hide whisper sender\n"
             "**`.ajifempty`** ─ Auto-join if house is empty\n"
@@ -2488,7 +2748,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedpres, self.help_presets)
 
     async def help_voting(self, ctx):
-        embedv = discord.Embed(title="🗳️ - Voting commands", description="9 commands", color=0xff3fb9)
+        embedv = discord.Embed(title="🗳️ - Voting commands", description="12 commands", color=0xff3fb9)
         embedv.add_field(name="Voting", value=(
             "**`.vote @player`** ─ Vote or change your vote\n"
             "**`.abstain`** ─ Abstain from voting\n"
@@ -2499,7 +2759,9 @@ class Other(commands.Cog):
             "**`.votelist`** ─ Show all current votes\n"
             "**`.resetvotes`** ─ Reset all votes\n"
             "**`.votehistory/vh [mode]`** ─ Scan vote history\n"
-            "  Modes: `grouped` (by target), `range` (reply to end msg or send ID/link)"
+            "  Modes: `grouped` (by target), `range` (reply to end msg or send ID/link)\n"
+            "  Tracks `.remvote`/`.removevote`/`.manipulate` so the count stays accurate\n"
+            "**`.updatevotes`/`.uv [ch]`** ─ Guide to refresh a session's votecount via `.vh`"
         ), inline=False)
         embedv.add_field(name="Voting in RCs", value=(
             "**`.voteinrc true/false`** ─ Enable voting in RoleChats\n\n"
@@ -2569,6 +2831,20 @@ class Other(commands.Cog):
         embedsendrole.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedsendrole, self.help_sendrole)
 
+    async def help_download(self, ctx):
+        embedd = discord.Embed(title="⬇️ - Downloads", description="3 commands", color=0xff3fb9)
+        embedd.add_field(name="Download", value=(
+            "**`.dl`** ─ Reply to a link, download the media and send it here\n"
+            "  YouTube, Spotify tracks, and other providers\n"
+            "**`.mdl`** ─ Same as `.dl`, but sends the audio as MP3\n"
+            "**`.dsplit <N>`** ─ Download and split evenly into **N** equal "
+            "parts (no number = minimum parts that fit Discord's upload limit)\n"
+            "  Too big for one file? It reports the size vs. this server's limit "
+            "and offers to send the first chunk that fits."
+        ), inline=False)
+        embedd.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
+        await self.send_help_page(ctx, embedd, self.help_download)
+
     async def help_utility(self, ctx):
         embedu = discord.Embed(title="⚙️ - Utility", description="28 commands", color=0xff3fb9)
         embedu.add_field(name="General", value=(
@@ -2618,11 +2894,11 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="42 commands", color=0xff3fb9)
+        embedo = discord.Embed(title="👽 - Other", description="43 commands", color=0xff3fb9)
         embedo.add_field(name="General", value=(
             "**`.help`** ─ Show this menu\n"
             "**`.who #ch`** ─ List players in a channel\n"
-            "**`.where #RC`** ─ Show a player's current location\n"
+            "**`.where #RC`** ─ Show a player's current location (staff only, reply `yes`)\n"
             "**`.map`** ─ Show the game map\n"
             "**`.role`/`.firstpin`** ─ Show registered package or first pinned message\n"
             "**`.role register <1-4> <role name>`** ─ Register a Role Package\n"
@@ -2631,7 +2907,8 @@ class Other(commands.Cog):
             "**`.roll @role <n>`** ─ Random players from a role\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.ping`** ─ Bot online check\n"
-            "**`.ding`** ─ Dong!"
+            "**`.ding`** ─ Dong!\n"
+            "**`.line`/`.banner [lines] [title]`** ─ Draw a clean divider banner"
         ), inline=False)
         embedo.add_field(name="Narration", value=(
             "**`.narrate #ch <msg>`** ─ Send narration to channels\n"
@@ -2845,7 +3122,7 @@ class Other(commands.Cog):
             "**`.resolveplayer #ch @player`** ─ Resolve a player\n"
             "**`.resolvesponsor #ch @sponsor`** ─ Choose a Library Sponsor\n"
             "**`.reviewroles`** ─ Review roles\n"
-            "**`.reviewteams`** ─ Review teams\n"
+            "**`.reviewteams`** ─ Review teams (add `alive` for only alive players)\n"
             "**`.ps`** ─ Randomized players & sponsors list (no team info)\n"
             "**`.approvepublish`** ─ Publish the archive\n"
             "**`.libimport`** ─ Import approved roles into the library"

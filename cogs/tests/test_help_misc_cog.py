@@ -201,6 +201,69 @@ class TestOther:
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
 
+    def test_line_exists(self):
+        """Verify line command exists on the cog."""
+        assert hasattr(help_misc_cog.Other, 'line')
+
+    def test_line_banner_alias(self):
+        """Verify line has a banner alias."""
+        method = getattr(help_misc_cog.Other, 'line')
+        aliases = list(getattr(method, 'aliases', None) or [])
+        assert 'banner' in aliases
+
+    def test_line_has_help(self):
+        """Verify line command has help text."""
+        method = getattr(help_misc_cog.Other, 'line')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    @staticmethod
+    def _run_line(*args):
+        """Invoke the line command callback and return the rendered message."""
+        import asyncio
+
+        async def go():
+            cog = help_misc_cog.Other(MagicMock())
+            sent = []
+            ctx = MagicMock()
+            ctx.send = AsyncMock(side_effect=lambda m: sent.append(m))
+            ctx.message.delete = AsyncMock()
+            await help_misc_cog.Other.line.callback(cog, ctx, *args)
+            return sent[-1]
+
+        return asyncio.run(go())
+
+    def test_line_count_no_title(self):
+        """.line <n> stacks n full divider lines."""
+        rows = self._run_line("3").split("\n")
+        full = "━" * 36
+        assert rows == [full, full, full]
+
+    def test_line_odd_count_title_middle(self):
+        """.line <n> <title> with odd n puts the title on the middle line."""
+        rows = self._run_line("5", "NIGHT").split("\n")
+        assert len(rows) == 5
+        assert "**NIGHT**" in rows[2]
+        assert rows[0] == rows[1] == rows[3] == rows[4] == "━" * 36
+
+    def test_line_even_count_title_in_gap(self):
+        """.line <n> <title> with even n centers the title in the middle gap."""
+        rows = self._run_line("4", "DAY").split("\n")
+        assert len(rows) == 5
+        assert "**DAY**" in rows[2]
+        assert rows[0] == rows[1] == rows[3] == rows[4] == "━" * 36
+
+    def test_line_backwards_compat(self):
+        """.line <title> without a number keeps the single-line banner."""
+        body = self._run_line("VISIT").split("\n")
+        assert len(body) == 1
+        assert "**VISIT**" in body[0]
+
+    def test_line_count_capped(self):
+        """A huge count is clamped so the message stays concise."""
+        rows = self._run_line("999").split("\n")
+        assert len(rows) <= 15
+
     def test_goat_exists(self):
         """Verify goat command exists on the cog."""
         assert hasattr(help_misc_cog.Other, 'goat')
@@ -728,7 +791,7 @@ class TestEmbedLimits:
             "nominations", "lists", "utility", "other", "meetupmatrix", "economy",
             "botc", "surveillance", "analytics", "status", "location", "dashboard",
             "gamemanager", "library", "games", "auction", "birthdays", "calendar",
-            "draft", "sticky", "sendrole",
+            "draft", "sticky", "sendrole", "download",
         )
     )
 
