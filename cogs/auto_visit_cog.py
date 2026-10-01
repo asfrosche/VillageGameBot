@@ -1,9 +1,14 @@
+import asyncio
+import types
+from datetime import datetime
+
 import discord
 from discord.ext import commands
 from discord.ui import View, Button
 
 from cogs.data_utils import load_guild_data, save_guild_data
 from cogs.moving_cog import _find_house
+from cogs.surveillance_cog import after_movement_update
 from utils.bot_db import (
     get_auto_visit_rc_allocation,
     get_auto_visit_rc_usage,
@@ -383,6 +388,73 @@ class AutoVisitRoleAddView(View):
 
 
 # ─────────────────────────────────────────────────────────────
+# Portal View (.pportal interactive button)
+# ─────────────────────────────────────────────────────────────
+
+
+class PortalView(View):
+    """Portal button placed inside a house: residents click to travel to the paired house.
+
+    Ephemeral by design (timeout + auto-disable), matching the "buttons only"
+    behaviour: the link lives on this message and is not stored in guild data.
+    """
+
+    def __init__(self, cog: "AutoVisit", source: discord.TextChannel, dest: discord.TextChannel):
+        super().__init__(timeout=86400)
+        self.cog = cog
+        self.source = source
+        self.dest = dest
+        self.message = None
+
+    @discord.ui.button(label="Portal", emoji="🌀", style=discord.ButtonStyle.primary)
+    async def portal_btn(self, interaction: discord.Interaction, button: Button):
+        guild_data = load_guild_data(self.source.guild.id)
+        if not guild_data:
+            return await interaction.response.send_message("Guild data not loaded.", ephemeral=True)
+
+        can_use = interaction.user.guild_permissions.administrator
+        if not can_use:
+            os_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("overseer_role_name", ""))
+            can_use = bool(os_role and os_role in interaction.user.roles)
+        if not can_use:
+            perms = self.source.permissions_for(interaction.user)
+            if not (perms.read_messages and perms.send_messages):
+                return await interaction.response.send_message("You are not in this house.", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+        moved = await self.cog._portal_move(self.source, self.dest, guild_data)
+        if not moved:
+            return await interaction.followup.send(
+                f"🌀 The house is empty — nobody to portal through to {self.dest.mention}.",
+                ephemeral=True,
+            )
+
+        self.stop()
+        if interaction.message:
+            for child in self.children:
+                child.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+        names = ", ".join(f"**{n}**" for n in moved)
+        await interaction.followup.send(
+            f"🌀 Portaled **{len(moved)}** to {self.dest.mention}: {names}",
+            ephemeral=True,
+        )
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except (discord.HTTPException, discord.Forbidden):
+                pass
+
+
+# ─────────────────────────────────────────────────────────────
 # Cog
 # ─────────────────────────────────────────────────────────────
 
@@ -596,6 +668,146 @@ class AutoVisit(commands.Cog):
             return
         reset_auto_visit_rc_usage(ctx.guild.id, channel.id)
         await ctx.send(f"Auto-visit usage reset for {channel.mention}. The allocation set via `.autorcset` remains unchanged.")
+
+    # ── Portal command ────────────────────────────────────────
+
+    async def _portal_move(self, source_channel: discord.TextChannel, dest_channel: discord.TextChannel, guild_data: dict) -> list[str]:
+        """Move every resident of *source_channel* into *dest_channel*.
+
+        Mirrors the standard house move (permission overwrites, Joins/Leaves,
+        Member-moved log, Follow/Track/Stalk sync, current_houses/member_homes).
+        Returns the list of moved display names.
+        """
+        guild = source_channel.guild
+        alive_role = discord.utils.get(guild.roles, name=guild_data["alive_role_name"])
+        sponsor_role = discord.utils.get(guild.roles, name=guild_data["sponsor_role_name"])
+        dead_role = discord.utils.get(guild.roles, name=guild_data["dead_role_name"])
+        alt_role = discord.utils.get(guild.roles, name=guild_data["alt_role_name"])
+        log_channel = discord.utils.get(guild.channels, name=guild_data["log_channel_name"])
+        category = discord.utils.get(guild.categories, name=guild_data["houses_category_name"])
+
+        members = [m for m in source_channel.members if not m.bot]
+        moved: list[str] = []
+
+        for member in members:
+            is_resident = alive_role in member.roles or dead_role in member.roles or alt_role in member.roles
+            is_sponsor = sponsor_role in member.roles
+            if not (is_resident or is_sponsor):
+                continue
+
+            old_house_list = []
+            for ch in category.channels:
+                if not ch.permissions_for(member).send_messages:
+                    continue
+                try:
+                    await ch.set_permissions(member, overwrite=None)
+                except (discord.Forbidden, discord.HTTPException):
+                    continue
+                old_house_list.append(f"{ch.mention} `[{ch.name}]`")
+                await ch.send(f"{member.mention} Leaves")
+
+            try:
+                await dest_channel.set_permissions(member, read_messages=True, send_messages=True)
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+            await dest_channel.send(f"{member.mention} Joins")
+            moved.append(member.display_name)
+
+            if is_sponsor:
+                continue
+
+            embed = discord.Embed(
+                title='Member moved',
+                description=f'{source_channel.mention}\n{member.mention} `[{member.display_name}, {member.name}]`',
+                color=0xff3fb9,
+                timestamp=datetime.now(),
+            )
+            if old_house_list:
+                embed.add_field(name='Removed From:', value="\n".join(old_house_list), inline=False)
+            embed.add_field(name='Added To:', value=f'{dest_channel.mention} `[{dest_channel.name}]`', inline=False)
+            embed.set_footer(text="Village Game")
+            if log_channel:
+                try:
+                    await log_channel.send(embed=embed)
+                except discord.HTTPException:
+                    pass
+            proxy = types.SimpleNamespace(guild=guild, bot=self.bot)
+            await after_movement_update(proxy, member)
+
+        if moved:
+            current = guild_data.setdefault("current_houses", {})
+            member_homes = guild_data.get("member_homes") or {}
+            for member in members:
+                if not (alive_role in member.roles or dead_role in member.roles or alt_role in member.roles or sponsor_role in member.roles):
+                    continue
+                key = str(member.id)
+                house_list = current.setdefault(key, [])
+                if source_channel.id in house_list:
+                    house_list.remove(source_channel.id)
+                if dest_channel.id not in house_list:
+                    house_list.append(dest_channel.id)
+                current[key] = house_list
+                if key in member_homes and member_homes[key] == str(source_channel.id):
+                    member_homes[key] = str(dest_channel.id)
+            guild_data["current_houses"] = current
+            guild_data["member_homes"] = member_homes
+            save_guild_data(guild.id, guild_data)
+
+        return moved
+
+    @commands.command(name="pportal")
+    async def pportal(self, ctx: commands.Context, house_a: discord.TextChannel, house_b: discord.TextChannel):
+        """Place a bidirectional portal between two houses.
+
+        Each house gets a 🌀 button; any resident inside can click it to move the
+        house's residents to the paired house. The buttons are ephemeral (not
+        restored after a restart). Usage: .pportal #house-a #house-b
+        """
+        if not self._is_admin_or_overseer(ctx):
+            await ctx.send("You don't have enough permissions to use this command.")
+            return
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
+        if house_a.category != houses_category or house_b.category != houses_category:
+            await ctx.send("Both channels must be houses inside the Houses category.")
+            return
+        if house_a.id == house_b.id:
+            await ctx.send("The two houses must be different.")
+            return
+
+        prompt = await ctx.send(
+            f"🌀 {ctx.author.mention}, place a portal between {house_a.mention} ↔ {house_b.mention}?\n"
+            f"Reply **yes** to confirm, anything else to cancel."
+        )
+
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel
+
+        try:
+            response = await self.bot.wait_for("message", timeout=60, check=check)
+        except asyncio.TimeoutError:
+            await prompt.edit(content="Timed out. Portal cancelled.")
+            return
+        if response.content.lower() != "yes":
+            await prompt.edit(content="Portal cancelled.")
+            return
+
+        view_a = PortalView(self, house_a, house_b)
+        view_b = PortalView(self, house_b, house_a)
+        msg_a = await house_a.send(
+            content=f"🌀 A **portal** to {house_b.mention} hums quietly. Click to travel.",
+            view=view_a,
+        )
+        msg_b = await house_b.send(
+            content=f"🌀 A **portal** to {house_a.mention} hums quietly. Click to travel.",
+            view=view_b,
+        )
+        view_a.message = msg_a
+        view_b.message = msg_b
+        await prompt.edit(content=f"🌀 Portal placed between {house_a.mention} ↔ {house_b.mention}.")
 
     # ── Player auto-visit commands ───────────────────────────
 

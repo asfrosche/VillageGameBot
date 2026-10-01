@@ -79,3 +79,49 @@ class TestAutoVisit:
         method = getattr(auto_visit_cog.AutoVisit, 'autostealth')
         doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
         assert doc is not None and len(doc.strip()) > 0
+
+    def test_pportal_exists(self):
+        """Verify pportal command exists on the cog."""
+        assert hasattr(auto_visit_cog.AutoVisit, 'pportal')
+
+    def test_pportal_has_help(self):
+        """Verify pportal command has help text."""
+        method = getattr(auto_visit_cog.AutoVisit, 'pportal')
+        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
+        assert doc is not None and len(doc.strip()) > 0
+
+    def test_portal_move_method_exists(self):
+        """Verify _portal_move helper exists on the cog."""
+        assert hasattr(auto_visit_cog.AutoVisit, '_portal_move')
+
+
+class TestPortalView:
+    """Validate the PortalView can be built and carries the portal button."""
+
+    @staticmethod
+    def _make_view():
+        from unittest.mock import MagicMock
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        try:
+            source = MagicMock(spec=discord.TextChannel)
+            dest = MagicMock(spec=discord.TextChannel)
+
+            async def build():
+                return auto_visit_cog.PortalView(MagicMock(), source, dest)
+
+            return loop.run_until_complete(build())
+        finally:
+            loop.close()
+
+    def test_portal_view_instantiates(self):
+        """Verify PortalView instantiates with two house channels."""
+        view = self._make_view()
+        assert view.source
+
+    def test_portal_view_has_button(self):
+        """Verify PortalView exposes a Portal button."""
+        view = self._make_view()
+        labels = [child.label for child in view.children if getattr(child, 'label', None)]
+        assert "Portal" in labels
