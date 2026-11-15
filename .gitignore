@@ -9,6 +9,9 @@ analytics_secrets.py
 cogs/analytics_secrets.py
 .env
 
+# YouTube cookies for yt-dlp (uploaded to the host, never committed)
+cookies.txt
+
 db/
 data/
 utils/analytics/*.db
