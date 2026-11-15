@@ -13,7 +13,7 @@ base_variables = {
     "alt_role_name": 'Alt',
     "log_channel_name": 'log-visits',
     "actions_log_channel_name": 'log-actions',
-    "os_questions_log_channel_name": 'os-questions',
+    "os_questions_log_channel_name": 'log-actions',
     "economy_log_channel_name": 'logs-economy',
     "edit_del_logs": 'edit-and-del-logs',
     "join_and_leave_logs": 'join-leave-logs',

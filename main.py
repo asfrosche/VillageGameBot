@@ -1,11 +1,9 @@
 import asyncio
-import json
 import os
 import random
 
 import discord
 from discord.ext import commands
-from datetime import datetime
 
 # Core data utilities (guild settings, invites, deadlist)
 from cogs.actions_logging_cog import ActionsLogging
@@ -30,9 +28,9 @@ from cogs.game_manager_it import GameManagerIt
 from cogs.economy_cog import Economy
 from cogs.auction_cog import AuctionCog
 # from cogs.dashboard_cog import Dashboard  # dashboard disabled
+# from cogs.auto_visit_cog import AutoVisit  # auto visit disabled
 from cogs.handling_cog import Handling
 from cogs.home_cog import Home
-from cogs.infos_cog import Infos
 from cogs.lists_cog import Lists
 from cogs.location_manager import LocationManager
 from cogs.meetupmatrix import Meetup
@@ -42,8 +40,6 @@ from cogs.help_misc_cog import Other
 from cogs.role_package_cog import RolePackageCog
 from cogs.presets_cog import Presets
 from cogs.privatecommands_cog import Privatecommands
-from cogs.react_cog import ReactCog
-from cogs.send_role import SendRole
 from cogs.setup_cog import Setup
 from cogs.tracker_cog import MessageTracker
 from cogs.utility_cog import Utility
@@ -65,14 +61,8 @@ from cogs.surveillance_cog import Surveillance
 from cogs.download_cog import DownloadCog
 import sys as _sys
 _main_dir = os.path.dirname(os.path.abspath(__file__))
-_fifa_dir = os.path.join(_main_dir, "fifa_data")
 if _main_dir not in _sys.path:
     _sys.path.insert(0, _main_dir)
-if _fifa_dir not in _sys.path:
-    _sys.path.insert(0, _fifa_dir)
-# FIFA World Cup simulation cogs
-from fifa_data.services.draft_cog import DraftCog
-from fifa_data.services.bracket import BracketCog
 
 # Blood on the Clocktower cogs
 from BOTC.cogs.role import RoleCog as BOTCRoleCog
@@ -83,16 +73,16 @@ from BOTC.cogs.scripts import ScriptsCog as BOTCScriptsCog
 from BOTC.cogs.help import HelpCog as BOTCHelpCog
 from BOTC.cogs.game import BOTCGame
 
-from testing.cog import TestingCog
+from devtools.cog import TestingCog
 
 # Analytics / dashboard
-from utils.analytics import init_analytics, get_analytics_service
+from utils.analytics import init_analytics
 from utils.analytics.instrumentation import register_analytics_hooks
 from utils.analytics.config import AnalyticsConfig
 
 # Optional analytics secrets (dashboard password)
 try:
-    from analytics_secrets import DASHBOARD_PASSWORD
+    from config.analytics_secrets import DASHBOARD_PASSWORD
 except ImportError:
     DASHBOARD_PASSWORD = None
 
@@ -150,30 +140,26 @@ async def on_ready():
             name="With Bidet",
         )
     )
-    print("Server in cui si trova il bot:")
+    print("Servers the bot is in:")
     for guild in bot.guilds:
         print(f'- {guild.name}')
     # Load dynamic/optional cogs that are not added via startcog()
     try:
         await bot.load_extension("cogs.library_cog")
     except Exception as e:
-        print(f"Errore caricamento Lybrary cog: {e}")
+        print(f"Error loading Library cog: {e}")
     try:
         await bot.load_extension("cogs.library_it_cog")
     except Exception as e:
-        print(f"Errore caricamento Ita Lybrary cog: {e}")
+        print(f"Error loading Italian Library cog: {e}")
     try:
         await bot.load_extension("cogs.meeting_cog")
     except Exception as e:
-        print(f"Errore caricamento Meetings cog: {e}")
+        print(f"Error loading Meetings cog: {e}")
     try:
         await bot.load_extension('cogs.os_info_cog')
     except Exception as e:
-        print(f"Errore caricamento Overseer cog: {e}")
-    try:
-        await bot.load_extension('cogs.os_questions_cog')
-    except Exception as e:
-        print(f"Errore caricamento OS Questions cog: {e}")
+        print(f"Error loading Overseer cog: {e}")
     
 
 # ── Event: on_guild_join ─────────────────────────────────────────────────────
@@ -709,18 +695,15 @@ async def fireworks(message, guild_data):
 async def startcog():
     await bot.add_cog(ActionsLogging(bot))
     await bot.add_cog(Setup(bot))
-    await bot.add_cog(SendRole(bot))
     await bot.add_cog(Moving(bot))
     await bot.add_cog(Home(bot))
     await bot.add_cog(Handling(bot))
-    await bot.add_cog(Infos(bot))
     await bot.add_cog(Lists(bot))
     await bot.add_cog(Presets(bot))
     await bot.add_cog(Voting(bot))
     await bot.add_cog(Nominations(bot))
     await bot.add_cog(Utility(bot))
     await bot.add_cog(Other(bot))
-    await bot.add_cog(ReactCog(bot))
     await bot.add_cog(RolePackageCog(bot))
     await bot.add_cog(Privatecommands(bot))
     await bot.add_cog(MessageTracker(bot))
@@ -731,6 +714,7 @@ async def startcog():
     await bot.add_cog(Economy(bot))
     await bot.add_cog(AuctionCog(bot))
     # await bot.add_cog(Dashboard(bot))  # dashboard disabled
+    # await bot.add_cog(AutoVisit(bot))  # auto visit disabled
     await bot.add_cog(AuxBattle(bot))
     await bot.add_cog(Birthday(bot))
     await bot.add_cog(Meetup(bot))
@@ -744,8 +728,6 @@ async def startcog():
     await bot.add_cog(StatusPanel(bot))
     await bot.add_cog(StickyCog(bot))
     await bot.add_cog(PinsCog(bot))
-    await bot.add_cog(DraftCog(bot))
-    await bot.add_cog(BracketCog(bot))
     await bot.add_cog(BOTCRoleCog(bot))
     await bot.add_cog(BOTCJinxCog(bot))
     await bot.add_cog(BOTCFabledCog(bot))
@@ -759,21 +741,11 @@ async def startcog():
 
     from cogs.library_admin_cog import GameLibraryAdmin
     await bot.add_cog(GameLibraryAdmin(bot))
+    # Small commands: RPS, scout, rchome, info, settarget/sendrole, askos
     try:
-        from cogs.rps_cog import RPSCog
-        await bot.add_cog(RPSCog(bot))
+        await bot.load_extension("cogs.misc_cog")
     except Exception as e:
-        print(f"Failed to load RPSCog: {e}")
-    try:
-        from cogs.scout_cog import Scout
-        await bot.add_cog(Scout(bot))
-    except Exception as e:
-        print(f"Failed to load Scout: {e}")
-    try:
-        from cogs.rchome_cog import RcHome
-        await bot.add_cog(RcHome(bot))
-    except Exception as e:
-        print(f"Failed to load RcHome: {e}")
+        print(f"Failed to load misc cog: {e}")
 
     try:
         await bot.tree.sync()

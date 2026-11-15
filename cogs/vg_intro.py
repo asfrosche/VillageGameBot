@@ -4,407 +4,226 @@ from discord.ext import commands
 
 MECHANIC_PAGES = {
     1: {
-        "title": "What is Hearthside?",
+        "title": "Welcome to The Village",
         "image": None,
         "content": """
-  🎲  VILLAGE GAMES
+  🎲  THE VILLAGE
 
-  A social deduction server
-  running 30-40 player games.
+  30-40 players. One town.
+  Some of them are lying.
+  Your job: find out who.
 
-  Inspired by Mafia & Werewolf
-  but pushed far beyond.
+  Lynch the threats.
+  Protect the innocent.
+  Survive ~10 days.
 
-  • Houses & Visits
-  • Lynches & Voting
-  • Economy & Shop
-  • Unique Custom Roles
-  • 50+ iterations
+  100+ games logged so far.
+  No two are ever the same.
 
-  Every game is unique.
-  No two games are the same.
-
-  Also hosts:
-  Mafia | Puzzles | Side Events
+  Also home to Mafia,
+  Puzzles & Side Events.
 """,
     },
     2: {
-        "title": "Game Structure",
+        "title": "How a Game Flows",
         "image": None,
         "content": """
-  ⏳  GAME STRUCTURE
+  ⏳  ~10 DAYS, TWO PHASES
 
-  • ~10 days per game
-  • 30-40 players
-  • Day/Night cycles (24h each)
+  ☀️  DAY  (24h)
+  Talk, accuse, vote, lynch.
+  📣 Megaphone: 1 msg / 6h
+  🗳️ Voting closes 30 min
+     before the day ends.
 
-  Day — Discuss, accuse, lynch
-  Night — Abilities, visits, kills
+  🌙  NIGHT  (24h)
+  Abilities, visits, kills.
+  Most roles act only now.
 
-  Game ends when all players
-  have 0% or 100% win chance.
+  🏁  The game ends when every
+  player sits at 0% or 100%
+  win chance.
 """,
     },
     3: {
-        "title": "Teams",
+        "title": "The Three Sides",
         "image": None,
         "content": """
-  🏘️  VILLAGE (majority)
-  Wins when they are the
+  🏘️  VILLAGE — the majority
+  Wins when they are the only
+  team left alive.
+  ~43% of logged role-games
+
+  ⚔️  EVIL — the minority
+  Wins on parity, or as the
   only team alive.
+  ~28% of logged role-games
 
-  ⚔️  EVIL (minority)
-  Wins on parity with or
-  being the only team alive.
+  ❓  OTHER — wildcards
+  Own win conditions, known
+  only to themselves.
 
-  ❓  OTHER (may not exist)
-  Alternative win conditions
-  known only to themselves.
+  ── SOLOS ──
+  🤷 NEUTRAL — keep your head
+     down. ~50% of logged games
+  💀 KILLER (RK) — last one
+     standing. Your win = everyone
+     dies. ~23% of logged games
+  ⚖️ SOLO TEAM — balance the
+     game, then strike.
 
-  Names may change per theme.
+  Names change per theme.
   Concepts stay the same.
 """,
     },
     4: {
-        "title": "Solo Breakdown",
-        "image": None,
-        "content": """
-  🤷  NEUTRAL
-  Keep head down.
-  Reach wincon quietly.
-
-  💀  KILLER (RK)
-  Last player standing.
-  Your win = everyone dies.
-
-  ⚖️  SOLO TEAM
-  Balance the game.
-  Strike at the end.
-
-  You are your own faction.
-""",
-    },
-    5: {
-        "title": "Day Phase",
-        "image": None,
-        "content": """
-  ☀️  Discuss / Accuse / Vote
-
-  24 hours to talk,
-  push suspects,
-  and lynch someone.
-
-  📣  Megaphone
-  1 message per 6 hours
-  so key posts aren't lost.
-
-Voting closes 30 min
-before day ends.
-
-Day abilities exist
-but most activate at Night.
-""",
-    },
-    6: {
-        "title": "Night Phase",
-        "image": None,
-        "content": """
-  🌙  Abilities | Visits | Kills
-
-  24 hours where most
-  role actions happen.
-
-  🏠  House channel
-  Where you live. Night
-  actions target you here.
-
-  📜  Role channel
-  Your role card + description.
-  Ping Overseers with
-  questions here.
-
-Most abilities are
-Night-only unless
-specified otherwise.
-""",
-    },
-    7: {
         "title": "Houses & Visits",
         "image": None,
         "content": """
   🏠  Every player owns a house.
+  Visit others to act on them.
 
-  Visit others:
-    [knock] or [barge]
-        |
-    TARGET HOUSE
+  🚪 KNOCK — owner opens, you enter
+  💥 BARGE — force in (role must
+     allow it)
+  👤 STEALTH — arrive unseen
 
-  Max 3 owners per house.
-  Owner must approve entry.
+  The door rules:
+  • Max 3 owners per house
+  • Owner must approve entry
+  • 1 visit a night by default
+    (roles can grant more)
+  • Going home is always free
+  • Owner's door presets beat visits
 
-  ⚠️  Homeless at night = death
-  at end of night, unless your
-  house was destroyed without
-  warning near end of night
-  (you may seek a new one).
+  ⚠️  Homeless at night = death,
+  unless your house was destroyed
+  without warning near the end
+  of the night (seek a new one).
 
-  Special locations cannot
+  🏠 House channel: where night
+  actions target you.
+  📜 Role channel: your role card.
+  Ping Overseers with questions.
+
+  🗺️ Special locations can't
   override other special
   locations.
+""",
+    },
+    5: {
+        "title": "Abilities Decoded",
+        "image": None,
+        "content": """
+  Every role card says how its
+  ability reaches the target:
 
-  1 visit/night by default.
-  Roles may grant more.
-  Returning home is free.
+  🤝 PHYSICAL — visit them in person
+  📡 REMOTE — use their player name
+  🏠 REMOTE-HOUSE — player + house no.
+  🏘️ HOUSE — targets a house itself
+
+  Ability types:
+  🗡️ LETHAL   🚫 BLOCK
+  🎭 MANIPULATION   💊 CURING
+  🛡️ PROTECTION   📡 INFO & COMMS
+  🌐 MOBILITY   ✨ SUPPORT
+  ❓ OTHER
+
+  A role can carry several types.
+  Most abilities are Night-only
+  unless the role card says so.
+""",
+    },
+    6: {
+        "title": "Play to Win",
+        "image": None,
+        "content": """
+  🎭  EVIL or SOLO? You MUST
+  fake a claim.
+
+  A great fakeclaim:
+  • Stays consistent
+  • Sounds useful
+  • Fits the village plans
+  • Mixes in some real abilities
+
+  Credibility is your currency.
+  Don't sacrifice yourself
+  unless it wins the team.
+
+  ☠️  EVIL PLAYBOOK
+  1. Gain trust first. Push with
+     logic, vote with the village.
+  2. Sync kills on strong villagers
+     (medics, protectors, info).
+  3. Keep weak players alive as
+     scapegoats.
+  4. Frame with reasons. No logic
+     and you become the suspect.
+  5. Sometimes let a teammate fall
+     to protect your credibility.
+""",
+    },
+    7: {
+        "title": "Rules & Economy",
+        "image": None,
+        "content": """
+  🚫  NEVER
+  • Screenshot private channels
+  • Copy-paste role text
+  • Share role channel contents
+  ✅ You MAY describe your role
+     in your own words.
+
+  ❓  UNSURE? Ask an Overseer.
+  Mechanics, role clarification,
+  anything at all.
+
+  ⚡  ALWAYS
+  • Read the game mechanics channel
+  • Trust, speak and visit carefully
+
+  💰  ECONOMY
+  🏪 Shop items have real effects.
+  • `$bal`  — check your balance
+  • `$give` — send money (you must
+    be physically in the same house)
 """,
     },
     8: {
-        "title": "Visit Types & Priority",
+        "title": "Decoder Ring",
         "image": None,
         "content": """
-  [REGULAR] 🚪 Knock -> owner
-  opens -> you enter.
-  Default for all roles.
+  📖  ROLES
+  OS Overseer (mods) · spec Spectator
+  rk Random Killer · el Evil Leader
+  tk Town Killer · med Medium (revive)
+  vills Villagers
 
-  [FORCED]  💥 Barge in without
-  knocking (role must
-  allow this).
+  💬  CHANNELS
+  ec Evil Chat · pc Private Chat
+  rc Rolechannel (actions + OS)
 
-  [STEALTH] 👤 Move without
-  narration. Hidden
-  arrival.
+  ⏱️  PHASES
+  eod end of day · eon end of night
+  oag once a game
+  n1 d1 v1 h1 Night/Day/Vote/House 1
 
-  [PRIORITY]
-  Visits are lowest priority
-  in presets. Owner's door
-  open/close presets win.
+  🔤  ABILITIES
+  abi ability · vb visit block
+  rb role block (no actives)
+  prots protection · rev revive
+  gs Green Seer (checks category)
+  dory loses all actives, usually
+  passives too; only visits + vote left
 
-End of night: back to
-your own house (free).
-""",
-    },
-    9: {
-        "title": "Regions & Locations",
-        "image": None,
-        "content": """
-  🗺️  REGIONS
-  Split players into groups.
-  Affect abilities, info,
-  travel, and interactions.
-
-  📍  SPECIAL LOCATIONS
-  Role-tied places, lore
-  areas, mechanical zones.
-
-Read the game-specific
-mechanics channel before
-each game for details.
-""",
-    },
-    10: {
-        "title": "Ability Categories",
-        "image": None,
-        "content": """
-  🗡️  LETHAL
-    Attacks, bleeds, kills
-  🚫  BLOCK
-    Visitblock, roleblock, category block
-  🎭  MANIPULATION
-    Visit control, fake narrations, role control
-  💊  CURING
-    Cures, revives, immunities
-  🛡️  PROTECTION
-    Shields, death delays
-  📡  INFO & COMMS
-    Checks, public/private chats, tracking
-  🌐  MOBILITY
-    Teleports, pulls
-  ✨  SUPPORT
-    Buffs, visit grant, refills
-  ❓  OTHER
-    Anything else
-
-A role can have multiple
-ability types.
-""",
-    },
-    11: {
-        "title": "How Abilities Work",
-        "image": None,
-        "content": """
-  🤝  PHYSICAL
-    Must visit target in person.
-  📡  REMOTE
-    Use by player name.
-  🏠  REMOTE-HOUSE
-    Need player name + house number.
-  🏘️  HOUSE
-    Targets a house itself (remote
-    or physical).
-
-Your role card specifies
-which type clearly.
-""",
-    },
-    12: {
-        "title": "Fakeclaiming",
-        "image": None,
-        "content": """
-  🎭  If you are Evil or Solo,
-  you MUST make a fake claim.
-
-  A good fakeclaim:
-  • Stays consistent
-  • Sounds useful
-  • Blends into village plans
-  • Mixes in real abilities
-  • Gets you trusted
-
-  Credibility = currency.
-
-  Don't sacrifice yourself
-  unless it helps the team.
-""",
-    },
-    13: {
-        "title": "Evil Strategy",
-        "image": None,
-        "content": """
-  ☠️  Gain trust first.
-  • Look useful
-  • Push with logic
-  • Vote with village
-  • Be in plans
-
-  🎯  Coordination
-  Sync kills on strong
-  villagers (medics,
-  protectors, info roles,
-  utilities).
-
-  Keep weak players
-  alive as scapegoats.
-
-  💬  Framing
-  Accuse with reason.
-  No logic = you become
-  the suspect.
-
-  Sometimes let a teammate
-  die for your credibility.
-""",
-    },
-    14: {
-        "title": "Rules & Tips",
-        "image": None,
-        "content": """
-  🚫  FORBIDDEN
-  • Screenshots of private channels
-  • Copy-pasted role text
-  • Sharing role channel contents
-
-  ✅  You MAY describe your
-  role in your own words.
-
-  ❓  ASK OVERSEERS
-  • Mechanics questions
-  • Role clarification
-  • Anything unclear
-
-  ⚡  ALWAYS
-  • Read game mechanics channel
-  • Trust carefully
-  • Speak carefully
-  • Visit carefully
-""",
-    },
-    15: {
-        "title": "Economy",
-        "image": None,
-        "content": """
-  💰  ECONOMY
-
-  🏪  SHOP
-  Buy items with effects.
-
-  Commands:
-  • `$bal`     — Check balance
-  • `$give`    — Give money to a player
-    (must be in the same house
-     physically)
-
-Items from the shop have
-various effects.
-
-Money transfers require
-you to be physically in
-the same house.
-""",
-    },
-    16: {
-        "title": "Glossary: Roles & Channels",
-        "image": None,
-        "content": """
-  📖  GLOSSARY
-
-  ROLES
-  OS — Overseer. Moderators.
-  spec — Spectator. Watching.
-  rk — Random Killer. Goal is
-       last man standing.
-  el — Evil Leader. Evil with
-       huge impact.
-  tk — Town Killer. Villager
-       with killing potential.
-  med — Medium. Revive ability.
-  vills — Villagers.
-
-  CHANNELS
-  ec — Evil Chat. For evils.
-       Not in every game.
-  pc — Private Chat. Only
-       players inside can read.
-  rc — Rolechannel. For actions
-       and OS communication.
-""",
-    },
-    17: {
-        "title": "Glossary: Phases & Abilities",
-        "image": None,
-        "content": """
-  📖  GLOSSARY
-
-  PHASES
-  eod — end of day
-  eon — end of night
-  oag — once a game
-  n1/d1/v1/h1 — Night/Day/
-       Vote/House 1
-
-  ABILITIES
-  abi — Ability (active/passive)
-  vb — Visit Block. Can't visit.
-  rb — Role Block. Can't use
-       Active abilities.
-  prots — Protections. Blocks
-       following attack.
-  rev — Revive. Bring back
-       dead players.
-  gs — Green Seer. Checks
-       a player's category.
-
-  OTHER
-  rc — Rolecard. Your role info.
-       Also Rolechannel (actions).
-  cred — Credibility.
-  nar — Narration (kill msgs).
-  mechs — Mechanics.
-  wincon — Win condition.
-  corr — Corrupted.
-  poe — Process of elimination.
-  recog — Recognition. 
-       Evil team (usually) finding each other
-  dory — Player loses all active abilities and usually passives too.
-       Only visits and vote left.
+  🧩  OTHER
+  rc rolecard · cred credibility
+  nar narration · mechs mechanics
+  wincon win condition · corr corrupted
+  poe process of elimination
+  recog Evil finding each other
 """,
     },
 }
@@ -823,7 +642,6 @@ EMBED_COLOR = 0xFF3FB9
 def get_index_embed():
     lines = []
     for num, data in MECHANIC_PAGES.items():
-        icon = data["title"].split(" ")[0] if data["title"].startswith("<") else ""
         lines.append(f"`{num:>2}` {data['title']}")
     embed = discord.Embed(
         title="Mechanics Index",
@@ -976,7 +794,7 @@ class VgIntro(commands.Cog):
                     return await ctx.send("That mechanics page does not exist.")
                 current = num
             except ValueError:
-                return await ctx.send("Invalid page. Use `.mechanics list`")
+                return await ctx.send("Invalid page. Use `.vgintro list`")
         else:
             current = 1
 
