@@ -74,6 +74,26 @@ def _extract_error_message(tb: str, exc_type: str) -> str:
     return lines[-1]
 
 
+_REDACT_LONG_ID_RE = re.compile(r"\b\d{15,20}\b")
+_REDACT_MENTION_RE = re.compile(r"<[@#&!]{1,2}\d+>")
+
+
+def _redact_report_text(text: str) -> str:
+    """Remove personal and environment details before an error goes into a report.
+
+    Drops Discord IDs and mentions, and rewrites the project and home folders so
+    the report only shows project-relative paths.
+    """
+    project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    home = os.path.expanduser("~")
+    for root in (project, project.replace("\\", "/")):
+        text = text.replace(root, "<project>")
+    for h in (home, home.replace("\\", "/")):
+        text = text.replace(h, "<home>")
+    text = _REDACT_MENTION_RE.sub("<mention>", text)
+    return _REDACT_LONG_ID_RE.sub("<id>", text)
+
+
 def _human_timestamp(iso_str: str | None, _now: datetime | None = None) -> str:
     """Convert an ISO timestamp to a human-friendly relative time."""
     if not iso_str:
@@ -921,7 +941,7 @@ class AnalyticsCog(commands.Cog):
     @_dev_only()
     @commands.command(name="analyticsexport")
     async def analyticsexport(self, ctx: commands.Context):
-        """Export all analytics data to a markdown file."""
+        """Export a complete, redacted error report to paste back for diagnosis."""
         svc = get_analytics_service()
         if not svc or not svc.enabled:
             await ctx.send("Analytics is disabled.")
@@ -932,138 +952,150 @@ class AnalyticsCog(commands.Cog):
             await ctx.send("Analytics database not available.")
             return
 
+        import platform
+        import subprocess
         import tempfile
         from datetime import datetime
 
-        overview = db.get_overview()
-        commands_data = db.get_commands(per_page=99999)["items"]
-        cog_stats = db.get_cog_stats()
-        perf = db.get_performance_over_time(days=90)
-        slowest = db.get_slowest_commands(limit=50)
-        health = db.get_feature_health()
+        now = datetime.utcnow()
         errors = db.get_errors(limit=500)
         err_summary = db.get_error_summary()
+        if not errors:
+            await ctx.send("No errors recorded.")
+            return
 
-        lines = []
-        lines.append(f"# Analytics Export — {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append("")
+        project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"], cwd=project,
+                capture_output=True, text=True, timeout=3,
+            ).stdout.strip() or "unknown"
+        except Exception:
+            commit = "unknown"
 
-        # Overview
-        lines.append("## Overview")
-        lines.append("")
-        lines.append(f"- Total commands executed: **{overview['total_commands']}**")
-        lines.append(f"- Active commands: **{overview['active_commands']}**")
-        lines.append(f"- Commands today: **{overview['commands_today']}**")
-        lines.append(f"- Commands this week: **{overview['commands_this_week']}**")
-        lines.append(f"- Avg execution time: **{overview['avg_time_ms']}ms**")
-        lines.append(f"- Error rate: **{overview['error_rate']}%**")
-        lines.append("")
+        # Group identical failures (same exception type and same reason).
+        groups: dict[tuple[str, str], dict] = {}
+        for e in errors:
+            raw_tb = e.get("traceback") or ""
+            exc = e["exception_type"] or "Unknown"
+            reason = _redact_report_text(_extract_error_message(raw_tb, exc))
+            ts = e["timestamp"][:19] if e["timestamp"] else "?"
+            g = groups.setdefault((exc, reason), {
+                "count": 0, "commands": set(), "first": ts, "last": ts,
+                "tb": _redact_report_text(raw_tb), "raw_tb": raw_tb,
+                "cog": e.get("cog_name") or "unknown",
+                "invocation": _redact_report_text(e.get("invocation") or ""),
+            })
+            g["count"] += 1
+            g["commands"].add(e["command_name"] or "?")
+            g["first"] = min(g["first"], ts)
+            g["last"] = max(g["last"], ts)
 
-        # Cog stats
-        lines.append("## Cog Stats")
-        lines.append("")
-        lines.append("| Cog | Execs | % | Active Cmds | Avg Latency | Fail Rate |")
-        lines.append("|-----|-------|---|-------------|-------------|-----------|")
-        for c in cog_stats:
-            lines.append(f"| {c['cog_name']} | {c['total_execs']} | {c['pct']}% | {c['active_commands']} | {c['avg_latency_ms']}ms | {c['failure_rate']}% |")
-        lines.append("")
+        def source_context(raw_tb: str) -> list[str]:
+            """Show a few lines around each project frame so the code can be read without opening files."""
+            out: list[str] = []
+            seen: set[tuple[str, int]] = set()
+            for m in re.finditer(r'File "([^"]+)", line (\d+), in ([^\n]+)', raw_tb):
+                path, line_no, func = m.group(1), int(m.group(2)), m.group(3)
+                norm = path.replace("\\", "/")
+                if not norm.startswith(project.replace("\\", "/") + "/"):
+                    continue  # skip discord.py / stdlib frames
+                if (norm, line_no) in seen:
+                    continue
+                seen.add((norm, line_no))
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        code = fh.read().splitlines()
+                except OSError:
+                    continue
+                lo, hi = max(1, line_no - 3), min(len(code), line_no + 3)
+                rel = _shorten_path(_redact_report_text(path)) or path
+                out.append(f"{rel}:{line_no} in {func.strip()}")
+                for n in range(lo, hi + 1):
+                    marker = ">" if n == line_no else " "
+                    out.append(f"{marker} {n:5d} {_redact_report_text(code[n - 1])}")
+                out.append("")
+            return out
 
-        # All commands
-        lines.append("## Commands (all)")
-        lines.append("")
-        lines.append("| Command | Cog | Execs | Failures | Fail% | Users | Avg(ms) | P95(ms) | First Used | Last Used |")
-        lines.append("|---------|-----|-------|----------|-------|-------|---------|---------|------------|-----------|")
-        for cmd in sorted(commands_data, key=lambda x: x["total_execs"], reverse=True):
-            lines.append(
-                f"| {cmd['command_name']} | {cmd['cog_name']} | {cmd['total_execs']} "
-                f"| {cmd['total_failures']} | {cmd['failure_rate']}% "
-                f"| {cmd['unique_users']} | {cmd['avg_time_ms']} | {cmd['p95_ms']} "
-                f"| {cmd['first_used'][:10] if cmd['first_used'] else '?'} "
-                f"| {cmd['last_used'][:10] if cmd['last_used'] else '?'} |"
-            )
-        lines.append("")
+        ordered = sorted(groups.items(), key=lambda kv: kv[1]["count"], reverse=True)
 
-        # Slowest commands
-        lines.append("## Slowest Commands (Top 50)")
-        lines.append("")
-        lines.append("| Command | Cog | Avg(ms) | Execs |")
-        lines.append("|---------|-----|---------|-------|")
-        for s in slowest:
-            lines.append(f"| {s['command_name']} | {s['cog_name']} | {s['avg_time_ms']} | {s['total_execs']} |")
-        lines.append("")
+        try:
+            import discord as _discord
+            discord_version = _discord.__version__
+        except Exception:
+            discord_version = "unknown"
 
-        # Feature health
-        lines.append("## Feature Health")
-        lines.append("")
-        lines.append("| Command | Score | Trend | 30d | 90d | Users | Rec |")
-        lines.append("|---------|-------|-------|-----|-----|-------|-----|")
-        for h in health:
-            lines.append(
-                f"| {h['command_name']} | {h['health_score']} | {h['trend']} "
-                f"| {h['executions_30d']} | {h['executions_90d']} "
-                f"| {h['unique_users']} | {h['recommendation']} |"
-            )
-        lines.append("")
+        lines = [
+            f"# Error report — {now:%Y-%m-%d %H:%M:%S} UTC",
+            "",
+            "Paste this file back for diagnosis. User, guild and channel IDs and mentions are removed,",
+            "and file paths are relative to the project.",
+            "",
+            "## Environment",
+            "",
+            f"- Bot commit: `{commit}`",
+            f"- Python: {platform.python_version()}",
+            f"- discord.py: {discord_version}",
+            f"- Platform: {platform.system()} {platform.release()}",
+            "",
+            "## Totals",
+            "",
+            f"- Errors in this report: **{len(errors)}** (most recent stored)",
+            f"- Total errors recorded: **{err_summary['total_errors']}**",
+            f"- Distinct errors (type + reason): **{len(groups)}**",
+            "",
+            "## Errors by reason",
+            "",
+        ]
+        for idx, ((exc, reason), g) in enumerate(ordered, 1):
+            tb_lines = g["tb"].strip().splitlines()
+            lines += [
+                f"### {idx}. {exc} — {g['count']}×",
+                "",
+                f"- **Reason:** {reason}",
+                f"- **Commands:** {', '.join(sorted(g['commands']))}",
+                f"- **Cog:** {g['cog']}",
+                f"- **Latest command text (redacted):** `{g['invocation'].replace('`', chr(39))}`" if g['invocation'] else "- **Latest command text:** not recorded",
+                f"- **First / last seen (UTC):** {g['first']} / {g['last']}",
+                "",
+                "Full traceback:",
+                "",
+                "```text",
+                *[t.replace("```", "'''") for t in tb_lines],
+                "```",
+                "",
+            ]
+            ctx_lines = source_context(g["raw_tb"])
+            if ctx_lines:
+                lines += ["Source around the project frames:", "", "```text",
+                          *[t.replace("```", "'''") for t in ctx_lines], "```", ""]
 
-        # Performance over time
-        lines.append("## Daily Performance (last 90 days)")
+        lines += [
+            "## Recent occurrences",
+            "",
+            "| Time (UTC) | Command | Exception | Reason |",
+            "|------------|---------|-----------|--------|",
+        ]
+        for e in errors[:50]:
+            ts = e["timestamp"][:19] if e["timestamp"] else "?"
+            exc = e["exception_type"] or "Unknown"
+            reason = _redact_report_text(_extract_error_message(e.get("traceback") or "", exc))
+            reason = reason.replace("|", chr(92) + "|")[:160]
+            lines.append(f"| {ts} | {e['command_name'] or '?'} | {exc} | {reason} |")
         lines.append("")
-        lines.append("| Date | Execs | Avg(ms) | Failures |")
-        lines.append("|------|-------|---------|----------|")
-        for p in perf:
-            lines.append(f"| {p['date']} | {p['executions']} | {p['avg_time_ms']} | {p['failures']} |")
-        lines.append("")
-
-        # Error summary
-        lines.append("## Error Summary")
-        lines.append("")
-        lines.append(f"- Total errors: **{err_summary['total_errors']}**")
-        if err_summary["by_type"]:
-            lines.append("")
-            lines.append("### By Exception Type")
-            lines.append("")
-            lines.append("| Type | Count |")
-            lines.append("|------|-------|")
-            for t in err_summary["by_type"]:
-                lines.append(f"| {t['type']} | {t['count']} |")
-        if err_summary["by_command"]:
-            lines.append("")
-            lines.append("### By Command")
-            lines.append("")
-            lines.append("| Command | Count |")
-            lines.append("|---------|-------|")
-            for c in err_summary["by_command"]:
-                lines.append(f"| {c['command']} | {c['count']} |")
-        lines.append("")
-
-        # Recent errors
-        if errors:
-            lines.append(f"## Recent Errors (last {len(errors)})")
-            lines.append("")
-            lines.append("| ID | Timestamp | Command | Exception | User | Guild |")
-            lines.append("|----|-----------|---------|-----------|------|-------|")
-            for e in errors:
-                ts = e["timestamp"][:19] if e["timestamp"] else "?"
-                lines.append(
-                    f"| {e['id']} | {ts} | {e['command_name']} "
-                    f"| {e['exception_type']} | {e['user_id']} | {e['guild_id']} |"
-                )
-            lines.append("")
 
         content = "\n".join(lines)
-
-        ts = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"analytics_export_{ts}.md"
+        ts = now.strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"error_report_{ts}.md"
         tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8")
         try:
             tmp.write(content)
             tmp.close()
             await ctx.send(
                 file=discord.File(tmp.name, filename=filename),
-                content=f"Analytics export — {ts}",
+                content=f"Error report: {len(errors)} errors in {len(groups)} distinct groups.",
             )
         finally:
-            import os
             os.unlink(tmp.name)
 
 

@@ -17,6 +17,7 @@ class CommandEvent:
     guild_id: str | None = None
     error_type: str | None = None
     error_traceback: str | None = None
+    invocation: str | None = None
     bot_version: str = ""
     git_commit: str = ""
 
@@ -43,6 +44,7 @@ class ErrorRecord:
     traceback: str
     user_id: str | None = None
     guild_id: str | None = None
+    invocation: str | None = None
 
 
 @dataclass

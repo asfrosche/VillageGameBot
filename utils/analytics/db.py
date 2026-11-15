@@ -10,6 +10,7 @@ from typing import Any
 
 logger = logging.getLogger("analytics.db")
 
+from .redact import redact_text
 from .models import (
     CommandEvent,
     CommandStats,
@@ -86,9 +87,14 @@ class AnalyticsDB:
                 exception_type  TEXT,
                 traceback       TEXT,
                 user_id         TEXT,
-                guild_id        TEXT
+                guild_id        TEXT,
+                invocation      TEXT
             );
         """)
+        # Databases created before the invocation column existed get it added here.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(error_log)").fetchall()}
+        if "invocation" not in cols:
+            conn.execute("ALTER TABLE error_log ADD COLUMN invocation TEXT")
         conn.commit()
 
     def upsert_command_stats(self, event: CommandEvent) -> None:
@@ -241,8 +247,8 @@ class AnalyticsDB:
     def insert_error(self, error: ErrorRecord) -> None:
         conn = self._get_conn()
         conn.execute(
-            """INSERT INTO error_log (timestamp, command_name, cog_name, exception_type, traceback, user_id, guild_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO error_log (timestamp, command_name, cog_name, exception_type, traceback, user_id, guild_id, invocation)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 error.timestamp.isoformat(),
                 error.command_name,
@@ -251,6 +257,7 @@ class AnalyticsDB:
                 error.traceback,
                 error.user_id,
                 error.guild_id,
+                redact_text(error.invocation, limit=300) or None,
             ),
         )
         conn.execute(
@@ -404,6 +411,8 @@ class AnalyticsDB:
                 "traceback": r["traceback"],
                 "user_id": r["user_id"],
                 "guild_id": r["guild_id"],
+                "cog_name": r["cog_name"],
+                "invocation": r["invocation"],
             }
             for r in rows
         ]

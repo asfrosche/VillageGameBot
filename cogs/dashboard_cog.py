@@ -3,8 +3,9 @@ from discord.ext import commands
 from discord.ui import View, Button, Select, Modal, TextInput
 import json
 import os
+from utils.paths import DB_DIR
 
-CONFIG_FILE_PATH = "db/roles_config.json"
+CONFIG_FILE_PATH = os.path.join(DB_DIR, "roles_config.json")
 
 # ------------------------------------------------------------------ #
 # Gestione JSON (Lettura, Salvataggio e Helpers Status)

@@ -87,6 +87,7 @@ class AnalyticsService:
                         traceback=event.error_traceback or "",
                         user_id=event.user_id,
                         guild_id=event.guild_id,
+                        invocation=event.invocation,
                     )
                     await p.record_error(error_record)
             except Exception:

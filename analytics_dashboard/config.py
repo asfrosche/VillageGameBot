@@ -10,7 +10,7 @@ class DashboardConfig:
         host: str = "0.0.0.0",
         port: int = 8712,
         password: str = "",
-        analytics_db_path: str = "./data/analytics.db",
+        analytics_db_path: str = "./runtime/data/analytics.db",
         tunnel_enabled: bool = False,
     ):
         self.enabled = enabled
@@ -27,6 +27,6 @@ class DashboardConfig:
             host=os.getenv("ANALYTICS_DASHBOARD_HOST", "0.0.0.0"),
             port=int(os.getenv("ANALYTICS_DASHBOARD_PORT", "8712")),
             password=os.getenv("ANALYTICS_DASHBOARD_PASSWORD", ""),
-            analytics_db_path=os.getenv("ANALYTICS_DB_PATH", "./data/analytics.db"),
+            analytics_db_path=os.getenv("ANALYTICS_DB_PATH", "./runtime/data/analytics.db"),
             tunnel_enabled=os.getenv("ANALYTICS_DASHBOARD_TUNNEL", "false").lower() == "true",
         )

@@ -9,6 +9,7 @@ from datetime import datetime
 from discord.ext import commands
 
 from .models import CommandEvent
+from .redact import redact_text
 
 logger = logging.getLogger("analytics.instrumentation")
 
@@ -64,6 +65,7 @@ def register_analytics_hooks(bot: commands.Bot, service) -> None:
                 # discord.py wraps command failures in CommandInvokeError; record the real cause.
                 error_type=type(getattr(error, "original", None) or error).__name__,
                 error_traceback=tb,
+                invocation=redact_text(getattr(ctx.message, "content", None), limit=300) or None,
                 user_id=str(ctx.author.id) if ctx.author else None,
                 guild_id=str(ctx.guild.id) if ctx.guild else None,
                 bot_version=service.config.bot_version,

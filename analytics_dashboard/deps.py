@@ -9,7 +9,7 @@ _db_instance: AnalyticsDB | None = None
 
 
 def get_db_path() -> str:
-    return os.getenv("ANALYTICS_DB_PATH", "./data/analytics.db")
+    return os.getenv("ANALYTICS_DB_PATH", "./runtime/data/analytics.db")
 
 
 def get_db():
