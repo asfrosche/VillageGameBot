@@ -225,6 +225,75 @@ class Lists(commands.Cog):
         else:
             await ctx.send(f"House list not found")
 
+    @commands.command()
+    async def rollhouse(self, ctx, house: discord.TextChannel = None, num: str = "1"):
+        """Roll random alive members from a house."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+
+        if house is None:
+            house = ctx.channel
+
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
+        if houses_category and house.category != houses_category:
+            await ctx.send("That channel is not a house.")
+            return
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+        if not alive_role:
+            await ctx.send("Alive role not found.")
+            return
+
+        members = []
+        for member in house.members:
+            if member.bot:
+                continue
+            try:
+                if house.permissions_for(member).send_messages and alive_role in member.roles:
+                    members.append(member)
+            except Exception:
+                continue
+
+        if not members:
+            await ctx.send("No alive members found in that house.")
+            return
+
+        if num.lower() == "all":
+            count = len(members)
+        else:
+            try:
+                count = int(num)
+            except ValueError:
+                await ctx.send("Insert a valid number or `all`.")
+                return
+
+        if count <= 0:
+            await ctx.send("Insert a valid number.")
+            return
+        if count > len(members):
+            await ctx.send(f"Not enough alive members in that house ({len(members)} available).")
+            return
+
+        picked = random.sample(members, count)
+        if count == 1:
+            embed = discord.Embed(
+                title="🎲 House Roll",
+                description=f"**{picked[0].display_name}**",
+                color=0xff3fb9,
+            )
+            embed.set_footer(text=f"Rolled 1 / {len(members)} alive members in {house.name}")
+        else:
+            desc = "\n".join(f"`{i}.` **{m.display_name}**" for i, m in enumerate(picked, 1))
+            embed = discord.Embed(
+                title="🎲 House Roll",
+                description=desc,
+                color=0xff3fb9,
+            )
+            embed.set_footer(text=f"Rolled {count} / {len(members)} alive members in {house.name}")
+        await ctx.send(embed=embed)
+
     @commands.command(aliases=["rh"])
     async def rollhouses(self, ctx, num_houses: str = "1"):
         """Randomly select one or more houses from the houselist."""

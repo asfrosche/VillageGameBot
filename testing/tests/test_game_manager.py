@@ -17,8 +17,8 @@ class TestGameManager:
     def test_startgame_has_help(self):
         """Verify startgame command has help text."""
         method = getattr(game_manager.GameManager, 'startgame')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addplayer_exists(self):
         """Verify addplayer command exists on the cog."""
@@ -27,8 +27,8 @@ class TestGameManager:
     def test_addplayer_has_help(self):
         """Verify addplayer command has help text."""
         method = getattr(game_manager.GameManager, 'addplayer')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removeplayer_exists(self):
         """Verify removeplayer command exists on the cog."""
@@ -37,8 +37,8 @@ class TestGameManager:
     def test_removeplayer_has_help(self):
         """Verify removeplayer command has help text."""
         method = getattr(game_manager.GameManager, 'removeplayer')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_closegame_exists(self):
         """Verify closegame command exists on the cog."""
@@ -47,5 +47,5 @@ class TestGameManager:
     def test_closegame_has_help(self):
         """Verify closegame command has help text."""
         method = getattr(game_manager.GameManager, 'closegame')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

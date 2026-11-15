@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 import discord
+import asyncio
 
 from cogs import tracker_cog
 
@@ -17,8 +18,8 @@ class TestMessageTracker:
     def test_statss_has_help(self):
         """Verify statss command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'statss')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setmessagetracking_exists(self):
         """Verify setmessagetracking command exists on the cog."""
@@ -27,8 +28,8 @@ class TestMessageTracker:
     def test_setmessagetracking_has_help(self):
         """Verify setmessagetracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'setmessagetracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_start_tracking_exists(self):
         """Verify start_tracking command exists on the cog."""
@@ -37,8 +38,8 @@ class TestMessageTracker:
     def test_start_tracking_has_help(self):
         """Verify start_tracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'start_tracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_stop_tracking_exists(self):
         """Verify stop_tracking command exists on the cog."""
@@ -47,8 +48,8 @@ class TestMessageTracker:
     def test_stop_tracking_has_help(self):
         """Verify stop_tracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'stop_tracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_reset_tracking_exists(self):
         """Verify reset_tracking command exists on the cog."""
@@ -57,5 +58,229 @@ class TestMessageTracker:
     def test_reset_tracking_has_help(self):
         """Verify reset_tracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'reset_tracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    def test_serverstats_exists(self):
+        """Verify serverstats command exists on the cog."""
+        assert hasattr(tracker_cog.MessageTracker, 'serverstats')
+
+    def test_serverstats_has_help(self):
+        """Verify serverstats command has help text."""
+        method = getattr(tracker_cog.MessageTracker, 'serverstats')
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    def test_serverstats_requires_admin(self):
+        """serverstats refuses non-admins without reading guild data."""
+        import asyncio
+
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            sent = []
+            ctx = MagicMock()
+            ctx.author.guild_permissions.administrator = False
+            ctx.send = AsyncMock(side_effect=lambda m: sent.append(m))
+            with patch.object(tracker_cog, 'load_guild_data') as mock_load:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx)
+            return sent, mock_load
+
+        sent, mock_load = asyncio.run(go())
+        assert sent and "admin" in sent[-1].lower()
+        mock_load.assert_not_called()
+
+
+class TestServerStatsLaps:
+    """Laps snapshot the current counts and let you view each one plus the total."""
+
+    def _ctx(self, admin=True):
+        ctx = MagicMock()
+        ctx.guild.id = 123
+        ctx.author.guild_permissions.administrator = admin
+        ctx.send = AsyncMock()
+        return ctx
+
+    def _data(self):
+        return {
+            "server_message_counts": {"1": 1},
+            "server_message_laps": [
+                {"lap": 1, "label": "Day 1", "counts": {"1": 2, "3": 5}, "saved_ts": 100},
+                {"lap": 2, "label": None, "counts": {"1": 4}, "saved_ts": 200},
+            ],
+            "server_message_lap_counter": 2,
+        }
+
+    def test_serverstats_lap_asks_for_confirmation(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            data = {"server_message_counts": {"1": 3, "2": 4}}
+            with patch.object(tracker_cog, "load_guild_data", return_value=data), patch.object(
+                tracker_cog, "save_guild_data"
+            ) as mock_save:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="lap Day 3")
+            return ctx, mock_save
+
+        ctx, mock_save = asyncio.run(go())
+        mock_save.assert_not_called()
+        content = ctx.send.await_args.args[0].lower()
+        assert "are you sure" in content
+        assert "day 3" in content
+        assert isinstance(ctx.send.await_args.kwargs.get("view"), tracker_cog.LapConfirmView)
+
+    def test_lap_confirmation_button_saves_counts(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            interaction = MagicMock(spec=discord.Interaction)
+            interaction.user.id = 5
+            interaction.guild.id = 123
+            interaction.message.edit = AsyncMock()
+            interaction.response.send_message = AsyncMock()
+            view = tracker_cog.LapConfirmView(cog, 5, "Day 3")
+            saved = {}
+            data = {"server_message_counts": {"1": 3, "2": 4}}
+            with patch.object(tracker_cog, "load_guild_data", return_value=data), patch.object(
+                tracker_cog, "save_guild_data", side_effect=lambda gid, d: saved.update(d)
+            ):
+                await tracker_cog.LapConfirmView.confirm(view, interaction, None)
+            return saved, interaction
+
+        saved, interaction = asyncio.run(go())
+        assert saved["server_message_counts"] == {}
+        assert saved["server_message_lap_counter"] == 1
+        assert len(saved["server_message_laps"]) == 1
+        record = saved["server_message_laps"][0]
+        assert record["lap"] == 1
+        assert record["label"] == "Day 3"
+        assert record["counts"] == {"1": 3, "2": 4}
+        interaction.response.send_message.assert_awaited_once()
+
+    def test_lap_confirmation_cancel_does_nothing(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            interaction = MagicMock(spec=discord.Interaction)
+            interaction.user.id = 5
+            interaction.response.edit_message = AsyncMock()
+            view = tracker_cog.LapConfirmView(cog, 5, "Day 3")
+            with patch.object(tracker_cog, "load_guild_data") as mock_load, patch.object(
+                tracker_cog, "save_guild_data"
+            ) as mock_save:
+                await tracker_cog.LapConfirmView.cancel(view, interaction, None)
+            return interaction, mock_load, mock_save
+
+        interaction, mock_load, mock_save = asyncio.run(go())
+        mock_load.assert_not_called()
+        mock_save.assert_not_called()
+        interaction.response.edit_message.assert_awaited_once()
+
+    def test_serverstats_lap_requires_label(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            data = {"server_message_counts": {"1": 2}}
+            with patch.object(tracker_cog, "load_guild_data", return_value=data), patch.object(
+                tracker_cog, "save_guild_data"
+            ) as mock_save:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="lap")
+            return ctx, mock_save
+
+        ctx, mock_save = asyncio.run(go())
+        mock_save.assert_not_called()
+        assert "label" in ctx.send.await_args.args[0].lower()
+        assert ctx.send.await_args.kwargs.get("view") is None
+
+    def test_serverstats_lap_refuses_when_empty(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            with patch.object(tracker_cog, "load_guild_data", return_value={"server_message_counts": {}}), patch.object(
+                tracker_cog, "save_guild_data"
+            ) as mock_save:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="lap day1")
+            return ctx, mock_save
+
+        ctx, mock_save = asyncio.run(go())
+        assert "nothing to lap" in ctx.send.await_args.args[0].lower()
+        mock_save.assert_not_called()
+
+    def test_serverstats_lap_requires_admin(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx(admin=False)
+            with patch.object(tracker_cog, "load_guild_data") as mock_load:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="lap day1")
+            return ctx, mock_load
+
+        ctx, mock_load = asyncio.run(go())
+        assert "admin" in ctx.send.await_args.args[0].lower()
+        mock_load.assert_not_called()
+
+    def test_serverstats_laps_lists_every_lap(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            with patch.object(tracker_cog, "load_guild_data", return_value=self._data()), patch.object(
+                tracker_cog.MessageTracker, "_send_laps_list", new=AsyncMock()
+            ) as send_list:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="laps")
+            return send_list
+
+        send_list = asyncio.run(go())
+        send_list.assert_awaited_once()
+
+    def test_serverstats_total_sums_laps_and_current(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            with patch.object(tracker_cog, "load_guild_data", return_value=self._data()), patch.object(
+                tracker_cog.MessageTracker, "_send_stats", new=AsyncMock()
+            ) as send_stats:
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="total")
+            return send_stats
+
+        send_stats = asyncio.run(go())
+        counts = send_stats.await_args.args[1]
+        assert counts == {"1": 7, "3": 5}
+
+    def test_serverstats_unknown_option(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            with patch.object(tracker_cog, "load_guild_data", return_value=self._data()):
+                await tracker_cog.MessageTracker.serverstats.callback(cog, ctx, view="banana")
+            return ctx
+
+        ctx = asyncio.run(go())
+        assert "unknown option" in ctx.send.await_args.args[0].lower()
+
+    def test_resetservstats_true_clears_laps(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            data = self._data()
+            with patch.object(tracker_cog, "load_guild_data", return_value=data), patch.object(
+                tracker_cog, "save_guild_data"
+            ):
+                await tracker_cog.MessageTracker.resetservstats.callback(cog, ctx, everything=True)
+            return data, ctx
+
+        data, ctx = asyncio.run(go())
+        assert data["server_message_counts"] == {}
+        assert data["server_message_laps"] == []
+        assert data["server_message_lap_counter"] == 0
+        assert "all saved laps" in ctx.send.await_args.args[0].lower()
+
+    def test_resetservstats_keeps_laps_by_default(self):
+        async def go():
+            cog = tracker_cog.MessageTracker(MagicMock())
+            ctx = self._ctx()
+            data = self._data()
+            with patch.object(tracker_cog, "load_guild_data", return_value=data), patch.object(
+                tracker_cog, "save_guild_data"
+            ):
+                await tracker_cog.MessageTracker.resetservstats.callback(cog, ctx)
+            return data
+
+        data = asyncio.run(go())
+        assert data["server_message_counts"] == {}
+        assert len(data["server_message_laps"]) == 2

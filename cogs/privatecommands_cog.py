@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from zoneinfo import ZoneInfo
 from cogs.data_utils import load_guild_data
+from utils.discord_safe import MESSAGE_CONTENT_LIMIT, split_text
 
 class Privatecommands(commands.Cog):
     def __init__(self, bot):
@@ -100,7 +101,8 @@ class Privatecommands(commands.Cog):
         if ctx.author.id == 450772749829537793:
             guilds = self.bot.guilds
             server_list = '\n'.join([f"{guild.name} - ID: {guild.id}" for guild in guilds])
-            await ctx.send(f"Lista dei server in cui si trova il bot:\n{server_list}")
+            for chunk in split_text(f"Lista dei server in cui si trova il bot:\n{server_list}", MESSAGE_CONTENT_LIMIT):
+                await ctx.send(chunk)
         else:
             return
 
@@ -110,7 +112,8 @@ class Privatecommands(commands.Cog):
             guild = self.bot.get_guild(int(guild_id))
             if guild:
                 member_list = '\n'.join([f"{member.name} - {member.id}" for member in guild.members])
-                await ctx.send(f"Lista dei membri nel server {guild.name}:\n{member_list}")
+                for chunk in split_text(f"Lista dei membri nel server {guild.name}:\n{member_list}", MESSAGE_CONTENT_LIMIT):
+                    await ctx.send(chunk)
             else:
                 await ctx.send("Non ho trovato nessun server con quell'ID.")
         else:

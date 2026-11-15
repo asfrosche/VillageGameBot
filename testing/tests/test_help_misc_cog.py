@@ -18,8 +18,8 @@ class TestOther:
     def test_who_has_help(self):
         """Verify who command has help text."""
         method = getattr(help_misc_cog.Other, 'who')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_where_exists(self):
         """Verify where command exists on the cog."""
@@ -28,8 +28,8 @@ class TestOther:
     def test_where_has_help(self):
         """Verify where command has help text."""
         method = getattr(help_misc_cog.Other, 'where')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_loc_exists(self):
         """Verify loc command exists on the cog."""
@@ -38,8 +38,8 @@ class TestOther:
     def test_loc_has_help(self):
         """Verify loc command has help text."""
         method = getattr(help_misc_cog.Other, 'loc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_timer_exists(self):
         """Verify timer command exists on the cog."""
@@ -48,8 +48,8 @@ class TestOther:
     def test_timer_has_help(self):
         """Verify timer command has help text."""
         method = getattr(help_misc_cog.Other, 'timer')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_roll_exists(self):
         """Verify roll command exists on the cog."""
@@ -58,8 +58,8 @@ class TestOther:
     def test_roll_has_help(self):
         """Verify roll command has help text."""
         method = getattr(help_misc_cog.Other, 'roll')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_narrate_exists(self):
         """Verify narrate command exists on the cog."""
@@ -68,8 +68,8 @@ class TestOther:
     def test_narrate_has_help(self):
         """Verify narrate command has help text."""
         method = getattr(help_misc_cog.Other, 'narrate')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_narration_exists(self):
         """Verify narration command exists on the cog."""
@@ -78,8 +78,8 @@ class TestOther:
     def test_narration_has_help(self):
         """Verify narration command has help text."""
         method = getattr(help_misc_cog.Other, 'narration')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_anarration_exists(self):
         """Verify anarration command exists on the cog."""
@@ -88,8 +88,8 @@ class TestOther:
     def test_anarration_has_help(self):
         """Verify anarration command has help text."""
         method = getattr(help_misc_cog.Other, 'anarration')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_narrationcolor_exists(self):
         """Verify narrationcolor command exists on the cog."""
@@ -98,8 +98,8 @@ class TestOther:
     def test_narrationcolor_has_help(self):
         """Verify narrationcolor command has help text."""
         method = getattr(help_misc_cog.Other, 'narrationcolor')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_revive_exists(self):
         """Verify revive command exists on the cog."""
@@ -108,8 +108,8 @@ class TestOther:
     def test_revive_has_help(self):
         """Verify revive command has help text."""
         method = getattr(help_misc_cog.Other, 'revive')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deletechannel_exists(self):
         """Verify deletechannel command exists on the cog."""
@@ -118,8 +118,8 @@ class TestOther:
     def test_deletechannel_has_help(self):
         """Verify deletechannel command has help text."""
         method = getattr(help_misc_cog.Other, 'deletechannel')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deletecategory_exists(self):
         """Verify deletecategory command exists on the cog."""
@@ -128,8 +128,8 @@ class TestOther:
     def test_deletecategory_has_help(self):
         """Verify deletecategory command has help text."""
         method = getattr(help_misc_cog.Other, 'deletecategory')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_timestamp_exists(self):
         """Verify timestamp command exists on the cog."""
@@ -138,8 +138,8 @@ class TestOther:
     def test_timestamp_has_help(self):
         """Verify timestamp command has help text."""
         method = getattr(help_misc_cog.Other, 'timestamp')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_time_exists(self):
         """Verify time command exists on the cog."""
@@ -148,8 +148,8 @@ class TestOther:
     def test_time_has_help(self):
         """Verify time command has help text."""
         method = getattr(help_misc_cog.Other, 'time')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_gettag_exists(self):
         """Verify gettag command exists on the cog."""
@@ -158,8 +158,8 @@ class TestOther:
     def test_gettag_has_help(self):
         """Verify gettag command has help text."""
         method = getattr(help_misc_cog.Other, 'gettag')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_firstpin_exists(self):
         """Verify firstpin command exists on the cog."""
@@ -168,8 +168,8 @@ class TestOther:
     def test_firstpin_has_help(self):
         """Verify firstpin command has help text."""
         method = getattr(help_misc_cog.Other, 'firstpin')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ping_exists(self):
         """Verify ping command exists on the cog."""
@@ -178,8 +178,8 @@ class TestOther:
     def test_ping_has_help(self):
         """Verify ping command has help text."""
         method = getattr(help_misc_cog.Other, 'ping')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ding_exists(self):
         """Verify ding command exists on the cog."""
@@ -188,8 +188,8 @@ class TestOther:
     def test_ding_has_help(self):
         """Verify ding command has help text."""
         method = getattr(help_misc_cog.Other, 'ding')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_dice_exists(self):
         """Verify dice command exists on the cog."""
@@ -198,8 +198,8 @@ class TestOther:
     def test_dice_has_help(self):
         """Verify dice command has help text."""
         method = getattr(help_misc_cog.Other, 'dice')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_goat_exists(self):
         """Verify goat command exists on the cog."""
@@ -208,8 +208,8 @@ class TestOther:
     def test_goat_has_help(self):
         """Verify goat command has help text."""
         method = getattr(help_misc_cog.Other, 'goat')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_help2_exists(self):
         """Verify help2 command exists on the cog."""
@@ -218,8 +218,8 @@ class TestOther:
     def test_help2_has_help(self):
         """Verify help2 command has help text."""
         method = getattr(help_misc_cog.Other, 'help2')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_searchhelp_exists(self):
         """Verify searchhelp command exists on the cog."""
@@ -228,8 +228,8 @@ class TestOther:
     def test_searchhelp_has_help(self):
         """Verify searchhelp command has help text."""
         method = getattr(help_misc_cog.Other, 'searchhelp')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_help_exists(self):
         """Verify help command exists on the cog."""
@@ -238,28 +238,12 @@ class TestOther:
     def test_help_has_help(self):
         """Verify help command has help text."""
         method = getattr(help_misc_cog.Other, 'help')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_timezoneselectview_instantiates(self):
-        """Verify TimezoneSelectView view can be instantiated."""
-        # TimezoneSelectView — requires cog/bot context to instantiate
-        pass
 
-    def test_confirmdeleteview_instantiates(self):
-        """Verify ConfirmDeleteView view can be instantiated."""
-        # ConfirmDeleteView — requires cog/bot context to instantiate
-        pass
 
-    def test_narrationcolorview_instantiates(self):
-        """Verify NarrationColorView view can be instantiated."""
-        # NarrationColorView — requires cog/bot context to instantiate
-        pass
 
-    def test_reviveview_instantiates(self):
-        """Verify ReviveView view can be instantiated."""
-        # ReviveView — requires cog/bot context to instantiate
-        pass
 
 
 # ── Deep tests for narration auto-pin ────────────────────────────────────────

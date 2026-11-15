@@ -1,6 +1,7 @@
 import os
 import re
 import typing
+from utils.discord_safe import add_text_fields, category_family, family_channels
 import discord
 import asyncio
 import datetime
@@ -9,7 +10,15 @@ from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from discord.ui import View, Button
 from utils.embeds import warning_embed
-from cogs.data_utils import load_guild_data, save_guild_data, add_player, get_lynch_channel
+from cogs.data_utils import (
+    LYNCH_SESSION_NAME_KEYS,
+    LYNCH_SESSION_VOTE_KEYS,
+    load_guild_data,
+    save_guild_data,
+    add_player,
+    get_lynch_channel,
+    resolve_lynch_channels,
+)
 from cogs.status_cog import (
     check_dead_warning,
     StatusWarningConfirmView,
@@ -175,7 +184,230 @@ class SkipNightView(discord.ui.View):
 
         await self.refresh_embed(interaction)
 
-        
+# ---------------------------
+# Multi-option anonymous vote ("pick")
+# ---------------------------
+PICK_MARKERS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+MAX_PICK_OPTIONS = len(PICK_MARKERS)
+
+
+def _parse_duration(text):
+    """'90s'/'5m'/'2h' -> timedelta, else None."""
+    match = re.fullmatch(r"(\d+)\s*([smh])", text.strip().lower())
+    if not match:
+        return None
+    value = int(match.group(1))
+    seconds = {"s": value, "m": value * 60, "h": value * 3600}[match.group(2)]
+    return timedelta(seconds=seconds)
+
+
+def parse_pick_args(args):
+    """Split ``.pick`` args into ``(title, options, cap, duration)``.
+
+    ``cap=N`` and ``time=1m`` flags may appear anywhere and are stripped.
+    Everything else is positional. Options are comma-separated, e.g.
+    ``.pick Good question?, Option one, Option two, Vote yes``. Without
+    commas, the first word is the title and each following word a single-word
+    option. Returns ``None`` when nothing positional remains.
+    """
+    cap = None
+    duration = None
+    words = []
+    for arg in args:
+        low = str(arg).lower()
+        if low.startswith("cap=") and low[4:].isdigit():
+            cap = max(1, int(low[4:]))
+        elif low.startswith("time="):
+            duration = _parse_duration(low[5:])
+        else:
+            words.append(arg)
+    if not words:
+        return None
+
+    raw = " ".join(words)
+    if "," in raw:
+        parts = [part.strip() for part in raw.split(",") if part.strip()]
+    else:
+        parts = [part.strip() for part in raw.split() if part.strip()]
+    if not parts:
+        return None
+    return parts[0], parts[1:], cap, duration
+
+
+def build_pick_embed(session, alive_count):
+    """Render the public (anonymous) vote embed for a pick session."""
+    lines = [
+        f"{option['letter']} **{option['name']}** — {len(option['voters'])}"
+        for option in session["options"]
+    ]
+    desc = "Vote for **one** option. Votes are **anonymous**.\n\n" + "\n".join(lines)
+
+    cap = session.get("cap")
+    if cap:
+        total = sum(len(option["voters"]) for option in session["options"])
+        filled = "🟩" * total
+        empty = "⬛" * max(0, cap - total)
+        desc += f"\n\n{filled}{empty} **{total}/{cap}** votes to reach"
+
+    desc += f"\n\n👥 {alive_count} alive players"
+
+    expires_at = session.get("expires_at")
+    if expires_at:
+        try:
+            left = datetime.fromisoformat(expires_at) - datetime.now(timezone.utc)
+            if left.total_seconds() > 0:
+                minutes, seconds = divmod(int(left.total_seconds()), 60)
+                desc += f"  •  ⏱️ {minutes}m {seconds}s left"
+        except (ValueError, TypeError):
+            pass
+
+    embed = discord.Embed(
+        title=session["title"],
+        description=desc,
+        color=0xff3fb9,
+        timestamp=datetime.now(),
+    )
+    embed.set_footer(text="Votes are anonymous • Voting closes when the timer ends")
+    return embed
+
+
+class PickView(discord.ui.View):
+    """Anonymous multiple-choice vote. One vote per player; switching moves it."""
+
+    def __init__(self, session, guild_id, message_id):
+        super().__init__(timeout=None)
+        self.session = session
+        self.guild_id = guild_id
+        self.message_id = message_id
+        for idx, option in enumerate(session["options"]):
+            button = discord.ui.Button(
+                label=option["name"],
+                emoji=option["letter"],
+                row=idx // 5,
+                style=discord.ButtonStyle.primary,
+            )
+            button.callback = self._make_vote_callback(idx)
+            self.add_item(button)
+        unvote = discord.ui.Button(
+            label="Unvote",
+            emoji="❌",
+            row=(len(session["options"]) - 1) // 5 + 1,
+            style=discord.ButtonStyle.danger,
+        )
+        unvote.callback = self._make_unvote_callback()
+        self.add_item(unvote)
+
+    def _make_vote_callback(self, idx):
+        async def _vote(interaction: discord.Interaction):
+            await self.vote(interaction, idx)
+        return _vote
+
+    def _make_unvote_callback(self):
+        async def _unvote(interaction: discord.Interaction):
+            await self.unvote(interaction)
+        return _unvote
+
+    def _sync_to_guild_data(self):
+        guild_data = load_guild_data(self.guild_id)
+        if guild_data:
+            sessions = guild_data.setdefault("pick_sessions", {})
+            sessions[str(self.message_id)] = self.session
+            save_guild_data(self.guild_id, guild_data)
+
+    def is_alive(self, member, guild_data):
+        alive_role = discord.utils.get(member.guild.roles, name=guild_data.get("alive_role_name"))
+        return alive_role in member.roles if alive_role else False
+
+    def _is_closed(self):
+        expires_at = self.session.get("expires_at")
+        if not expires_at:
+            return False
+        try:
+            return datetime.now(timezone.utc) >= datetime.fromisoformat(expires_at)
+        except (ValueError, TypeError):
+            return False
+
+    def _last_vote_index(self, uid):
+        for idx, option in enumerate(self.session["options"]):
+            if uid in option["voters"]:
+                return idx
+        return None
+
+    def _alive_count(self, interaction):
+        guild_data = load_guild_data(interaction.guild.id) or {}
+        alive_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("alive_role_name"))
+        if not alive_role:
+            return 0
+        return len([m for m in interaction.guild.members if alive_role in m.roles])
+
+    async def refresh_embed(self, interaction):
+        embed = build_pick_embed(self.session, self._alive_count(interaction))
+        await interaction.message.edit(embed=embed, view=self)
+
+    async def vote(self, interaction, idx):
+        guild_data = load_guild_data(interaction.guild.id) or {}
+        if not self.is_alive(interaction.user, guild_data):
+            return await interaction.response.send_message(
+                "Only Alive players can vote.", ephemeral=True)
+        if self._is_closed():
+            return await interaction.response.send_message(
+                "Voting has closed. ⏱️", ephemeral=True)
+
+        option = self.session["options"][idx]
+        uid = interaction.user.id
+
+        if uid in option["voters"]:
+            return await interaction.response.send_message(
+                "You already voted for this option.", ephemeral=True)
+
+        previous = self._last_vote_index(uid)
+        if previous is not None:
+            self.session["options"][previous]["voters"].remove(uid)
+            reply = "Vote moved to the new option. ✅"
+        else:
+            reply = "Vote cast anonymously. ✅"
+
+        option["voters"].append(uid)
+        self._sync_to_guild_data()
+
+        await interaction.response.send_message(reply, ephemeral=True)
+        await self.refresh_embed(interaction)
+
+        cap = self.session.get("cap")
+        if cap:
+            total = sum(len(o["voters"]) for o in self.session["options"])
+            if total >= cap and not self.session.get("pinged"):
+                self.session["pinged"] = True
+                self._sync_to_guild_data()
+                os_role = discord.utils.get(
+                    interaction.guild.roles,
+                    name=guild_data.get("overseer_role_name"),
+                )
+                if os_role:
+                    await interaction.channel.send(
+                        f"{os_role.mention} Poll threshold reached.")
+
+    async def unvote(self, interaction):
+        guild_data = load_guild_data(interaction.guild.id) or {}
+        if not self.is_alive(interaction.user, guild_data):
+            return await interaction.response.send_message(
+                "Only Alive players can interact.", ephemeral=True)
+        if self._is_closed():
+            return await interaction.response.send_message(
+                "Voting has closed. ⏱️", ephemeral=True)
+
+        uid = interaction.user.id
+        previous = self._last_vote_index(uid)
+        if previous is None:
+            return await interaction.response.send_message(
+                "You have not voted yet.", ephemeral=True)
+
+        self.session["options"][previous]["voters"].remove(uid)
+        self._sync_to_guild_data()
+        await interaction.response.send_message("Vote removed. ❌", ephemeral=True)
+        await self.refresh_embed(interaction)
+
+
 class Utility(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -317,16 +549,19 @@ class Utility(commands.Cog):
             return None, None
         return team, role_name.strip()
 
-    async def _remove_member_from_side_channels(self, member, category):
+    async def _remove_member_from_side_channels(self, member, categories, announce=True):
+        """Remove *member* from every channel in *categories* where they can send.
+
+        announce=False clears access without posting a notice in the channel.
+        """
         errors = []
-        if not category:
-            return errors
-        for channel in category.channels:
+        for channel in family_channels(categories):
             permissions = channel.permissions_for(member)
             if permissions.send_messages:
                 try:
                     await channel.set_permissions(member, overwrite=None)
-                    await channel.send(f"{member.mention} Leaves")
+                    if announce:
+                        await channel.send(f"{member.mention} Leaves")
                 except discord.Forbidden:
                     errors.append(f"Cannot edit permissions in {channel.mention} — Missing Manage Permissions")
                 except Exception as e:
@@ -366,7 +601,7 @@ class Utility(commands.Cog):
             except discord.NotFound:
                 return await ctx.send("One or both message IDs not found.")
             start_msg, end_msg = sorted([from_msg, to_msg], key=lambda m: m.created_at)
-            async for message in ctx.channel.history(after=start_msg, before=end_msg, oldest_first=True):
+            async for message in ctx.channel.history(after=start_msg, before=end_msg, oldest_first=True, limit=None):
                 if not message.pinned:
                     messages_to_delete.append(message)
             if not from_msg.pinned:
@@ -388,52 +623,7 @@ class Utility(commands.Cog):
         if not messages_to_delete:
             return await ctx.send("No messages to delete in the specified range.")
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-        recent = [m for m in messages_to_delete if m.created_at >= cutoff]
-        old = [m for m in messages_to_delete if m.created_at < cutoff]
-
-        summary = f"🧹 **{len(recent)}** recent messages will be bulk deleted."
-        if old:
-            summary += f"\n⚠️ **{len(old)}** messages older than 14 days will be deleted individually (max 50)."
-        summary += "\n\nAre you sure?"
-
-        confirm_view = View(timeout=30)
-        confirmed = {"value": False}
-
-        async def confirm_cb(interaction):
-            if interaction.user != ctx.author:
-                return await interaction.response.send_message("These buttons aren't yours.", ephemeral=True)
-            confirmed["value"] = True
-            confirm_view.stop()
-            try:
-                await interaction.response.edit_message(content="🧹 Sweeping...", view=None)
-            except (discord.NotFound, discord.InteractionResponded):
-                pass
-
-        async def cancel_cb(interaction):
-            if interaction.user != ctx.author:
-                return await interaction.response.send_message("These buttons aren't yours.", ephemeral=True)
-            confirm_view.stop()
-            try:
-                await interaction.response.edit_message(content="Cancelled.", view=None)
-            except (discord.NotFound, discord.InteractionResponded):
-                pass
-
-        confirm_btn = Button(label="✔ Sweep", style=discord.ButtonStyle.green)
-        confirm_btn.callback = confirm_cb
-        cancel_btn = Button(label="❌ Cancel", style=discord.ButtonStyle.red)
-        cancel_btn.callback = cancel_cb
-        confirm_view.add_item(confirm_btn)
-        confirm_view.add_item(cancel_btn)
-
-        confirm_msg = await ctx.send(summary, view=confirm_view)
-        await confirm_view.wait()
-
-        if not confirmed["value"]:
-            return
-
-        await self.broom_delete(ctx, messages_to_delete, old_count=len(old))
-        await confirm_msg.delete()
+        await self.broom_delete(ctx, messages_to_delete)
 
     @commands.command(name="fbroom")
     async def fbroom(self, ctx, *args):
@@ -467,7 +657,7 @@ class Utility(commands.Cog):
             except discord.NotFound:
                 return await ctx.send("One or both message IDs not found.")
             start_msg, end_msg = sorted([from_msg, to_msg], key=lambda m: m.created_at)
-            async for message in ctx.channel.history(after=start_msg, before=end_msg, oldest_first=True):
+            async for message in ctx.channel.history(after=start_msg, before=end_msg, oldest_first=True, limit=None):
                 messages_to_delete.append(message)
             messages_to_delete.insert(0, from_msg)
             if from_msg != to_msg:
@@ -537,11 +727,26 @@ class Utility(commands.Cog):
         if confirm_msg is not None:
             await confirm_msg.delete()
 
-    async def broom_delete(self, ctx, messages_to_delete, old_count=None):
-        """Delete messages and log to broom channel (shared by .broom and shop broom)."""
-        guild_data = load_guild_data(ctx.guild.id)
+    async def broom_delete(self, target, messages_to_delete, old_count=None, individual_limit=50):
+        """Delete messages and log to broom channel (shared by .broom and shop broom).
+
+        *target* may be a command ``Context`` or a discord ``Interaction``.
+        Old messages are always classified by age, never by list position.
+        *individual_limit* caps how many messages older than 14 days are deleted
+        one-by-one (slow, rate-limited); ``None`` deletes all of them.
+        """
+        is_interaction = isinstance(target, discord.Interaction)
+        guild = target.guild
+        channel = target.channel
+        author = target.user if is_interaction else target.author
+
+        guild_data = load_guild_data(guild.id) or {}
         broom_channel_name = guild_data.get("edit_del_logs")
-        broom_channel = discord.utils.get(ctx.guild.text_channels, name=broom_channel_name)
+        broom_channel = (
+            discord.utils.get(guild.text_channels, name=broom_channel_name)
+            if broom_channel_name
+            else None
+        )
         with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
             for message in messages_to_delete:
                 timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -549,60 +754,63 @@ class Utility(commands.Cog):
                 temp_log.write(f"{timestamp} - {message.author}: {content}\n")
             temp_log_name = temp_log.name
 
-        if old_count is None:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-            recent = [m for m in messages_to_delete if m.created_at >= cutoff]
-            old = [m for m in messages_to_delete if m.created_at < cutoff]
-        else:
-            old = messages_to_delete[-old_count:] if old_count else []
-            recent = messages_to_delete[:-old_count] if old_count else messages_to_delete
+        # Discord only bulk-deletes messages younger than 14 days, so split by age
+        # regardless of the order the caller collected them in. A one-day margin keeps
+        # messages right at the boundary out of the bulk batch (they are deleted one by one).
+        cutoff = datetime.now(timezone.utc) - timedelta(days=13)
+        recent = [m for m in messages_to_delete if m.created_at >= cutoff]
+        old = [m for m in messages_to_delete if m.created_at < cutoff]
 
-        MAX_INDIVIDUAL = 50
+        old_to_delete = old if individual_limit is None else old[:individual_limit]
         deleted = 0
         skipped = 0
         batch_fallbacks = 0
+        failures = []  # one entry per message Discord refused; nothing is dropped silently
+
+        async def delete_one(msg):
+            nonlocal deleted
+            try:
+                await msg.delete()
+                deleted += 1
+            except discord.NotFound:
+                pass  # already gone, so nothing was left behind
+            except discord.HTTPException as error:
+                failures.append(str(error))
+            await asyncio.sleep(1.05)
 
         for i in range(0, len(recent), 100):
             batch = recent[i:i + 100]
             try:
-                await ctx.channel.delete_messages(batch)
+                await channel.delete_messages(batch)
                 deleted += len(batch)
             except discord.HTTPException:
                 batch_fallbacks += 1
                 for msg in batch:
-                    try:
-                        await msg.delete()
-                        deleted += 1
-                        await asyncio.sleep(1.05)
-                    except discord.NotFound:
-                        pass
-                    except discord.HTTPException:
-                        pass
+                    await delete_one(msg)
 
-        for msg in old[:MAX_INDIVIDUAL]:
-            try:
-                await msg.delete()
-                deleted += 1
-                await asyncio.sleep(1.05)
-            except discord.NotFound:
-                pass
-            except discord.HTTPException:
-                pass
+        for msg in old_to_delete:
+            await delete_one(msg)
 
-        if len(old) > MAX_INDIVIDUAL:
-            skipped = len(old) - MAX_INDIVIDUAL
+        if individual_limit is not None and len(old) > individual_limit:
+            skipped = len(old) - individual_limit
 
         if broom_channel:
-            await broom_channel.send(f'🧹 **{ctx.author}** used a broom in {ctx.channel.mention}')
+            await broom_channel.send(f'🧹 **{author}** used a broom in {channel.mention}')
             await broom_channel.send(file=discord.File(temp_log_name))
         os.remove(temp_log_name)
 
-        msg = f"🧹 Broom swept away **{deleted}** messages."
+        report = f"🧹 Broom swept away **{deleted}** messages."
         if batch_fallbacks:
-            msg += f"\n⚠️ {batch_fallbacks} batch(es) deleted one-by-one (bulk delete limit / pinned messages)."
+            report += f"\n⚠️ {batch_fallbacks} batch(es) deleted one-by-one (bulk delete limit / pinned messages)."
         if skipped:
-            msg += f"\n⚠️ Skipped **{skipped}** messages older than 14 days (limit: {MAX_INDIVIDUAL})."
-        await ctx.send(msg, delete_after=5)
+            report += f"\n⚠️ Skipped **{skipped}** messages older than 14 days (limit: {individual_limit})."
+        if failures:
+            from collections import Counter
+            reasons = "; ".join(f"{text} (x{count})" for text, count in Counter(failures).most_common(2))
+            report += f"\n❌ Could not delete **{len(failures)}** message(s): {reasons}"
+        # Keep the report visible when something was left behind.
+        await channel.send(report, delete_after=None if failures else 5)
+        return {"deleted": deleted, "failed": len(failures), "skipped": skipped}
 
     @commands.command()
     async def housecheck(self, ctx, hours: int = 24):
@@ -738,6 +946,83 @@ class Utility(commands.Cog):
         self.bot.dispatch("phase_change", "night", ctx.guild)
         await self._manage_channels(ctx, False)
 
+    REGION_CHANNELS = {
+        "future": {
+            "daydiscussion": "🌞│future-day-discussion",
+            "megaphone": "📢│future-megaphone",
+            "voting_keys": ["lynch_channel_name1", "lynch_channel_name2", "lynch_channel_name3", "leader_channel_name"],
+        },
+        "past": {
+            "daydiscussion": "🌞│past-day-discussion",
+            "megaphone": "📢│past-megaphone",
+            "voting_keys": ["lynch_channel_name4", "lynch_channel_name5", "lynch_channel_name6", "leader_channel_name2"],
+        },
+    }
+
+    @commands.command()
+    async def daywf(self, ctx):
+        """Unlock the Future region's day channels."""
+        await self._manage_region_channels(ctx, True, "future")
+
+    @commands.command()
+    async def nightwf(self, ctx):
+        """Lock the Future region's day channels."""
+        await self._manage_region_channels(ctx, False, "future")
+
+    @commands.command()
+    async def daywp(self, ctx):
+        """Unlock the Past region's day channels."""
+        await self._manage_region_channels(ctx, True, "past")
+
+    @commands.command()
+    async def nightwp(self, ctx):
+        """Lock the Past region's day channels."""
+        await self._manage_region_channels(ctx, False, "past")
+
+    def _phase_embed(self, day):
+        """Build the DAY STARTS / DAY ENDS embed used by the region commands."""
+        if day:
+            embed = discord.Embed(title="DAY STARTS", color=0xff3fb9, timestamp=datetime.now())
+            embed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExYzhpcTRsZXpuZ2RtcTl2c2hoMms4cmc4YmFsbDE1Mnl5emM1c3NrZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/VDGOdvmp1bpc3PcCry/giphy.gif")
+        else:
+            embed = discord.Embed(title="DAY ENDS", color=0xff3fb9, timestamp=datetime.now())
+            embed.set_image(url="https://media2.giphy.com/media/v1.Y2lkPTZjMDliOTUyc2x4MWg1ajU1dmVvbjhlcnU1cmRncHI1ZTZmeXNvb3RrZ3BnNGJ2YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/SirUFDS5F83Go/giphy.gif")
+        embed.set_footer(text="Village Game")
+        return embed
+
+    async def _manage_region_channels(self, ctx, allow_messages, region):
+        """Lock/unlock only the given region's channels (permissions + phase embed)."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+        os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+        if os_role not in ctx.author.roles and not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+        guild = ctx.guild
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
+        spec = self.REGION_CHANNELS[region]
+        embed = self._phase_embed(allow_messages)
+        await ctx.send(f'{"Unlocking" if allow_messages else "Locking"} {region} channels')
+        daychat_channels = [
+            discord.utils.get(guild.channels, name=spec["daydiscussion"]),
+            discord.utils.get(guild.channels, name=spec["megaphone"]),
+        ]
+        voting_channels = [get_lynch_channel(guild, guild_data, key) for key in spec["voting_keys"]]
+        for channel in daychat_channels:
+            if channel:
+                await channel.set_permissions(alive_role, view_channel=True, send_messages=allow_messages)
+                await channel.set_permissions(sponsor_role, view_channel=True, send_messages=allow_messages)
+                await channel.send(embed=embed)
+        for channel in voting_channels:
+            if channel:
+                await channel.set_permissions(alive_role, view_channel=True, send_messages=allow_messages)
+                await channel.set_permissions(sponsor_role, view_channel=True, send_messages=False)
+                await channel.send(embed=embed)
+        await ctx.send('Done')
+
     def _build_stats_embed(self, guild_data, guild):
         """Build the message stats embed from current tracking data."""
         counts = guild_data.get("tracked_message_counts") or {}
@@ -757,12 +1042,11 @@ class Utility(commands.Cog):
     def _build_votelist_embeds(self, guild_data, guild):
         """Build votelist embeds from current vote data."""
         votes_sessions = {
-            "LYNCH SESSION 1": guild_data.get("lynch_votes1", {}),
-            "LYNCH SESSION 2": guild_data.get("lynch_votes2", {}),
-            "LYNCH SESSION 3": guild_data.get("lynch_votes3", {}),
-            "LYNCH SESSION 4": guild_data.get("lynch_votes4", {}),
-            "LEADER ELECTION": guild_data.get("leader_votes", {}),
+            f"LYNCH SESSION {i}": guild_data.get(f"lynch_votes{i}", {})
+            for i in range(1, len(LYNCH_SESSION_VOTE_KEYS) + 1)
         }
+        votes_sessions["LEADER ELECTION"] = guild_data.get("leader_votes", {})
+        votes_sessions["LEADER ELECTION 2"] = guild_data.get("leader_votes2", {})
         embeds = []
         for session, votes in votes_sessions.items():
             if not votes:
@@ -811,21 +1095,18 @@ class Utility(commands.Cog):
                 daychat = discord.utils.get(guild.channels, name=guild_data["daydiscussion_channel_name"])
                 megaphone = discord.utils.get(guild.channels, name=guild_data["megaphone_channel_name"])
                 announcements_channel = discord.utils.get(guild.channels, name=guild_data["announcements_channel_name"])
-                lynch_channel1 = get_lynch_channel(guild, guild_data, "lynch_channel_name1")
-                lynch_channel2 = get_lynch_channel(guild, guild_data, "lynch_channel_name2")
-                lynch_channel3 = get_lynch_channel(guild, guild_data, "lynch_channel_name3")
-                lynch_channel4 = get_lynch_channel(guild, guild_data, "lynch_channel_name4")
+                lynch_session_channels = resolve_lynch_channels(guild, guild_data)
                 leader_channel = get_lynch_channel(guild, guild_data, "leader_channel_name")
+                leader_channel2 = get_lynch_channel(guild, guild_data, "leader_channel_name2")
                 daychat_channels = [daychat, megaphone]
-                voting_channels = [lynch_channel1, lynch_channel2, lynch_channel3, lynch_channel4, leader_channel]
+                voting_channels = [*lynch_session_channels, leader_channel, leader_channel2]
 
                 if allow_messages:
                     # --- DAY START: reset votes and restart message tracking ---
-                    guild_data["lynch_votes1"] = {}
-                    guild_data["lynch_votes2"] = {}
-                    guild_data["lynch_votes3"] = {}
-                    guild_data["lynch_votes4"] = {}
+                    for key in LYNCH_SESSION_VOTE_KEYS:
+                        guild_data[key] = {}
                     guild_data["leader_votes"] = {}
+                    guild_data["leader_votes2"] = {}
                     guild_data["tracked_message_counts"] = {}
                     guild_data["message_tracking_enabled"] = True
                     save_guild_data(ctx.guild.id, guild_data)
@@ -898,9 +1179,9 @@ class Utility(commands.Cog):
                 break
         embed = discord.Embed(color=0xff3fb9, timestamp=datetime.now())
         if guild_data["showwhispersender"] and sender:
-            embed.add_field(name=f"{sender.mention} `[{sender.display_name}]` sent you a whisper:", value=f'{message}', inline=False)
+            add_text_fields(embed, f"{sender.mention} `[{sender.display_name}]` sent you a whisper:", message)
         else:
-            embed.add_field(name="Someone sent you a whisper:", value=f'{message}', inline=False)
+            add_text_fields(embed, "Someone sent you a whisper:", message)
         embed.set_footer(text="Village Game")
         if receiver:
             await receiver_channel.send(f"{receiver.mention}")
@@ -913,7 +1194,7 @@ class Utility(commands.Cog):
             eout1 = sender.mention
         else:
             eout1 = ctx.channel.mention
-        embedlog.add_field(name=f"{eout1} sent a whisper to {eout2}:", value=f'{message}\n\n{receiver_channel.mention}', inline=False)
+        add_text_fields(embedlog, f"{eout1} sent a whisper to {eout2}:", f'{message}\n\n{receiver_channel.mention}')
         embedlog.set_footer(text="Village Game")
         if whisper_logs_channel:
             await whisper_logs_channel.send(embed=embedlog)
@@ -958,8 +1239,9 @@ class Utility(commands.Cog):
                 alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
                 sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
                 houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
-                privc_category = discord.utils.get(ctx.guild.categories, name=guild_data["privc_category_name"])
-                publc_category = discord.utils.get(ctx.guild.categories, name=guild_data["publc_category_name"])
+                privc_categories = category_family(ctx.guild.categories, guild_data["privc_category_name"])
+                old_pcs_categories = category_family(ctx.guild.categories, guild_data.get("old_pcs_category_name") or "OLD PCS")
+                publc_categories = category_family(ctx.guild.categories, guild_data["publc_category_name"])
                 dead_category = discord.utils.get(ctx.guild.categories, name=guild_data["dead_rc_category_name"])
                 channel = ctx.channel
                 members = channel.members
@@ -1011,14 +1293,12 @@ class Utility(commands.Cog):
                         if old_house:
                             homeless_message = await old_house.send(f"{member.mention} doesn't live here anymore")
                             await homeless_message.pin()
-                        if privc_category:
-                            for priv_channel in privc_category.channels:
+                        for priv_channel in family_channels(privc_categories):
                                 permissions = priv_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await priv_channel.set_permissions(member, overwrite=None)
                                     await priv_channel.send(f'{member.mention} Leaves')
-                        if publc_category:
-                            for publ_channel in publc_category.channels:
+                        for publ_channel in family_channels(publc_categories):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
@@ -1042,16 +1322,17 @@ class Utility(commands.Cog):
                                 permissions = house_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await house_channel.set_permissions(member, overwrite=None)
-                        if privc_category:
-                            for priv_channel in privc_category.channels:
+                        for priv_channel in family_channels(privc_categories):
                                 permissions = priv_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await priv_channel.set_permissions(member, overwrite=None)
-                        if publc_category:
-                            for publ_channel in publc_category.channels:
+                        for publ_channel in family_channels(publc_categories):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
+                # OLD PCS: clear member access quietly (archived channels, no notice posted)
+                for member in members:
+                    await self._remove_member_from_side_channels(member, old_pcs_categories, announce=False)
                 # Clean up follow pairs where dead member was the target
                 for member in members:
                     if alive_role in member.roles or sponsor_role in member.roles:
@@ -1063,7 +1344,11 @@ class Utility(commands.Cog):
                     dead_ids = {str(m.id) for m in alive_members}
                     vote_lines = []
                     removed_votes = []
-                    for vote_dict in [guild_data.get("lynch_votes1", {}), guild_data.get("lynch_votes2", {}), guild_data.get("lynch_votes3", {}), guild_data.get("lynch_votes4", {}), guild_data.get("leader_votes", {})]:
+                    for vote_dict in [
+                        *(guild_data.get(key, {}) for key in LYNCH_SESSION_VOTE_KEYS),
+                        guild_data.get("leader_votes", {}),
+                        guild_data.get("leader_votes2", {}),
+                    ]:
                         for voter_id, target_id in list(vote_dict.items()):
                             if voter_id in dead_ids or str(target_id) in dead_ids:
                                 voter = ctx.guild.get_member(int(voter_id))
@@ -1146,8 +1431,8 @@ class Utility(commands.Cog):
                 alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
                 sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
                 houses_category = discord.utils.get(ctx.guild.categories, name=guild_data["houses_category_name"])
-                privc_category = discord.utils.get(ctx.guild.categories, name=guild_data["privc_category_name"])
-                publc_category = discord.utils.get(ctx.guild.categories, name=guild_data["publc_category_name"])
+                privc_categories = category_family(ctx.guild.categories, guild_data["privc_category_name"])
+                publc_categories = category_family(ctx.guild.categories, guild_data["publc_category_name"])
                 dead_category = discord.utils.get(ctx.guild.categories, name=guild_data["dead_rc_category_name"])
                 channel = ctx.channel
                 members = channel.members
@@ -1195,14 +1480,12 @@ class Utility(commands.Cog):
                             if old_house:
                                 homeless_message = await old_house.send(f"{member.mention} doesn't live here anymore")
                                 await homeless_message.pin()
-                        if privc_category:
-                            for priv_channel in privc_category.channels:
+                        for priv_channel in family_channels(privc_categories):
                                 permissions = priv_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await priv_channel.set_permissions(member, overwrite=None)
                                     await priv_channel.send(f'{member.mention} Leaves')
-                        if publc_category:
-                            for publ_channel in publc_category.channels:
+                        for publ_channel in family_channels(publc_categories):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
@@ -1217,13 +1500,11 @@ class Utility(commands.Cog):
                                 permissions = house_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await house_channel.set_permissions(member, overwrite=None)
-                        if privc_category:
-                            for priv_channel in privc_category.channels:
+                        for priv_channel in family_channels(privc_categories):
                                 permissions = priv_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await priv_channel.set_permissions(member, overwrite=None)
-                        if publc_category:
-                            for publ_channel in publc_category.channels:
+                        for publ_channel in family_channels(publc_categories):
                                 permissions = publ_channel.permissions_for(member)
                                 if permissions.send_messages:
                                     await publ_channel.set_permissions(member, overwrite=None)
@@ -1255,8 +1536,9 @@ class Utility(commands.Cog):
         dead_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("dead_role_name"))
         alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
         sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
-        privc_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("privc_category_name"))
-        publc_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("publc_category_name"))
+        privc_categories = category_family(ctx.guild.categories, guild_data.get("privc_category_name"))
+        publc_categories = category_family(ctx.guild.categories, guild_data.get("publc_category_name"))
+        old_pcs_categories = category_family(ctx.guild.categories, guild_data.get("old_pcs_category_name") or "OLD PCS")
         if not dead_role:
             await ctx.send("Dead role not found")
             return
@@ -1318,10 +1600,12 @@ class Utility(commands.Cog):
             except Exception as e:
                 errors.append(f"Pin error in {selected_house.mention}: {e}")
 
-        privc_errors = await self._remove_member_from_side_channels(target_member, privc_category)
-        publc_errors = await self._remove_member_from_side_channels(target_member, publc_category)
+        privc_errors = await self._remove_member_from_side_channels(target_member, privc_categories)
+        publc_errors = await self._remove_member_from_side_channels(target_member, publc_categories)
+        old_pcs_errors = await self._remove_member_from_side_channels(target_member, old_pcs_categories, announce=False)
         errors.extend(privc_errors)
         errors.extend(publc_errors)
+        errors.extend(old_pcs_errors)
 
         if alive_member:
             try:
@@ -1417,36 +1701,83 @@ class Utility(commands.Cog):
         embed = discord.Embed(title="Corpse Locations", description="\n".join(lines), color=discord.Color.dark_grey())
         await ctx.send(embed=embed)
 
+    @staticmethod
+    def _resolve_member(guild: discord.Guild, token: str):
+        """Resolve a raw command token to a member.
+
+        Handles <@id>/<@!id> mentions (Discord sends the ! form for members with
+        a nickname, which never equals Member.mention), raw user IDs, usernames,
+        and nicknames/display names.
+        """
+        token = token.strip()
+        m = re.fullmatch(r'<@!?(\d+)>', token)
+        if m:
+            return guild.get_member(int(m.group(1)))
+        if token.isdigit():
+            return guild.get_member(int(token))
+        return discord.utils.find(
+            lambda mem: mem.name == token or mem.display_name == token,
+            guild.members,
+        )
+
     @commands.command()
     async def addrole(self, ctx, role: discord.Role, *members):
         """Give a role to one or more members."""
         if ctx.author.guild_permissions.administrator:
-            response = f"{role.mention} role successfully added"
+            if not members:
+                return await ctx.send("Usage: `.addrole <role> <member...>`")
             if 'everyone' in members:
                 members_wo_role = [member for member in ctx.guild.members if role not in member.roles]
+                status = await ctx.send(f"🧹 Adding {role.mention} to **{len(members_wo_role)}** member(s)…")
                 for member in members_wo_role:
                     await member.add_roles(role)
-                await ctx.send(f"{role.mention} role successfully added to everyone")
+                await status.edit(content=f"✅ Added {role.mention} to **{len(members_wo_role)}** member(s).")
             else:
                 members_wo_role = []
                 for member in members:
-                    found_member = discord.utils.find(lambda m: m.name == member or m.mention == member or str(m.id) == member, ctx.guild.members)
+                    found_member = self._resolve_member(ctx.guild, member)
                     if found_member and role not in found_member.roles:
                         members_wo_role.append(found_member)
-                        await found_member.add_roles(role)
-                if members_wo_role:
-                    await ctx.send(response)
-                else:
-                    await ctx.send("No valid members found or they already have the role.")
+                if not members_wo_role:
+                    return await ctx.send("No valid members found or they already have the role.")
+                names = ", ".join(m.display_name for m in members_wo_role)
+                status = await ctx.send(
+                    f"🧹 Adding {role.mention} to **{len(members_wo_role)}** member(s): {names}"
+                )
+                for member in members_wo_role:
+                    await member.add_roles(role)
+                await status.edit(content=f"✅ Added {role.mention} to **{len(members_wo_role)}** member(s): {names}")
         else:
             await ctx.send("You don't have enough permissions to use this command")
 
     @commands.command()
-    async def removerole(self, ctx, role: discord.Role, member: discord.Member):
-        """Remove a role from a member (admin only)."""
+    async def removerole(self, ctx, role: discord.Role, *members):
+        """Remove a role from one or more members (admin only)."""
         if not ctx.author.guild_permissions.administrator:
             return
-        await member.remove_roles(role)
+        if not members:
+            return await ctx.send("Usage: `.removerole <role> <member...>`")
+        if 'everyone' in members:
+            members_with_role = [member for member in ctx.guild.members if role in member.roles]
+            status = await ctx.send(f"🧹 Removing {role.mention} from **{len(members_with_role)}** member(s) (everyone)…")
+            for member in members_with_role:
+                await member.remove_roles(role)
+            await status.edit(content=f"✅ Removed {role.mention} from **{len(members_with_role)}** member(s) (everyone).")
+        else:
+            members_with_role = []
+            for member in members:
+                found_member = self._resolve_member(ctx.guild, member)
+                if found_member and role in found_member.roles:
+                    members_with_role.append(found_member)
+            if not members_with_role:
+                return await ctx.send("No valid members found or they don't have the role.")
+            names = ", ".join(m.display_name for m in members_with_role)
+            status = await ctx.send(
+                f"🧹 Removing {role.mention} from **{len(members_with_role)}** member(s): {names}"
+            )
+            for member in members_with_role:
+                await member.remove_roles(role)
+            await status.edit(content=f"✅ Removed {role.mention} from **{len(members_with_role)}** member(s): {names}")
         
     @commands.command()
     async def addchannelperms(self, ctx, role: discord.Role, channel: discord.TextChannel, type: str = "r"):
@@ -1705,6 +2036,124 @@ class Utility(commands.Cog):
             color=0xff3fb9,
         )
         embed.add_field(name="Voters", value="\n".join(lines), inline=False)
+        embed.set_footer(text=f"Message ID: {message_id}")
+
+        await ctx.send(embed=embed)
+
+    @commands.command(name="pick")
+    async def pick(self, ctx, *args):
+        """Start an anonymous multiple-choice vote in this channel.
+        Usage: .pick [cap=N] [time=1m] <Title>, <Option one>, <Option two> ...""" 
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+
+        os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+        if not os_role:
+            await ctx.send("Overseer role not found.")
+            return
+        if os_role not in ctx.author.roles and not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have permission to use this command.")
+            return
+
+        parsed = parse_pick_args(args)
+        if not parsed:
+            await ctx.send("Usage: `.pick [cap=N] [time=1m] <Title>, <Option one>, <Option two> ...`")
+            return
+        title, option_names, cap, duration = parsed
+        if len(option_names) < 2:
+            await ctx.send("You need at least **two** options.")
+            return
+        if len(option_names) > MAX_PICK_OPTIONS:
+            await ctx.send(f"Too many options (max {MAX_PICK_OPTIONS}).")
+            return
+
+        # Post the poll in the channel the command was typed in.
+        poll_channel = ctx.channel
+
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
+        alive_count = 0
+        if alive_role:
+            alive_count = len([m for m in ctx.guild.members if alive_role in m.roles])
+
+        session = {
+            "title": f"🎮 Poll — {title}",
+            "options": [
+                {"letter": PICK_MARKERS[idx], "name": name, "voters": []}
+                for idx, name in enumerate(option_names)
+            ],
+            "cap": cap,
+            "expires_at": (datetime.now(timezone.utc) + duration).isoformat() if duration else None,
+            "pinged": False,
+        }
+
+        embed = build_pick_embed(session, alive_count)
+        msg = await poll_channel.send(embed=embed)
+        view = PickView(session, guild_id=ctx.guild.id, message_id=msg.id)
+        await msg.edit(embed=embed, view=view)
+
+        sessions = guild_data.setdefault("pick_sessions", {})
+        sessions[str(msg.id)] = session
+        save_guild_data(ctx.guild.id, guild_data)
+
+    @commands.command(name="pickvoters")
+    async def pickvoters(self, ctx, *, raw_input: str):
+        """Show who voted on each pick option (admin only).
+        Usage: .pickvoters <message_id or message_link>"""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("You don't have permission to use this command.")
+            return
+
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return
+
+        raw_input = raw_input.strip().strip("<>")
+        message_id = None
+        if raw_input.startswith("https://discord.com/channels/"):
+            parts = raw_input.rstrip("/").split("/")
+            if len(parts) >= 3:
+                message_id = parts[-1]
+        elif raw_input.isdigit():
+            message_id = raw_input
+        else:
+            await ctx.send(
+                "Invalid format. Use a message ID (e.g. `1234567890123456789`) "
+                "or a full message link."
+            )
+            return
+
+        sessions = guild_data.get("pick_sessions", {})
+        session_data = sessions.get(str(message_id))
+        if not session_data:
+            await ctx.send(f"No pick session found for message ID `{message_id}`.")
+            return
+
+        embed = discord.Embed(
+            title=f"🗳️ Pick Voters — {session_data['title']}",
+            color=0xff3fb9,
+        )
+        total = 0
+        for option in session_data["options"]:
+            voters = option["voters"]
+            total += len(voters)
+            lines = []
+            for vid in voters:
+                member = ctx.guild.get_member(int(vid))
+                if member:
+                    lines.append(f"• **{member.display_name}** (`{vid}`)")
+                else:
+                    lines.append(f"• Unknown (`{vid}`)")
+            if len(lines) > 15:
+                lines = lines[:15] + ["• …"]
+            embed.add_field(
+                name=f"{option['letter']} {option['name']} ({len(voters)})",
+                value="\n".join(lines) or "—",
+                inline=False,
+            )
+        embed.description = f"**{total}** total vote{'s' if total != 1 else ''}"
         embed.set_footer(text=f"Message ID: {message_id}")
 
         await ctx.send(embed=embed)

@@ -2,6 +2,7 @@ import discord
 import asyncio
 import aiohttp
 import datetime
+import difflib
 import re
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -48,6 +49,84 @@ def _parse_custom_emoji(emoji: str):
     name = match.group(2)
     emoji_id = int(match.group(3))
     return name, emoji_id, animated
+
+
+_CHANNEL_MENTION_RE = re.compile(r"<#(\d+)>")
+
+
+def _normalize_channel_name(name: str) -> str:
+    """Lowercase a channel name and collapse separators/emoji so lookups are forgiving."""
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
+
+
+def _resolve_channel(guild, value):
+    """Resolve *value* to a guild text channel as robustly as possible.
+
+    Accepts, in order of confidence: a channel mention (``<#id>``), a raw ID, a
+    ``#name``, an exact name, a name that only differs by emoji/punctuation/case,
+    a unique substring, or a unique fuzzy match. Returns ``(channel, candidates)``
+    where *candidates* holds the closest near-misses when *value* was ambiguous
+    (or couldn't be resolved at all).
+    """
+    value = (value or "").strip()
+    if not value:
+        return None, []
+
+    mention = _CHANNEL_MENTION_RE.fullmatch(value)
+    if mention:
+        return guild.get_channel(int(mention.group(1))), []
+
+    query = value[1:] if value.startswith("#") else value
+    if query.isdigit():
+        channel = guild.get_channel(int(query))
+        if channel is not None:
+            return channel, []
+
+    channels = list(guild.text_channels)
+    target = query.lower()
+    norm_target = _normalize_channel_name(query)
+
+    # Exact name (case-insensitive) wins outright - channel names are unique.
+    for channel in channels:
+        if channel.name.lower() == target:
+            return channel, []
+
+    # Group channels by normalised name so emoji/punctuation can be ignored.
+    norm = {}
+    for channel in channels:
+        norm.setdefault(_normalize_channel_name(channel.name), []).append(channel)
+
+    if norm_target:
+        if len(norm.get(norm_target, [])) == 1:
+            return norm[norm_target][0], []
+
+        contains = [c for c in channels if target in c.name.lower()]
+        if len(contains) == 1:
+            return contains[0], []
+        norm_contains = [c for c in channels if norm_target in _normalize_channel_name(c.name)]
+        if len(norm_contains) == 1:
+            return norm_contains[0], []
+
+        close = difflib.get_close_matches(norm_target, list(norm.keys()), n=3, cutoff=0.6)
+        if len(close) == 1 and len(norm[close[0]]) == 1:
+            return norm[close[0]][0], []
+
+    # No unique hit - offer the nearest candidates (fuzzy first, then substring).
+    suggestions = []
+    seen_ids = set()
+
+    def add(candidates):
+        for channel in candidates:
+            if channel.id not in seen_ids:
+                seen_ids.add(channel.id)
+                suggestions.append(channel)
+
+    if norm_target:
+        for close_key in difflib.get_close_matches(norm_target, list(norm.keys()), n=5, cutoff=0.5):
+            add(norm[close_key])
+    add([c for c in channels if target and target in c.name.lower()])
+    return None, suggestions[:10]
+
 
 class Setup(commands.Cog):
     def __init__(self, bot):
@@ -218,9 +297,9 @@ class Setup(commands.Cog):
                 await daychat_category.create_text_channel(name=megaphone_channel_name)
                 set_lynch_channel(guild_data, "lynch_channel_name1", await daychat_category.create_text_channel(name=lynch_channel_name1))
                 set_lynch_channel(guild_data, "lynch_channel_name2", await daychat_category.create_text_channel(name=lynch_channel_name2))
-                set_lynch_channel(guild_data, "lynch_channel_name3", await daychat_category.create_text_channel(name=guild_data.get("lynch_channel_name3", "🗳│vote-session-3")))
-                set_lynch_channel(guild_data, "lynch_channel_name4", await daychat_category.create_text_channel(name=guild_data.get("lynch_channel_name4", "🗳│vote-session-4")))
                 set_lynch_channel(guild_data, "leader_channel_name", await daychat_category.create_text_channel(name=leader_channel_name))
+                # Leader election 2 is optional: it is not created by .setup. Assign
+                # an existing channel with `.channelset leaderelection2` to enable it.
                 await daychat_category.create_text_channel(name=vote_count_name)
                 await publc_category.create_text_channel(name='duplicate-this')
                 await privc_category.create_text_channel(name='duplicate-this')
@@ -279,52 +358,75 @@ class Setup(commands.Cog):
 
     # Setup channels
     @commands.command()
-    async def channelset(self, ctx, channel: str, new_channel: discord.TextChannel = None):
-        """Assign a channel configuration key to a channel."""
+    async def channelset(self, ctx, channel: str = None, *, new_channel: str = None):
+        """Assign a channel configuration key to a channel.
+
+        The channel can be a mention (#channel), an ID, or a name - emoji,
+        punctuation and case are ignored, and a unique partial/close name also
+        works (e.g. "vote count" matches "📊│vote-count"). If nothing is given,
+        the current channel is used.
+        """
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
-                valid_channels = ['daydiscussion', 'megaphone', 'lynchsession1', 'lynchsession2', 'lynchsession3', 'lynchsession4', 'leaderelection', 'votecount', 'logchannel', 'actionslogchannel', 'announcements', 'map', 'whisperlogs', 'editdellogs', 'joinleavelogs', 'narrationlog']
-                if new_channel is None:
-                    new_channel = ctx.channel
-                new_channel_name = new_channel.name
-                if channel.lower() in valid_channels:
-                    if channel.lower() == 'daydiscussion':
+                valid_channels = ['daydiscussion', 'megaphone', 'lynchsession1', 'lynchsession2', 'lynchsession3', 'lynchsession4', 'lynchsession5', 'lynchsession6', 'leaderelection', 'leaderelection2', 'votecount', 'logchannel', 'actionslogchannel', 'announcements', 'map', 'whisperlogs', 'editdellogs', 'joinleavelogs', 'narrationlog']
+                key = channel.lower() if channel else ''
+                if key in valid_channels:
+                    if new_channel:
+                        resolved, candidates = _resolve_channel(ctx.guild, new_channel)
+                        if resolved is None:
+                            if candidates:
+                                options = "\n".join(f"• {c.mention} (`{c.name}`)" for c in candidates)
+                                await ctx.send(f'"{new_channel}" matches more than one channel. Did you mean:\n{options}\n\nTip: mention the channel or use its ID.')
+                            else:
+                                await ctx.send(f'Could not find a channel matching "{new_channel}". Mention it like #channel, send its ID, or type its name.')
+                            return
+                        new_channel = resolved
+                    else:
+                        new_channel = ctx.channel
+                    new_channel_name = new_channel.name
+                    if key == 'daydiscussion':
                         guild_data['daydiscussion_channel_name'] = new_channel_name
-                    elif channel.lower() == 'megaphone':
+                    elif key == 'megaphone':
                         guild_data['megaphone_channel_name'] = new_channel_name
-                    elif channel.lower() == 'lynchsession1':
+                    elif key == 'lynchsession1':
                         set_lynch_channel(guild_data, 'lynch_channel_name1', new_channel)
-                    elif channel.lower() == 'lynchsession2':
+                    elif key == 'lynchsession2':
                         set_lynch_channel(guild_data, 'lynch_channel_name2', new_channel)
-                    elif channel.lower() == 'lynchsession3':
+                    elif key == 'lynchsession3':
                         set_lynch_channel(guild_data, 'lynch_channel_name3', new_channel)
-                    elif channel.lower() == 'lynchsession4':
+                    elif key == 'lynchsession4':
                         set_lynch_channel(guild_data, 'lynch_channel_name4', new_channel)
-                    elif channel.lower() == 'leaderelection':
+                    elif key == 'lynchsession5':
+                        set_lynch_channel(guild_data, 'lynch_channel_name5', new_channel)
+                    elif key == 'lynchsession6':
+                        set_lynch_channel(guild_data, 'lynch_channel_name6', new_channel)
+                    elif key == 'leaderelection':
                         set_lynch_channel(guild_data, 'leader_channel_name', new_channel)
-                    elif channel.lower() == 'votecount':
+                    elif key == 'leaderelection2':
+                        set_lynch_channel(guild_data, 'leader_channel_name2', new_channel)
+                    elif key == 'votecount':
                         guild_data['vote_count_name'] = new_channel_name
-                    elif channel.lower() == 'logchannel':
+                    elif key == 'logchannel':
                         guild_data['log_channel_name'] = new_channel_name
-                    elif channel.lower() == 'actionslogchannel':
+                    elif key == 'actionslogchannel':
                         guild_data['actions_log_channel_name'] = new_channel_name
-                    elif channel.lower() == 'announcements':
+                    elif key == 'announcements':
                         guild_data['announcements_channel_name'] = new_channel_name
-                    elif channel.lower() == 'map':
+                    elif key == 'map':
                         guild_data['map_channel_name'] = new_channel_name
-                    elif channel.lower() == 'whisperlogs':
+                    elif key == 'whisperlogs':
                         guild_data['whisper_logs_channel_name'] = new_channel_name
-                    elif channel.lower() == 'editdellogs':
+                    elif key == 'editdellogs':
                         guild_data['edit_del_logs'] = new_channel_name
-                    elif channel.lower() == 'joinleavelogs':
+                    elif key == 'joinleavelogs':
                         guild_data['join_and_leave_logs'] = new_channel_name
-                    elif channel.lower() == 'narrationlog':
+                    elif key == 'narrationlog':
                         guild_data['narration_log_channel_name'] = new_channel_name
                     save_guild_data(ctx.guild.id, guild_data)
-                    await ctx.send(f"{channel.capitalize()} channel set to {new_channel_name}")
+                    await ctx.send(f"{key.capitalize()} channel set to {new_channel_name}")
                 else:
-                    await ctx.send('Invalid type of channel. Try using the following arguments:\n- Announcements\n- Map\n- DayDiscussion\n- Megaphone\n- LynchSession1\n- LynchSession2\n- LeaderElection\n- VoteCount\n- LogChannel\n- ActionsLogChannel\n- WhisperLogs\n- EditDelLogs\n- JoinLeaveLogs\n- NarrationLog')
+                    await ctx.send('Invalid type of channel. Try using the following arguments:\n- Announcements\n- Map\n- DayDiscussion\n- Megaphone\n- LynchSession1\n- LynchSession2\n- LynchSession3\n- LynchSession4\n- LynchSession5\n- LynchSession6\n- LeaderElection\n- LeaderElection2\n- VoteCount\n- LogChannel\n- ActionsLogChannel\n- WhisperLogs\n- EditDelLogs\n- JoinLeaveLogs\n- NarrationLog')
             else:
                 await ctx.send("Guild data not loaded.")
         else:
@@ -360,15 +462,32 @@ class Setup(commands.Cog):
             await ctx.send(f"❌ Could not rename the channel: {e}")
 
     @addch.command(name="rename")
-    async def addch_rename(self, ctx, *, text: str = None):
-        """Rename the current channel to the given text (admin only). Spaces & special chars become dashes, uppercase becomes lowercase. Example: .addch rename Apple Pie -> apple-pie"""
+    async def addch_rename(self, ctx, *, args: str = None):
+        """Rename a channel (admin only). Defaults to current channel.
+        Example: .addch rename apple pie
+                 .addch rename apple pie #this
+        """
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("You don't have enough perms to use this command")
             return
-        if not text:
-            await ctx.send("❌ Provide the new channel name. Example: `.addch rename apple-pie`")
+
+        # Parse manually so multi-word names work; an optional trailing #channel picks the target.
+        channel = None
+        new_text = (args or "").strip()
+        mention = re.search(r"<#(\d+)>\s*$", new_text)
+        if mention:
+            channel = ctx.guild.get_channel(int(mention.group(1)))
+            new_text = new_text[:mention.start()].strip()
+            if channel is None:
+                await ctx.send("❌ I couldn't find that channel.")
+                return
+        target = channel or ctx.channel
+
+        if not new_text or new_text.startswith("<#"):
+            await ctx.send("❌ Provide the new channel name. Example: `.addch rename apple-pie #channel`")
             return
-        new_name = re.sub(r"[^a-z0-9_-]", "-", text.strip().lower())
+
+        new_name = re.sub(r"[^a-z0-9_-]", "-", new_text.strip().lower())
         new_name = re.sub(r"-{2,}", "-", new_name).strip("-")
         if not new_name:
             await ctx.send("❌ That text produced an empty/invalid channel name. Example: `.addch rename apple-pie`")
@@ -376,8 +495,8 @@ class Setup(commands.Cog):
         if len(new_name) > 100:
             new_name = new_name[:100].strip("-")
         try:
-            await ctx.channel.edit(name=new_name)
-            await ctx.send(f"✅ Channel renamed to `{new_name}`")
+            await target.edit(name=new_name)
+            await ctx.send(f"✅ Channel {target.mention} renamed to `{new_name}`")
         except discord.Forbidden:
             await ctx.send("I don't have permission to rename this channel.")
         except discord.HTTPException as e:

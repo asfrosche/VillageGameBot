@@ -17,8 +17,8 @@ class TestBirthday:
     def test_birthday_has_help(self):
         """Verify birthday command has help text."""
         method = getattr(bday.Birthday, 'birthday')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_bdaystatus_exists(self):
         """Verify bdaystatus command exists on the cog."""
@@ -27,8 +27,8 @@ class TestBirthday:
     def test_bdaystatus_has_help(self):
         """Verify bdaystatus command has help text."""
         method = getattr(bday.Birthday, 'bdaystatus')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_testbday_exists(self):
         """Verify testbday command exists on the cog."""
@@ -37,8 +37,8 @@ class TestBirthday:
     def test_testbday_has_help(self):
         """Verify testbday command has help text."""
         method = getattr(bday.Birthday, 'testbday')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_nextbirthdays_exists(self):
         """Verify nextbirthdays command exists on the cog."""
@@ -47,8 +47,8 @@ class TestBirthday:
     def test_nextbirthdays_has_help(self):
         """Verify nextbirthdays command has help text."""
         method = getattr(bday.Birthday, 'nextbirthdays')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_birthdays_exists(self):
         """Verify birthdays command exists on the cog."""
@@ -57,8 +57,8 @@ class TestBirthday:
     def test_birthdays_has_help(self):
         """Verify birthdays command has help text."""
         method = getattr(bday.Birthday, 'birthdays')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_helpbday_exists(self):
         """Verify helpbday command exists on the cog."""
@@ -67,5 +67,5 @@ class TestBirthday:
     def test_helpbday_has_help(self):
         """Verify helpbday command has help text."""
         method = getattr(bday.Birthday, 'helpbday')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

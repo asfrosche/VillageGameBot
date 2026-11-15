@@ -17,25 +17,9 @@ class TestGameManagerIt:
     def test_calendario_cmd_has_help(self):
         """Verify calendario_cmd command has help text."""
         method = getattr(game_manager_it.GameManagerIt, 'calendario_cmd')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_wizardaggiungipartitaview_instantiates(self):
-        """Verify WizardAggiungiPartitaView view can be instantiated."""
-        # WizardAggiungiPartitaView — requires cog/bot context to instantiate
-        pass
 
-    def test_calendarioview_instantiates(self):
-        """Verify CalendarioView view can be instantiated."""
-        # CalendarioView — requires cog/bot context to instantiate
-        pass
 
-    def test_dettagliopartitaview_instantiates(self):
-        """Verify DettaglioPartitaView view can be instantiated."""
-        # DettaglioPartitaView — requires cog/bot context to instantiate
-        pass
 
-    def test_listagiocatoriview_instantiates(self):
-        """Verify ListaGiocatoriView view can be instantiated."""
-        # ListaGiocatoriView — requires cog/bot context to instantiate
-        pass

@@ -1,3 +1,4 @@
+from utils.discord_safe import EDIT_LIMIT_CODE, with_retries
 import discord
 from discord.ext import commands
 import os
@@ -275,8 +276,7 @@ class Estate(commands.Cog):
             with io.BytesIO() as image_binary:
                 image.save(image_binary, 'PNG')
                 image_binary.seek(0)
-                file = discord.File(fp=image_binary, filename='estate_map.png')
-                await msg.edit(content="", attachments=[file])
+                msg = await self._publish_map(channel, msg, guild_data, [("estate_map.png", image_binary.getvalue())])
         else:
             top_occupied = sum(1 for k in top_keys if houses[k]["status"] == "occupied")
             top_destroyed = sum(1 for k in top_keys if houses[k]["status"] == "destroyed")
@@ -296,10 +296,35 @@ class Estate(commands.Cog):
                 top_bin.seek(0)
                 bottom_bin.seek(0)
                 
-                file_top = discord.File(fp=top_bin, filename='estate_top.png')
-                file_bottom = discord.File(fp=bottom_bin, filename='estate_bottom.png')
                 
-                await msg.edit(content="", attachments=[file_top, file_bottom])
+                msg = await self._publish_map(channel, msg, guild_data, [
+                    ("estate_top.png", top_bin.getvalue()),
+                    ("estate_bottom.png", bottom_bin.getvalue()),
+                ])
+
+    async def _publish_map(self, channel, msg, guild_data, images):
+        """Replace the map image with *images* [(filename, png_bytes)].
+
+        Discord only lets old messages be edited a few times (code 30046), so when an
+        edit is refused the old map is deleted and a fresh message is posted and saved.
+        """
+        def files():
+            return [discord.File(io.BytesIO(data), filename=name) for name, data in images]
+
+        try:
+            await with_retries(lambda: msg.edit(content="", attachments=files()))
+            return msg
+        except discord.HTTPException as error:
+            if getattr(error, "code", None) != EDIT_LIMIT_CODE:
+                raise
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
+        new_msg = await with_retries(lambda: channel.send(files=files()))
+        guild_data["estate_directory"]["message_id"] = new_msg.id
+        save_guild_data(channel.guild.id, guild_data)
+        return new_msg
 
     def draw_estate_section(self, houses, all_keys, keys_subset, title, subtitle, row_offset, section_rows, cols, house_size, padding_x, padding_y):
         count = len(keys_subset)

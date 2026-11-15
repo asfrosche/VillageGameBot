@@ -232,6 +232,28 @@ class TestOnCommandError:
         error = commands.CommandInvokeError(inner)
         _await(on_error(ctx, error))
         service.record_failure.assert_called_once()
+        event = service.record_failure.call_args[0][0]
+        # The real cause is recorded, not the CommandInvokeError wrapper.
+        assert event.error_type == "ValueError"
+
+    def test_records_the_real_discord_error_behind_command_invoke_error(self):
+        import discord
+        _, on_error, service = self._make_handlers()
+        ctx = MagicMock()
+        ctx.command.qualified_name = "use"
+        ctx.cog = None
+        forbidden = discord.Forbidden(MagicMock(status=403, reason="Forbidden"), "Missing Permissions")
+        _await(on_error(ctx, commands.CommandInvokeError(forbidden)))
+        event = service.record_failure.call_args[0][0]
+        assert event.error_type == "Forbidden"
+
+    def test_plain_errors_keep_their_own_name(self):
+        _, on_error, service = self._make_handlers()
+        ctx = MagicMock()
+        ctx.command.qualified_name = "x"
+        ctx.cog = None
+        _await(on_error(ctx, KeyError("k")))
+        assert service.record_failure.call_args[0][0].error_type == "KeyError"
 
     def test_handles_ctx_with_no_command(self):
         _, on_error, service = self._make_handlers()

@@ -96,6 +96,31 @@ _inject_bot_token()
 DEFAULT_UPLOAD_LIMIT = 25 * 1024 * 1024  # 25 MiB (DMs / unknown guild limit)
 DOWNLOAD_TIMEOUT_SECONDS = 600
 CONCURRENCY_LIMIT = 2
+MAX_CLIP_PARTS = 10
+
+# Directory holding main.py (the bot's project root). Used to find the
+# cookies.txt that is uploaded next to it, independent of the process cwd.
+_BOT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _cookies_file() -> str | None:
+    """Absolute path to the uploaded ``cookies.txt``, or ``None`` if absent.
+
+    The file lives next to ``main.py`` (the bot root). ``os.getcwd()`` and the
+    temp dir are also checked as fallbacks. Returns ``None`` when no non-empty
+    file exists so callers can fall back gracefully.
+    """
+    for cand in (
+        _BOT_ROOT / "cookies.txt",
+        Path(os.getcwd()) / "cookies.txt",
+        Path(tempfile.gettempdir()) / "cookies.txt",
+    ):
+        try:
+            if cand.is_file() and cand.stat().st_size > 0:
+                return str(cand.resolve())
+        except OSError:
+            continue
+    return None
 
 # This member gets one .dl download per rolling 8h window.
 _LIMITED_USER_ID = 383330685139550208
@@ -137,16 +162,22 @@ _DOUYIN_UNSUPPORTED_MESSAGE = (
     "one. Try a YouTube or other link instead."
 )
 
+_TIKTOK_PHOTO_UNSUPPORTED_MESSAGE = (
+    "TikTok photo posts (slideshows) can't be downloaded: yt-dlp only supports "
+    "TikTok videos. Send a link to a TikTok video instead."
+)
+_TIKTOK_NOT_A_VIDEO_MESSAGE = (
+    "That TikTok link isn't a single video (it's a profile, tag, sound, live or "
+    "discover page). Send a link to a specific TikTok video instead."
+)
+
 _PRIVATE_KEYWORDS = (
-    "private",
     "private video",
+    "this video is private",
     "requires login",
-    "sign in",
-    "log in",
-    "login",
-    "members",
+    "login required",
     "member-only",
-    "restricted",
+    "members only",
     "age-restricted",
     "only available to",
     "not available in your country",
@@ -209,6 +240,30 @@ def extract_url(text: str) -> str | None:
     return url
 
 
+async def _reply_url(ctx: commands.Context) -> tuple[str | None, discord.Message | None]:
+    """Pull a media URL out of the message ``ctx`` replies to.
+
+    Returns ``(url, replied_message)``; either can be ``None``.
+    """
+    reference = ctx.message.reference
+    replied = None
+    if reference is not None and reference.message_id is not None:
+        try:
+            replied = await ctx.channel.fetch_message(reference.message_id)
+        except (discord.HTTPException, discord.Forbidden):
+            replied = reference.resolved
+    if replied is None or not isinstance(replied, discord.Message):
+        return None, None
+    url = extract_url(replied.content)
+    if url is None and replied.attachments:
+        url = replied.attachments[0].url
+    if url is None:
+        return None, replied
+    if url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com"):
+        url = url.split("?")[0]
+    return url, replied
+
+
 def _is_douyin_url(url: str) -> bool:
     """Return whether ``url`` belongs to Douyin (any host or link shape)."""
     try:
@@ -218,6 +273,30 @@ def _is_douyin_url(url: str) -> bool:
     return host in _DOUYIN_HOSTS
 
 
+
+
+def _tiktok_unsupported_message(url: str) -> str | None:
+    """Explain why a TikTok URL can't be downloaded, or return ``None`` if it looks like a video.
+
+    yt-dlp only extracts individual videos. Photo posts (slideshows) and pages such
+    as profiles, tags, sounds, live streams and discover pages are rejected with a
+    clear message instead of yt-dlp's generic "Unsupported URL".
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return None
+    host = (parsed.hostname or "").lower()
+    if not (host == "tiktok.com" or host.endswith(".tiktok.com")):
+        return None
+    if host in ("vm.tiktok.com", "vt.tiktok.com"):
+        return None  # short links: yt-dlp resolves them to the target
+    path = parsed.path
+    if "/photo/" in path:
+        return _TIKTOK_PHOTO_UNSUPPORTED_MESSAGE
+    if "/video/" in path or path.startswith("/t/"):
+        return None
+    return _TIKTOK_NOT_A_VIDEO_MESSAGE
 
 
 def _is_spotify_url(url: str) -> bool:
@@ -356,34 +435,67 @@ def map_download_error(exc: Exception) -> str:
     """Human message for a yt-dlp failure, without leaking raw output."""
     if isinstance(exc, UnsupportedError):
         return "This URL isn't supported for downloading."
-    if isinstance(exc, GeoRestrictedError):
-        return "This content is private or restricted and can't be downloaded."
 
     message = str(exc).lower()
 
-    if any(k in message for k in _PRIVATE_KEYWORDS):
-        return "This content is private or restricted and can't be downloaded."
+    # Specific, actionable failures are checked BEFORE the generic
+    # private/restricted keywords, otherwise broad phrases like "sign in"
+    # would swallow the more helpful messages below.
+    if "could not find chrome cookies database" in message or (
+        "could not find" in message and "cookies database" in message
+    ):
+        return (
+            "No YouTube cookies are available on this host (Chrome isn't "
+            "installed here). Put a `cookies.txt` (Netscape format) next to "
+            "main.py and restart the bot."
+        )
+    if "sign in to confirm" in message or "are not a bot" in message:
+        return (
+            "YouTube is asking to confirm you're not a bot (anti-bot challenge). "
+            "Put a valid `cookies.txt` (Netscape format) next to main.py and "
+            "restart the bot, then try again."
+        )
+    if "only images are available" in message:
+        return (
+            "YouTube returned only images for this video (age/region/bot check). "
+            "Put a valid `cookies.txt` (Netscape format) next to main.py and "
+            "restart the bot, or try a different link."
+        )
+    if "ffmpeg" in message or "ffprobe" in message:
+        return (
+            "This download needs ffmpeg (audio conversion or audio+video merge) "
+            "and it isn't available on this host. Install ffmpeg "
+            "(`apt install ffmpeg` on Linux, or keep `imageio-ffmpeg` installed)."
+        )
+    if "requested format" in message or "no format matches" in message or "format is not available" in message:
+        return (
+            "No playable single-file version is available for this link. "
+            "This often happens on hosted bots due to a missing JS runtime/PO "
+            "token. Try a different source or ensure cookies are configured."
+        )
+
     if "http error 403" in message or "http error 401" in message:
         return (
             "Download was temporarily blocked by the platform (anti-bot check "
             "or rate limit). Please try again in a few minutes."
         )
+    if isinstance(exc, GeoRestrictedError):
+        return "This content is private or restricted and can't be downloaded."
+    if any(k in message for k in _PRIVATE_KEYWORDS):
+        return "This content is private or restricted and can't be downloaded."
 
     if "max-filesize" in message or ("larger than" in message and "file" in message):
         return "The media is too large to send on Discord."
 
+    if any(k in message for k in _NETWORK_KEYWORDS):
+        return "Network failure while downloading."
+    # Checked after the network keywords so 429/rate-limit wins over the generic
+    # "http error 4x" fallback below.
     if "http error 4" in message or "http error 410" in message:
         return "The media is unavailable."
     if "unsupported" in message or "is not a valid url" in message:
         return "This URL isn't supported for downloading."
-    if "requested format" in message or "no format matches" in message:
-        return (
-            "No playable single-file version is available for this link. "
-            "It needs audio+video merging, which requires ffmpeg to be installed."
-        )
 
-    if any(k in message for k in _NETWORK_KEYWORDS):
-        return "Network failure while downloading."
     if isinstance(exc, (YtDlDownloadError, ExtractorError)):
         return "Couldn't download this media."
 
@@ -444,13 +556,25 @@ def _too_large_embed(error: FileTooLargeError) -> discord.Embed:
         )
     else:
         lines.append("Couldn't estimate the largest chunk — the length is unknown.")
-    lines.extend(
-        [
-            "",
-            "A uniform split of the whole media into equal parts is the next "
-            "step; it will ask for confirmation before sending the parts.",
-        ]
-    )
+    if error.filepath is None or error.duration_seconds is None:
+        # No parked file to work on, so the buttons below won't appear.
+        lines.extend(
+            [
+                "",
+                "This file wasn't kept, so it can't be cut automatically. "
+                "Try `.dsplit` (smallest number of equal parts that fit) or "
+                "`.dclip <start> <end>` to grab a specific section.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Use the buttons below: **Send the first part** cuts the largest "
+                "start section that fits, or **Send all parts** splits the whole "
+                "media into equal parts and sends them in order.",
+            ]
+        )
     return error_embed(description="\n".join(lines))
 
 
@@ -625,6 +749,136 @@ def _ffmpeg_duration(path: Path) -> float | None:
     return float(hours) * 3600 + float(minutes) * 60 + float(seconds)
 
 
+def _parse_timestamp(value: str) -> float | None:
+    """Parse ``ss``, ``mm:ss`` or ``hh:mm:ss`` into seconds (comma or dot decimals)."""
+    text = (value or "").strip().replace(",", ".")
+    if not text:
+        return None
+    chunks = text.split(":")
+    if len(chunks) > 3:
+        return None
+    total = 0.0
+    for chunk in chunks:
+        try:
+            number = float(chunk)
+        except ValueError:
+            return None
+        if number < 0:
+            return None
+        total = total * 60 + number
+    return total
+
+
+def _parse_clip_args(raw: str | None) -> tuple[float, float | None, int | None, str | None]:
+    """Parse ``start [end] [parts]`` for `.dclip`.
+
+    A second value smaller than the start reads as a part count rather than an
+    end time, so `.dclip 1:30 3` means "from 1:30 to the end, in 3 parts".
+    Returns ``(start, end, parts, error)``.
+    """
+    tokens = (raw or "").split()
+    if not tokens:
+        return (
+            0.0,
+            None,
+            None,
+            "Usage: `.dclip <start> [end] [parts]` — e.g. `.dclip 1:30 2:45` or `.dclip 1:30 2:45 3`.",
+        )
+    start = _parse_timestamp(tokens[0])
+    if start is None:
+        return (
+            0.0,
+            None,
+            None,
+            f"`{tokens[0]}` isn't a timestamp. Use seconds (`90`), `m:ss` (`1:30`) or `h:mm:ss` (`1:02:03`).",
+        )
+
+    end: float | None = None
+    parts: int | None = None
+    for token in tokens[1:]:
+        value = _parse_timestamp(token)
+        if end is None and parts is None and value is not None and value > start:
+            end = value
+            continue
+        if parts is None and token.isdigit() and int(token) >= 2:
+            parts = int(token)
+            continue
+        return 0.0, None, None, f"`{token}` isn't a timestamp or a part count."
+
+    if parts is not None and parts > MAX_CLIP_PARTS:
+        return 0.0, None, None, f"At most **{MAX_CLIP_PARTS}** parts are supported."
+    return start, end, parts, None
+
+
+def _format_range(start: float, end: float | None) -> str:
+    left = _format_duration(start)
+    right = _format_duration(end) if end is not None else "end"
+    return f"{left} → {right}"
+
+
+def _clip_looks_usable(path: Path, length: float) -> bool:
+    """Whether a freshly cut file really holds the requested duration.
+
+    Guards against ffmpeg quietly handing back the whole file (or an empty
+    shell) when the requested range doesn't exist.
+    """
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    produced = _ffmpeg_duration(path)
+    if produced is None:
+        return False  # no readable duration header means a broken/empty cut
+    return abs(produced - length) <= max(1.5, 0.2 * length)
+
+
+def _cut_region(source: Path, start: float, length: float) -> Path:
+    """Cut ``length`` seconds starting at ``start`` out of ``source``.
+
+    Fast seek + stream copy first; if that can't produce a usable file (odd
+    container, cut not on a keyframe) the region is re-encoded so the cut lands
+    exactly on the requested timestamp.
+    """
+    ffmpeg = _find_ffmpeg()
+    if ffmpeg is None:
+        raise DownloadError(
+            "Clipping needs ffmpeg to be installed "
+            "(`apt install ffmpeg` on Linux, or keep `imageio-ffmpeg` installed)."
+        )
+    if length <= 0:
+        raise DownloadError("That timestamp range is empty.")
+    out = source.parent / f"clip_{int(start)}_{int(start + length)}.mp4"
+
+    def _run(cmd: list[str]) -> None:
+        try:
+            subprocess.run(cmd, check=False, capture_output=True, timeout=3600)
+        except Exception:
+            pass
+
+    def _usable() -> bool:
+        return _clip_looks_usable(out, length)
+
+    for transcode in (False, True):
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", f"{start:.3f}",
+            "-i", str(source),
+            "-t", f"{length:.3f}",
+        ]
+        if transcode:
+            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac"]
+        else:
+            cmd += ["-c", "copy"]
+        cmd.append(str(out))
+        _run(cmd)
+        if _usable():
+            return out
+        try:
+            if out.exists():
+                out.unlink()
+        except OSError:
+            pass
+    raise DownloadError("Couldn't cut that part of the video.")
+
+
 def _split_into_parts(
     source: Path,
     n_parts: int,
@@ -755,6 +1009,41 @@ def _split_min_parts_embed(
         lines.append(f"≈ {_format_duration(duration_seconds / max(1, min_parts))} per part")
     lines.extend(["", f"Try `.dsplit {min_parts}`."])
     return error_embed(description="\n".join(lines))
+
+
+def _clip_plan_embed(
+    range_text: str,
+    size: int,
+    limit: int,
+    n_parts: int,
+    part_seconds: float | None,
+) -> discord.Embed:
+    lines = [
+        "**Clipping this media**",
+        "",
+        f"Range: {range_text}",
+        f"Clip size: {_format_mb(size)}",
+        f"Server limit: {_format_mb(limit)} (varies with this server's boost level)",
+        f"Parts: {n_parts} (≈ {size / max(1, n_parts) / (1024 * 1024):.1f} MB each)",
+    ]
+    if part_seconds:
+        lines.append(f"≈ {_format_duration(part_seconds)} each")
+    lines.extend(["", "Press the button to send all parts."])
+    return error_embed(description="\n".join(lines))
+
+
+def _clip_too_big_embed(
+    size: int, limit: int, min_parts: int, args: str
+) -> discord.Embed:
+    return error_embed(
+        description=(
+            "**That clip is too big for this server**\n\n"
+            f"Clip size: {_format_mb(size)}\n"
+            f"Server limit: {_format_mb(limit)}\n"
+            f"Needs at least **{min_parts}** parts to fit.\n\n"
+            f"Try `.dclip {args} {min_parts}`."
+        )
+    )
 
 
 class SplitConfirmView(discord.ui.View):
@@ -892,6 +1181,9 @@ class DownloadCog(commands.Cog):
 
         if _is_douyin_url(url):
             raise DownloadError(_DOUYIN_UNSUPPORTED_MESSAGE)
+        tiktok_message = _tiktok_unsupported_message(url)
+        if tiktok_message is not None:
+            raise DownloadError(tiktok_message)
 
         opts: dict = {
             "outtmpl": str(workdir / "%(title).80B.%(ext)s"),
@@ -947,14 +1239,33 @@ class DownloadCog(commands.Cog):
         # impersonation if curl_cffi is unavailable.
         if _IMPERSONATE_TARGET is not None:
             opts["impersonate"] = _IMPERSONATE_TARGET
+        # Use the cookies.txt uploaded next to main.py for authentication
+        # (YouTube bot checks and similar). yt-dlp's `cookiefile` is the
+        # library equivalent of the CLI's `--cookies`.
+        cookies = _cookies_file()
+        if cookies:
+            opts["cookiefile"] = cookies
+        else:
+            # No cookies file found: continue without it rather than failing.
+            # Some platforms still work, and the error mapper explains how to
+            # add one if a download is blocked.
+            pass
         if cancel_event is not None:
             opts["progress_hooks"] = [_check_cancel]
 
         if url.startswith("http"):
             _head_size_guard(url, max_filesize)
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception:
+            # A stale/invalid cookie file is the most common failure; retry
+            # once without it before giving up.
+            opts2 = dict(opts)
+            opts2.pop("cookiefile", None)
+            with yt_dlp.YoutubeDL(opts2) as ydl:
+                info = ydl.extract_info(url, download=False)
 
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadError("Download timed out.")
@@ -965,8 +1276,14 @@ class DownloadCog(commands.Cog):
         if size and size > max_filesize:
             raise FileTooLargeError(size, max_filesize, _duration_seconds(info))
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+        except Exception:
+            opts2 = dict(opts)
+            opts2.pop("cookiefile", None)
+            with yt_dlp.YoutubeDL(opts2) as ydl:
+                info = ydl.extract_info(url, download=True)
 
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadError("Download timed out.")
@@ -979,7 +1296,11 @@ class DownloadCog(commands.Cog):
     async def _download_and_send(self, ctx: commands.Context, url: str, audio_only: bool = False, audio_codec: str | None = None, sender_name: str | None = None) -> None:
         limit = self._upload_limit(ctx)
         workdir = Path(tempfile.mkdtemp(prefix="village_dl_"))
-        processing_msg = await ctx.send("Downloading…")
+        processing_msg = None
+        try:
+            processing_msg = await ctx.send("Downloading…")
+        except (discord.HTTPException, discord.Forbidden):
+            processing_msg = None
         pending_cleanup = True
         try:
             loop = asyncio.get_running_loop()
@@ -1033,10 +1354,11 @@ class DownloadCog(commands.Cog):
         finally:
             # Remove the "Downloading…" message whether the media arrived or
             # the download failed, so only the result (or error) stays.
-            try:
-                await processing_msg.delete()
-            except discord.HTTPException:
-                pass
+            if processing_msg is not None:
+                try:
+                    await processing_msg.delete()
+                except (discord.HTTPException, discord.Forbidden):
+                    pass
             if pending_cleanup:
                 _retry_rmtree(workdir)
 
@@ -1090,7 +1412,7 @@ class DownloadCog(commands.Cog):
                 )
             )
             return
-        if url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com"):
+        if url and (url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com")):
             url = url.split("?")[0]
 
         audio_only = False
@@ -1102,12 +1424,13 @@ class DownloadCog(commands.Cog):
                 await ctx.send(embed=error_embed(description=e.message))
                 return
 
+        sender_name = replied.author.display_name if replied and getattr(replied, "author", None) else "Unknown"
         try:
             await self._download_and_send(
-                ctx, url, audio_only=audio_only, sender_name=replied.author.display_name
+                ctx, url, audio_only=audio_only, sender_name=sender_name
             )
         except FileTooLargeError as e:
-            await self._handle_too_large(ctx, e, replied.author.display_name)
+            await self._handle_too_large(ctx, e, sender_name)
             return
         except DownloadError as e:
             await ctx.send(embed=error_embed(description=e.message))
@@ -1125,8 +1448,9 @@ class DownloadCog(commands.Cog):
             self._limited_last_use[_LIMITED_USER_ID] = now
         for msg in (replied, ctx.message):
             try:
-                await msg.delete()
-            except discord.HTTPException:
+                if msg is not None:
+                    await msg.delete()
+            except (discord.HTTPException, discord.Forbidden):
                 pass
 
     @commands.command(name="mdl")
@@ -1180,7 +1504,7 @@ class DownloadCog(commands.Cog):
                 )
             )
             return
-        if url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com"):
+        if url and (url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com")):
             url = url.split("?")[0]
 
         if _is_spotify_url(url):
@@ -1190,15 +1514,16 @@ class DownloadCog(commands.Cog):
                 await ctx.send(embed=error_embed(description=e.message))
                 return
 
+        sender_name = replied.author.display_name if replied and getattr(replied, "author", None) else "Unknown"
         try:
             await self._download_and_send(
                 ctx,
                 url,
                 audio_codec="mp3",
-                sender_name=replied.author.display_name,
+                sender_name=sender_name,
             )
         except FileTooLargeError as e:
-            await self._handle_too_large(ctx, e, replied.author.display_name)
+            await self._handle_too_large(ctx, e, sender_name)
             return
         except DownloadError as e:
             await ctx.send(embed=error_embed(description=e.message))
@@ -1212,8 +1537,9 @@ class DownloadCog(commands.Cog):
         # message so the channel only shows the resulting MP3.
         for msg in (replied, ctx.message):
             try:
-                await msg.delete()
-            except discord.HTTPException:
+                if msg is not None:
+                    await msg.delete()
+            except (discord.HTTPException, discord.Forbidden):
                 pass
 
     @commands.command(name="dsplit")
@@ -1267,7 +1593,7 @@ class DownloadCog(commands.Cog):
                 )
             )
             return
-        if url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com"):
+        if url and (url.startswith("https://media.discordapp.net") or url.startswith("https://cdn.discordapp.com")):
             url = url.split("?")[0]
 
         if _is_spotify_url(url):
@@ -1279,7 +1605,11 @@ class DownloadCog(commands.Cog):
 
         limit = self._upload_limit(ctx)
         workdir = Path(tempfile.mkdtemp(prefix="village_split_"))
-        processing_msg = await ctx.send("Downloading…")
+        processing_msg = None
+        try:
+            processing_msg = await ctx.send("Downloading…")
+        except (discord.HTTPException, discord.Forbidden):
+            processing_msg = None
         parked = False
         try:
             loop = asyncio.get_running_loop()
@@ -1312,13 +1642,14 @@ class DownloadCog(commands.Cog):
                 return
 
             parked = True
+            sender_name = replied.author.display_name if replied and getattr(replied, "author", None) else "Unknown"
             view = SplitConfirmView(
                 channel=ctx.channel,
                 author_id=ctx.author.id,
                 workdir=workdir,
                 parts=part_files,
                 title=info.get("title"),
-                sender_name=replied.author.display_name,
+                sender_name=sender_name,
                 n_parts=n_parts,
             )
             await ctx.send(embed=_split_plan_embed(size, limit, duration, n_parts), view=view)
@@ -1330,10 +1661,192 @@ class DownloadCog(commands.Cog):
             await ctx.send(embed=error_embed(description=map_download_error(e)))
             print(f"DSPLIT error: {e}")
         finally:
+            if processing_msg is not None:
+                try:
+                    await processing_msg.delete()
+                except (discord.HTTPException, discord.Forbidden):
+                    pass
+            if not parked:
+                _retry_rmtree(workdir)
+
+    @commands.command(name="dclip")
+    async def dclip(self, ctx: commands.Context, *, args: str = None):
+        """Reply to a link to clip a timestamp range. `.dclip 1:30 2:45` = 1:30 to 2:45; add a part count to also split it, e.g. `.dclip 1:30 2:45 3`. Timestamps accept `90`, `1:30` or `1:02:03`."""
+        if yt_dlp is None:
+            await ctx.send(
+                embed=error_embed(
+                    description=(
+                        "The `yt-dlp` package isn't installed, so downloads are "
+                        "disabled.\n\nOn the host run:\n```\npip install -r requirements.txt\n```"
+                    )
+                )
+            )
+            return
+
+        if _find_ffmpeg() is None:
+            await ctx.send(
+                embed=error_embed(
+                    description=(
+                        "Clipping needs ffmpeg to be installed "
+                        "(`apt install ffmpeg` on Linux, or keep "
+                        "`imageio-ffmpeg` installed)."
+                    )
+                )
+            )
+            return
+
+        start, end, parts, parse_error = _parse_clip_args(args)
+        if parse_error is not None:
+            await ctx.send(embed=error_embed(description=parse_error))
+            return
+
+        url, replied = await _reply_url(ctx)
+        if replied is None or url is None:
+            await ctx.send(
+                embed=error_embed(
+                    description="Reply to a message containing a media link.",
+                )
+            )
+            return
+
+        if _is_spotify_url(url):
             try:
-                await processing_msg.delete()
-            except discord.HTTPException:
-                pass
+                url = _spotify_search_query(url)
+            except DownloadError as e:
+                await ctx.send(embed=error_embed(description=e.message))
+                return
+
+        limit = self._upload_limit(ctx)
+        workdir = Path(tempfile.mkdtemp(prefix="village_clip_"))
+        processing_msg = None
+        try:
+            processing_msg = await ctx.send("Downloading…")
+        except (discord.HTTPException, discord.Forbidden):
+            processing_msg = None
+        parked = False
+        try:
+            loop = asyncio.get_running_loop()
+            cancel_event = threading.Event()
+            async with self._lock():
+                try:
+                    filepath, info = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            self._download_blocking,
+                            url,
+                            workdir,
+                            10 * 1024**3,  # don't refuse on size: the clip handles it
+                            cancel_event,
+                            False,
+                            None,
+                        ),
+                        timeout=DOWNLOAD_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    cancel_event.set()
+                    raise DownloadError("The download timed out.")
+                except DownloadError:
+                    raise
+                except Exception as exc:
+                    raise DownloadError(map_download_error(exc)) from None
+
+            duration = _duration_seconds(info)
+            title = info.get("title") if info else None
+            sender_name = replied.author.display_name if replied and getattr(replied, "author", None) else "Unknown"
+
+            if duration and start >= duration - 0.1:
+                raise DownloadError(
+                    f"That starts past the end of the video, which is only "
+                    f"{_format_duration(duration)} long."
+                )
+            if end is not None and duration and end > duration:
+                end = duration
+            if end is not None and end <= start:
+                raise DownloadError("The end timestamp has to be after the start one.")
+            length = (end - start) if end is not None else (duration - start if duration else None)
+            if not length or length <= 0:
+                raise DownloadError(
+                    "Couldn't read the video's length, so an open-ended clip isn't possible. "
+                    "Give an end timestamp, e.g. `.dclip 1:30 2:45`."
+                )
+
+            clip_path = await loop.run_in_executor(
+                None, _cut_region, filepath, start, length
+            )
+            clip_size = clip_path.stat().st_size
+            range_text = _format_range(start, end)
+
+            if parts and parts > 1:
+                per_part_limit = int(limit * 0.94)
+                min_parts = max(2, (clip_size + per_part_limit - 1) // per_part_limit)
+                if parts < min_parts:
+                    await ctx.send(
+                        embed=_clip_too_big_embed(
+                            clip_size, limit, min_parts, " ".join((args or "").split())
+                        )
+                    )
+                    return
+                part_files = await loop.run_in_executor(
+                    None, _split_into_parts, clip_path, parts, workdir, length
+                )
+                if any(p.stat().st_size > limit for p in part_files):
+                    await ctx.send(
+                        embed=_clip_too_big_embed(
+                            clip_size, limit, min_parts, " ".join((args or "").split())
+                        )
+                    )
+                    return
+
+                parked = True
+                view = SplitConfirmView(
+                    channel=ctx.channel,
+                    author_id=ctx.author.id,
+                    workdir=workdir,
+                    parts=part_files,
+                    title=title,
+                    sender_name=sender_name,
+                    n_parts=parts,
+                )
+                await ctx.send(
+                    embed=_clip_plan_embed(range_text, clip_size, limit, parts, length / parts),
+                    view=view,
+                )
+                return
+
+            if clip_size > limit:
+                per_part_limit = int(limit * 0.94)
+                min_parts = max(2, (clip_size + per_part_limit - 1) // per_part_limit)
+                await ctx.send(
+                    embed=_clip_too_big_embed(
+                        clip_size, limit, min_parts, " ".join((args or "").split())
+                    )
+                )
+                return
+
+            file = discord.File(clip_path, filename=clip_path.name)
+            try:
+                await ctx.send(
+                    content=(
+                        f"**{(sender_name or 'Unknown')[:100]} -> "
+                        f"{str(title or 'Downloaded media')[:1500]}** ({range_text})"
+                    ),
+                    file=file,
+                )
+            finally:
+                file.close()
+        except FileTooLargeError as e:
+            await ctx.send(embed=_too_large_embed(e))
+        except DownloadError as e:
+            await ctx.send(embed=error_embed(description=e.message))
+        except Exception as e:
+            await ctx.send(embed=error_embed(description=map_download_error(e)))
+            print(f"DCLIP error: {e}")
+        finally:
+            if processing_msg is not None:
+                try:
+                    await processing_msg.delete()
+                except (discord.HTTPException, discord.Forbidden):
+                    pass
             if not parked:
                 _retry_rmtree(workdir)
 

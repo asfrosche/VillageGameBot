@@ -11,12 +11,48 @@ from cogs.download_cog import (
     DownloadCog,
     extract_url,
     map_download_error,
+    _cookies_file,
+    _format_range,
     _is_douyin_url,
     _is_spotify_url,
+    _parse_clip_args,
+    _parse_timestamp,
     _spotify_search_query,
 )
 
 DOUYIN_VIDEO = "https://www.douyin.com/video/7667116669306670363"
+
+
+class TestCookiesFile:
+    """cookies.txt is found next to main.py and used as yt-dlp's cookiefile."""
+
+    def test_returns_absolute_path_when_present(self, tmp_path):
+        cookie = tmp_path / "cookies.txt"
+        cookie.write_text("# Netscape HTTP Cookie File\n")
+        with patch.object(download_cog, "_BOT_ROOT", tmp_path):
+            result = _cookies_file()
+        assert result == str(cookie.resolve())
+        assert Path(result).is_absolute()
+
+    def test_missing_file_returns_none(self, tmp_path, monkeypatch):
+        # Point every search location at an empty dir so nothing is found.
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+        with patch.object(download_cog, "_BOT_ROOT", empty), patch.object(
+            download_cog.tempfile, "gettempdir", lambda: str(empty)
+        ):
+            assert _cookies_file() is None
+
+    def test_empty_file_is_ignored(self, tmp_path, monkeypatch):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        (empty / "cookies.txt").write_text("")
+        monkeypatch.chdir(empty)
+        with patch.object(download_cog, "_BOT_ROOT", empty), patch.object(
+            download_cog.tempfile, "gettempdir", lambda: str(empty)
+        ):
+            assert _cookies_file() is None
 
 
 class TestDownloadCog:
@@ -27,8 +63,8 @@ class TestDownloadCog:
 
     def test_dl_has_help(self):
         method = getattr(DownloadCog, 'dl')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_extract_url_simple(self):
         assert extract_url("watch https://www.youtube.com/watch?v=jNQXAC9IVRw now") == (
@@ -42,6 +78,53 @@ class TestDownloadCog:
 
     def test_extract_url_none(self):
         assert extract_url("no link here") is None
+
+
+class TestDclip:
+    """`.dclip` timestamp parsing: `<start> [end] [parts]`."""
+
+    def test_dclip_exists(self):
+        assert hasattr(DownloadCog, 'dclip')
+
+    def test_dclip_has_help(self):
+        method = getattr(DownloadCog, 'dclip')
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [("90", 90.0), ("1:30", 90.0), ("1:02:03", 3723.0), ("0", 0.0), ("1.5", 1.5)],
+    )
+    def test_parse_timestamp_valid(self, text, expected):
+        assert _parse_timestamp(text) == expected
+
+    @pytest.mark.parametrize("text", ["", "abc", "-5", "1:2:3:4", None])
+    def test_parse_timestamp_invalid(self, text):
+        assert _parse_timestamp(text) is None
+
+    def test_parse_clip_args_start_only(self):
+        assert _parse_clip_args("1:30") == (90.0, None, None, None)
+
+    def test_parse_clip_args_start_and_end(self):
+        assert _parse_clip_args("1:30 2:45") == (90.0, 165.0, None, None)
+
+    def test_parse_clip_args_with_parts(self):
+        assert _parse_clip_args("1:30 2:45 3") == (90.0, 165.0, 3, None)
+
+    def test_parse_clip_args_small_second_value_is_parts(self):
+        assert _parse_clip_args("1:30 3") == (90.0, None, 3, None)
+
+    def test_parse_clip_args_missing_args(self):
+        assert _parse_clip_args(None)[3] is not None
+
+    def test_parse_clip_args_bad_timestamp(self):
+        assert "isn't a timestamp" in _parse_clip_args("bad")[3]
+
+    def test_parse_clip_args_too_many_parts(self):
+        assert "at most" in _parse_clip_args("90 99 12")[3].lower()
+
+    def test_format_range_open_ended(self):
+        assert _format_range(90, None) == "1:30 → end"
 
 
 class TestDouyinSupport:

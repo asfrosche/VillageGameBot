@@ -17,8 +17,8 @@ class TestMessageTracker:
     def test_statss_has_help(self):
         """Verify statss command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'statss')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setmessagetracking_exists(self):
         """Verify setmessagetracking command exists on the cog."""
@@ -27,8 +27,8 @@ class TestMessageTracker:
     def test_setmessagetracking_has_help(self):
         """Verify setmessagetracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'setmessagetracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_start_tracking_exists(self):
         """Verify start_tracking command exists on the cog."""
@@ -37,8 +37,8 @@ class TestMessageTracker:
     def test_start_tracking_has_help(self):
         """Verify start_tracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'start_tracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_stop_tracking_exists(self):
         """Verify stop_tracking command exists on the cog."""
@@ -47,8 +47,8 @@ class TestMessageTracker:
     def test_stop_tracking_has_help(self):
         """Verify stop_tracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'stop_tracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_reset_tracking_exists(self):
         """Verify reset_tracking command exists on the cog."""
@@ -57,5 +57,5 @@ class TestMessageTracker:
     def test_reset_tracking_has_help(self):
         """Verify reset_tracking command has help text."""
         method = getattr(tracker_cog.MessageTracker, 'reset_tracking')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

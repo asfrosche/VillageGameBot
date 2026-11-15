@@ -17,8 +17,8 @@ class TestLists:
     def test_playerlist_has_help(self):
         """Verify playerlist command has help text."""
         method = getattr(lists_cog.Lists, 'playerlist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_sponsorlist_exists(self):
         """Verify sponsorlist command exists on the cog."""
@@ -27,8 +27,8 @@ class TestLists:
     def test_sponsorlist_has_help(self):
         """Verify sponsorlist command has help text."""
         method = getattr(lists_cog.Lists, 'sponsorlist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setuphouselist_exists(self):
         """Verify setuphouselist command exists on the cog."""
@@ -37,8 +37,8 @@ class TestLists:
     def test_setuphouselist_has_help(self):
         """Verify setuphouselist command has help text."""
         method = getattr(lists_cog.Lists, 'setuphouselist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_houselistadd_exists(self):
         """Verify houselistadd command exists on the cog."""
@@ -47,8 +47,8 @@ class TestLists:
     def test_houselistadd_has_help(self):
         """Verify houselistadd command has help text."""
         method = getattr(lists_cog.Lists, 'houselistadd')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_houselistremove_exists(self):
         """Verify houselistremove command exists on the cog."""
@@ -57,8 +57,8 @@ class TestLists:
     def test_houselistremove_has_help(self):
         """Verify houselistremove command has help text."""
         method = getattr(lists_cog.Lists, 'houselistremove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_houselist_exists(self):
         """Verify houselist command exists on the cog."""
@@ -67,8 +67,8 @@ class TestLists:
     def test_houselist_has_help(self):
         """Verify houselist command has help text."""
         method = getattr(lists_cog.Lists, 'houselist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deadlist_exists(self):
         """Verify deadlist command exists on the cog."""
@@ -77,8 +77,8 @@ class TestLists:
     def test_deadlist_has_help(self):
         """Verify deadlist command has help text."""
         method = getattr(lists_cog.Lists, 'deadlist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_map_command_exists(self):
         """Verify map_command command exists on the cog."""
@@ -87,5 +87,5 @@ class TestLists:
     def test_map_command_has_help(self):
         """Verify map_command command has help text."""
         method = getattr(lists_cog.Lists, 'map_command')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

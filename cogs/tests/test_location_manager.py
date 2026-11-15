@@ -17,8 +17,8 @@ class TestLocationManager:
     def test_test_geocoder_has_help(self):
         """Verify test_geocoder command has help text."""
         method = getattr(location_manager.LocationManager, 'test_geocoder')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setloc_exists(self):
         """Verify setloc command exists on the cog."""
@@ -27,8 +27,8 @@ class TestLocationManager:
     def test_setloc_has_help(self):
         """Verify setloc command has help text."""
         method = getattr(location_manager.LocationManager, 'setloc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setcontinent_exists(self):
         """Verify setcontinent command exists on the cog."""
@@ -37,8 +37,8 @@ class TestLocationManager:
     def test_setcontinent_has_help(self):
         """Verify setcontinent command has help text."""
         method = getattr(location_manager.LocationManager, 'setcontinent')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_listunknown_exists(self):
         """Verify listunknown command exists on the cog."""
@@ -47,8 +47,8 @@ class TestLocationManager:
     def test_listunknown_has_help(self):
         """Verify listunknown command has help text."""
         method = getattr(location_manager.LocationManager, 'listunknown')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_remloc_exists(self):
         """Verify remloc command exists on the cog."""
@@ -57,8 +57,8 @@ class TestLocationManager:
     def test_remloc_has_help(self):
         """Verify remloc command has help text."""
         method = getattr(location_manager.LocationManager, 'remloc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_locations_exists(self):
         """Verify locations command exists on the cog."""
@@ -67,8 +67,8 @@ class TestLocationManager:
     def test_locations_has_help(self):
         """Verify locations command has help text."""
         method = getattr(location_manager.LocationManager, 'locations')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_locsnotset_exists(self):
         """Verify locsnotset command exists on the cog."""
@@ -77,8 +77,8 @@ class TestLocationManager:
     def test_locsnotset_has_help(self):
         """Verify locsnotset command has help text."""
         method = getattr(location_manager.LocationManager, 'locsnotset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_mapp_exists(self):
         """Verify mapp command exists on the cog."""
@@ -87,8 +87,8 @@ class TestLocationManager:
     def test_mapp_has_help(self):
         """Verify mapp command has help text."""
         method = getattr(location_manager.LocationManager, 'mapp')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_mapheat_exists(self):
         """Verify mapheat command exists on the cog."""
@@ -97,8 +97,8 @@ class TestLocationManager:
     def test_mapheat_has_help(self):
         """Verify mapheat command has help text."""
         method = getattr(location_manager.LocationManager, 'mapheat')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_mysetloc_exists(self):
         """Verify mysetloc command exists on the cog."""
@@ -107,8 +107,8 @@ class TestLocationManager:
     def test_mysetloc_has_help(self):
         """Verify mysetloc command has help text."""
         method = getattr(location_manager.LocationManager, 'mysetloc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_myremoveloc_exists(self):
         """Verify myremoveloc command exists on the cog."""
@@ -117,8 +117,8 @@ class TestLocationManager:
     def test_myremoveloc_has_help(self):
         """Verify myremoveloc command has help text."""
         method = getattr(location_manager.LocationManager, 'myremoveloc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_near_exists(self):
         """Verify near command exists on the cog."""
@@ -127,8 +127,8 @@ class TestLocationManager:
     def test_near_has_help(self):
         """Verify near command has help text."""
         method = getattr(location_manager.LocationManager, 'near')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_time_exists(self):
         """Verify time command exists on the cog."""
@@ -137,8 +137,8 @@ class TestLocationManager:
     def test_time_has_help(self):
         """Verify time command has help text."""
         method = getattr(location_manager.LocationManager, 'time')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_locstats_exists(self):
         """Verify locstats command exists on the cog."""
@@ -147,8 +147,8 @@ class TestLocationManager:
     def test_locstats_has_help(self):
         """Verify locstats command has help text."""
         method = getattr(location_manager.LocationManager, 'locstats')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_refreshtz_exists(self):
         """Verify refreshtz command exists on the cog."""
@@ -157,8 +157,8 @@ class TestLocationManager:
     def test_refreshtz_has_help(self):
         """Verify refreshtz command has help text."""
         method = getattr(location_manager.LocationManager, 'refreshtz')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_forceremloc_exists(self):
         """Verify forceremloc command exists on the cog."""
@@ -167,8 +167,8 @@ class TestLocationManager:
     def test_forceremloc_has_help(self):
         """Verify forceremloc command has help text."""
         method = getattr(location_manager.LocationManager, 'forceremloc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_whentime_exists(self):
         """Verify whentime command exists on the cog."""
@@ -177,8 +177,8 @@ class TestLocationManager:
     def test_whentime_has_help(self):
         """Verify whentime command has help text."""
         method = getattr(location_manager.LocationManager, 'whentime')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_lochelp_exists(self):
         """Verify lochelp command exists on the cog."""
@@ -187,15 +187,7 @@ class TestLocationManager:
     def test_lochelp_has_help(self):
         """Verify lochelp command has help text."""
         method = getattr(location_manager.LocationManager, 'lochelp')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_locationsview_instantiates(self):
-        """Verify LocationsView view can be instantiated."""
-        # LocationsView — requires cog/bot context to instantiate
-        pass
 
-    def test_unknowncontinentview_instantiates(self):
-        """Verify UnknownContinentView view can be instantiated."""
-        # UnknownContinentView — requires cog/bot context to instantiate
-        pass

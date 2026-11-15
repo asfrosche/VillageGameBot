@@ -1627,6 +1627,29 @@ class LibraryDatabase:
     # Allies / nemeses (shared helpers)
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _latest_player_names(cursor) -> dict[int, str]:
+        """Map each player_id to the name they were most recently recorded under.
+
+        A player's stored name can change between games (nickname vs username, or
+        even a raw mention), so reports show one canonical name per player rather
+        than whichever name happened to land on a given row.
+        """
+        cursor.execute("""
+            SELECT player_id, player_name
+            FROM roles
+            WHERE player_id IS NOT NULL
+              AND player_name IS NOT NULL
+              AND player_name != ''
+            ORDER BY player_id, game_number DESC, role_id DESC
+        """)
+        latest: dict[int, str] = {}
+        for row in cursor.fetchall():
+            pid = row["player_id"]
+            if pid not in latest:
+                latest[pid] = row["player_name"]
+        return latest
+
     def _get_teammate_rows(self, player_id: int):
         """Return same-team co-occurrence rows for ally computation."""
         with self._connect() as conn:
@@ -1656,19 +1679,7 @@ class LibraryDatabase:
             """, (player_id,))
             agg_rows = cursor.fetchall()
 
-            cursor.execute("""
-                SELECT player_id, player_name
-                FROM roles
-                WHERE player_id IS NOT NULL
-                  AND player_name IS NOT NULL
-                  AND player_name != ''
-                ORDER BY player_id, game_number DESC, role_id DESC
-            """)
-            latest_names: dict[int, str] = {}
-            for row in cursor.fetchall():
-                pid = row["player_id"]
-                if pid not in latest_names:
-                    latest_names[pid] = row["player_name"]
+            latest_names = self._latest_player_names(cursor)
 
             return [
                 (row["player_id"], latest_names.get(row["player_id"], f"Player {row['player_id']}"), row["wins_together"], row["games_together"])
@@ -1676,25 +1687,39 @@ class LibraryDatabase:
             ]
 
     def _get_opponent_rows(self, player_id: int):
-        """Return opposing-team co-occurrence rows for nemesis computation."""
+        """Return opposing-team co-occurrence rows for nemesis computation.
+
+        Grouped by player_id only. Grouping by player_name too would split one
+        person into a row per name they were recorded under (a nickname and a
+        username, say), which both double-counts them in the nemesis list and
+        spreads their real record across several weaker entries. The display
+        name is resolved once per player from their most recent game.
+        """
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT
-                    r2.player_id,
-                    r2.player_name,
+                    r2.player_id AS player_id,
                     SUM(CASE WHEN r2.win = 1 AND r1.win = 0 THEN 1 ELSE 0 END) AS losses_to,
                     COUNT(*) AS games_together
                 FROM roles r1
                 JOIN roles r2 ON r1.game_number = r2.game_number
                 WHERE r1.player_id = ?
+                  AND r2.player_id IS NOT NULL
                   AND r2.player_id != r1.player_id
                   AND r1.team != r2.team
                   AND r1.count = 1 AND r2.count = 1
                   AND r1.team != 5 AND r2.team != 5
-                GROUP BY r2.player_id, r2.player_name
+                GROUP BY r2.player_id
             """, (player_id,))
-            return cursor.fetchall()
+            agg_rows = cursor.fetchall()
+
+            latest_names = self._latest_player_names(cursor)
+
+            return [
+                (row["player_id"], latest_names.get(row["player_id"], f"Player {row['player_id']}"), row["losses_to"], row["games_together"])
+                for row in agg_rows
+            ]
 
     def _get_player_game_count(self, player_id: int) -> int:
         """Return total counted non-bonus games for a player."""
@@ -1862,6 +1887,61 @@ class LibraryDatabase:
                   AND r1.team != 5 AND r2.team != 5
             """, (player_id, other_id))
             return cursor.fetchone()
+
+    def get_shared_games(self, player_id: int, other_id: int):
+        """Return the games both players appeared in, newest first.
+
+        Uses the same counted-role filters as ``get_relation_between``
+        (count=1, team!=5) so the shared list lines up with the ally/opponent
+        counts next to it. One row per game: if a player somehow has more than
+        one counted role in the same game, the lowest role_id is used.
+        """
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    r1.game_number AS game_number,
+                    r1.game_name AS game_name,
+                    r1.role_id AS my_role_id,
+                    r1.role_name AS my_role,
+                    r1.team AS my_team,
+                    r1.win AS my_win,
+                    r1.mvp AS my_mvp,
+                    r2.role_id AS their_role_id,
+                    r2.role_name AS their_role,
+                    r2.team AS their_team,
+                    r2.win AS their_win
+                FROM roles r1
+                JOIN roles r2 ON r1.game_number = r2.game_number
+                WHERE r1.player_id = ?
+                  AND r2.player_id = ?
+                  AND r1.count = 1 AND r2.count = 1
+                  AND r1.team != 5 AND r2.team != 5
+                ORDER BY r1.game_number DESC, r1.role_id ASC, r2.role_id ASC
+            """, (player_id, other_id))
+            rows = cursor.fetchall()
+
+        shared = []
+        seen = set()
+        for row in rows:
+            if row["game_number"] in seen:
+                continue
+            seen.add(row["game_number"])
+            shared.append({
+                "game_number": row["game_number"],
+                "game_name": row["game_name"],
+                "my_role_id": row["my_role_id"],
+                "my_role": row["my_role"],
+                "my_team": row["my_team"],
+                "my_result": "🏆 Win" if row["my_win"] == 1 else "❌ Loss",
+                "my_mvp": row["my_mvp"] == 1,
+                "their_role_id": row["their_role_id"],
+                "their_role": row["their_role"],
+                "their_team": row["their_team"],
+                "their_result": "🏆 Win" if row["their_win"] == 1 else "❌ Loss",
+                "same_team": row["my_team"] == row["their_team"],
+            })
+        return shared
 
     # -------------------------------------------------------------------------
     # Account management
@@ -2435,6 +2515,7 @@ class LeaderboardView(discord.ui.View):
             "name":        lambda p: p["player_name"].lower(),
             # MVP sort modes
             "mvp_total":   lambda p: (-p.get("total_mvps", 0), -p["wins"], -p["games"]),
+            "mvp_pct":     lambda p: (-((p.get("total_mvps", 0) / p["games"] * 100) if p["games"] else 0.0), -p.get("total_mvps", 0), -p["games"]),
             "mvp_village": lambda p: (-p.get("village_mvps", 0), -p.get("village_wins", 0), -p.get("village_games", 0)),
             "mvp_evil":    lambda p: (-p.get("evil_mvps", 0), -p.get("evil_wins", 0), -p.get("evil_games", 0)),
             "mvp_rk":      lambda p: (-p.get("rk_mvps", 0), -p.get("rk_wins", 0), -p.get("rk_games", 0)),
@@ -2471,6 +2552,7 @@ class LeaderboardView(discord.ui.View):
             "rk_wr": "RK Winrate", "neutral_wr": "Neutral Winrate", "solo_wins": "Solo Wins",
             "mvp_total": "Total MVPs", "mvp_village": "Village MVPs",
             "mvp_evil": "Evil MVPs", "mvp_rk": "RK MVPs", "mvp_neutral": "Neutral MVPs",
+            "mvp_pct": "MVP %",
             "village_wins": "Village Wins", "evil_wins": "Evil Wins", "other_wins": "RK+Neutral Wins",
         }
 
@@ -2494,6 +2576,10 @@ class LeaderboardView(discord.ui.View):
                 line += f"Solo Wins: {p.get('solo_wins', 0)}\n"
             elif self.sort_mode == "mvp_total":
                 line += f"⭐ Total MVPs: {p.get('total_mvps', 0)}\n"
+            elif self.sort_mode == "mvp_pct":
+                mvps = p.get("total_mvps", 0)
+                rate = (mvps / p["games"] * 100) if p["games"] else 0.0
+                line += f"⭐ MVP Rate: {rate:.1f}% ({mvps} MVPs / {p['games']}G)\n"
             elif self.sort_mode == "mvp_village":
                 line += f"⭐ Village MVPs: {p.get('village_mvps', 0)} (Village: {p.get('village_wins', 0)}W / {p.get('village_games', 0)}G)\n"
             elif self.sort_mode == "mvp_evil":
@@ -2534,6 +2620,7 @@ class LeaderboardView(discord.ui.View):
             discord.SelectOption(label="Neutral Winrate", value="neutral_wr"),
             discord.SelectOption(label="Solo Wins", value="solo_wins"),
             discord.SelectOption(label="⭐ Total MVPs", value="mvp_total"),
+            discord.SelectOption(label="⭐ MVP % (MVPs / Games)", value="mvp_pct"),
             discord.SelectOption(label="⭐ Village MVPs", value="mvp_village"),
             discord.SelectOption(label="⭐ Evil MVPs", value="mvp_evil"),
             discord.SelectOption(label="⭐ RK MVPs", value="mvp_rk"),
@@ -3503,6 +3590,81 @@ class RelationsView(discord.ui.View):
             embed=self.build_embed(f"Nemesis of {self.player}", self.nemesis),
             view=self
         )
+
+# ---------------------------
+# SharedGamesView
+# ---------------------------
+class SharedGamesView(discord.ui.View):
+    """The shared slice of two players' histories — every game both played.
+
+    A paged list (10 games per page) driven by ◀ Prev / Next ▶. Just the
+    list — role descriptions are reached via .role, not from here.
+    """
+
+    def __init__(self, db, player_name, other_name, shared, page=0, page_size=10):
+        super().__init__(timeout=300)
+        self.db = db
+        self.player_name = player_name[:40]
+        self.other_name = other_name[:40]
+        self.shared = shared
+        self.page = page
+        self.page_size = page_size
+
+    def _current_items(self):
+        start = self.page * self.page_size
+        return self.shared[start:start + self.page_size]
+
+    def get_embed(self):
+        total_pages = max(1, (len(self.shared) - 1) // self.page_size + 1)
+        items = self._current_items()
+
+        embed = discord.Embed(
+            title=f"\U0001f3ae Games Together — {self.player_name} ⇄ {self.other_name}",
+            color=EMBED_COLOR,
+        )
+
+        if not items:
+            embed.description = "*No shared games found.*"
+            embed.set_footer(text=f"Page {self.page + 1}/{total_pages}")
+            return embed
+
+        desc = ""
+        for entry in items:
+            tag = "\U0001f91d Allies" if entry["same_team"] else "⚔️ Opponents"
+            mvp = " ⭐" if entry["my_mvp"] else ""
+            desc += (
+                f"**Game {entry['game_number']} — {entry['game_name'].replace('-', ' ').title()}** ({tag})\n"
+                f"• {self.player_name}: {entry['my_role']}{mvp} — "
+                f"{TEAMS.get(entry['my_team'], 'Unknown')} ({entry['my_result']})\n"
+                f"• {self.other_name}: {entry['their_role']} — "
+                f"{TEAMS.get(entry['their_team'], 'Unknown')} ({entry['their_result']})\n\n"
+            )
+
+        embed.description = desc
+        together = sum(1 for entry in self.shared if entry["same_team"])
+        embed.set_footer(
+            text=(
+                f"{len(self.shared)} shared game{'s' if len(self.shared) != 1 else ''} • "
+                f"{together} as allies • Page {self.page + 1}/{total_pages}"
+            )
+        )
+        return embed
+
+    async def update(self, interaction):
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary, row=1)
+    async def prev_page(self, interaction, button):
+        if self.page > 0:
+            self.page -= 1
+        await self.update(interaction)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary, row=1)
+    async def next_page(self, interaction, button):
+        max_page = (len(self.shared) - 1) // self.page_size
+        if self.page < max_page:
+            self.page += 1
+        await self.update(interaction)
 
 class MigrateConfirmView(discord.ui.View):
     def __init__(self, ctx):
@@ -4989,36 +5151,65 @@ class GameLibrary(commands.Cog):
         embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=EMBED_FOOTER_ICON)
         await ctx.send(embed=embed, view=TeamWinsView(self.db))
 
-    @commands.command(name="relations")
-    async def relations(self, ctx, member: discord.Member = None):
-        """View your relations with a mentioned player, or your full allies, worst allies, and nemeses - Usage: .relations [@player]"""
-        if member is not None and member.id != ctx.author.id:
-            row = self.db.get_relation_between(ctx.author.id, member.id)
-            same_wins, same_games, diff_games, my_wins, their_wins = row
-            if same_games == 0 and diff_games == 0:
-                await ctx.send(
-                    f"❌ No relation data found between {ctx.author.display_name} and {member.display_name}!"
-                )
-                return
-            lines = []
-            if same_games:
-                wr = same_wins / same_games * 100
-                lines.append(
-                    f"**Allies** — {same_games} game{'s' if same_games != 1 else ''} together: "
-                    f"**{same_wins}W** ({wr:.1f}%)"
-                )
-            if diff_games:
-                my_wr = my_wins / diff_games * 100
-                lines.append(
-                    f"**Opponents** — {diff_games} game{'s' if diff_games != 1 else ''} against each other: "
-                    f"you **{my_wins}W** / them **{their_wins}W** ({my_wr:.1f}%)"
-                )
-            embed = discord.Embed(
-                title=f"Relations: {ctx.author.display_name} ⇄ {member.display_name}",
-                description="\n".join(lines),
-                color=discord.Color.blurple(),
+    async def _send_pair_relations(self, ctx, left, right):
+        """Relations embed + shared-games dropdown for any pair of players."""
+        if left.id == right.id:
+            await ctx.send("❌ Pick two different players.")
+            return
+
+        same_wins, same_games, diff_games, my_wins, their_wins = self.db.get_relation_between(
+            left.id, right.id
+        )
+        if same_games == 0 and diff_games == 0:
+            await ctx.send(
+                f"❌ No relation data found between {left.display_name} and {right.display_name}!"
             )
+            return
+
+        lines = []
+        if same_games:
+            wr = same_wins / same_games * 100
+            lines.append(
+                f"**Allies** — {same_games} game{'s' if same_games != 1 else ''} together: "
+                f"**{same_wins}W** ({wr:.1f}%)"
+            )
+        if diff_games:
+            left_wr = my_wins / diff_games * 100
+            lines.append(
+                f"**Opponents** — {diff_games} game{'s' if diff_games != 1 else ''} against each other: "
+                f"**{left.display_name}** {my_wins}W / **{right.display_name}** {their_wins}W "
+                f"({left_wr:.1f}%)"
+            )
+        embed = discord.Embed(
+            title=f"Relations: {left.display_name} ⇄ {right.display_name}",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        shared = self.db.get_shared_games(left.id, right.id)
+        if shared:
+            view = SharedGamesView(self.db, left.display_name, right.display_name, shared)
+            await ctx.send(embed=embed, view=view)
+        else:
             await ctx.send(embed=embed)
+
+    @commands.command(name="relations")
+    async def relations(self, ctx, member: discord.Member = None, member2: discord.Member = None):
+        """View relations between two players, or your own allies, worst allies, and nemeses.
+
+        Usage: `.relations` | `.relations [@player]` | `.relations [@playerA] [@playerB]`
+        """
+        if member2 is not None:
+            if member is None:
+                await ctx.send("❌ Usage: `.relations [@playerA] [@playerB]`")
+                return
+            left, right = member, member2
+        elif member is not None and member.id != ctx.author.id:
+            left, right = ctx.author, member
+        else:
+            left = right = None
+
+        if left is not None:
+            await self._send_pair_relations(ctx, left, right)
             return
 
         member = ctx.author

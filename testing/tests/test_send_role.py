@@ -17,8 +17,8 @@ class TestSendRole:
     def test_settarget_has_help(self):
         """Verify settarget command has help text."""
         method = getattr(send_role.SendRole, 'settarget')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_sendrole_exists(self):
         """Verify sendrole command exists on the cog."""
@@ -27,5 +27,5 @@ class TestSendRole:
     def test_sendrole_has_help(self):
         """Verify sendrole command has help text."""
         method = getattr(send_role.SendRole, 'sendrole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

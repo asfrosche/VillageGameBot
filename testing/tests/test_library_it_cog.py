@@ -17,8 +17,8 @@ class TestGameLibraryIT:
     def test_missing_ids_it_has_help(self):
         """Verify missing_ids_it command has help text."""
         method = getattr(library_it_cog.GameLibraryIT, 'missing_ids_it')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_bad_names_it_exists(self):
         """Verify bad_names_it command exists on the cog."""
@@ -27,8 +27,8 @@ class TestGameLibraryIT:
     def test_bad_names_it_has_help(self):
         """Verify bad_names_it command has help text."""
         method = getattr(library_it_cog.GameLibraryIT, 'bad_names_it')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_remove_bad_name_it_exists(self):
         """Verify remove_bad_name_it command exists on the cog."""
@@ -37,8 +37,8 @@ class TestGameLibraryIT:
     def test_remove_bad_name_it_has_help(self):
         """Verify remove_bad_name_it command has help text."""
         method = getattr(library_it_cog.GameLibraryIT, 'remove_bad_name_it')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_statsit_exists(self):
         """Verify statsit command exists on the cog."""
@@ -47,8 +47,8 @@ class TestGameLibraryIT:
     def test_statsit_has_help(self):
         """Verify statsit command has help text."""
         method = getattr(library_it_cog.GameLibraryIT, 'statsit')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_winrateit_exists(self):
         """Verify winrateit command exists on the cog."""
@@ -57,8 +57,8 @@ class TestGameLibraryIT:
     def test_winrateit_has_help(self):
         """Verify winrateit command has help text."""
         method = getattr(library_it_cog.GameLibraryIT, 'winrateit')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_relationsit_exists(self):
         """Verify relationsit command exists on the cog."""
@@ -67,25 +67,9 @@ class TestGameLibraryIT:
     def test_relationsit_has_help(self):
         """Verify relationsit command has help text."""
         method = getattr(library_it_cog.GameLibraryIT, 'relationsit')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_migrateconfirmview_instantiates(self):
-        """Verify MigrateConfirmView view can be instantiated."""
-        # MigrateConfirmView — requires cog/bot context to instantiate
-        pass
 
-    def test_admingameselectview_instantiates(self):
-        """Verify AdminGameSelectView view can be instantiated."""
-        # AdminGameSelectView — requires cog/bot context to instantiate
-        pass
 
-    def test_adminteamselectview_instantiates(self):
-        """Verify AdminTeamSelectView view can be instantiated."""
-        # AdminTeamSelectView — requires cog/bot context to instantiate
-        pass
 
-    def test_adminroledescriptionview_instantiates(self):
-        """Verify AdminRoleDescriptionView view can be instantiated."""
-        # AdminRoleDescriptionView — requires cog/bot context to instantiate
-        pass

@@ -4,6 +4,7 @@ import html
 import random
 import difflib
 import wcwidth
+from utils.discord_safe import category_family, chunk_fields
 import discord
 import aiohttp
 import asyncio
@@ -28,20 +29,8 @@ HELP2_CATEGORIES = {
 
 
 def _chunk_lines(lines, cap=1024):
-    chunks = []
-    current = []
-    current_len = 0
-    for line in lines:
-        line_len = len(line) + 1
-        if current and current_len + line_len > cap:
-            chunks.append("\n".join(current))
-            current = []
-            current_len = 0
-        current.append(line)
-        current_len += line_len
-    if current:
-        chunks.append("\n".join(current))
-    return chunks
+    """Group lines into field values of at most *cap* characters (long single lines are split)."""
+    return chunk_fields(list(lines), cap)
 
 
 def _embed_pages(title, footer_text, groups, color):
@@ -71,6 +60,29 @@ def _embed_pages(title, footer_text, groups, color):
             total_len += field_len
     flush()
     return pages
+
+
+MAX_EMBED_DESC = 4096
+MAX_FIELD_NAME = 256
+MAX_FIELD_VALUE = 1024
+MAX_EMBED_CHARS = 6000
+
+
+def _truncate(text, limit, marker="\n\n*… Output truncated. Use `.firstpin 1` to view a single message.*"):
+    """Cut text to limit, preferring a clean break near the end so little room is wasted."""
+    if len(text) <= limit:
+        return text
+    room = max(limit - len(marker), 0)
+    cut = text[:room].rstrip()
+    # Only accept a line/word break that sits near the end of the budget,
+    # otherwise the embed would stop far short of the room it was given.
+    threshold = room * 0.8
+    boundary = cut.rfind("\n")
+    if boundary < threshold:
+        boundary = cut.rfind(" ")
+    if boundary < threshold:
+        boundary = room
+    return cut[:boundary].rstrip() + marker
 
 
 def _embed_chunks(embeds, max_embeds=10, max_chars=6000):
@@ -344,7 +356,10 @@ async def _choose_interaction_gif(pool, is_valid=None):
 COMMAND_INDEX = [
     (".setup <num>", "Setup roles, channels & categories (num houses)", "Setup", ["init", "configure", "server", "channel"]),
     (".roleset <key> @role", "Assign a role for the bot", "Setup", ["config", "permission"]),
-    (".channelset <key> #ch", "Assign a channel for the bot", "Setup", ["config", "channel"]),
+    (".channelset <key> #ch", "Assign a channel (mention, ID or name)", "Setup", ["config", "channel"]),
+    (".addch <text>", "Append text to the current channel name (admin)", "Setup", ["channel", "rename", "append", "add", "admin"]),
+    (".addch rename <name> [#channel]", "Fully rename a channel, optionally a different one (admin)", "Setup", ["channel", "rename", "add", "admin"]),
+    (".channelstats", "List all categories with channel counts (admin)", "Setup", ["category", "channels", "list", "admin"]),
     (".categoryset <key> <name>", "Assign a category", "Setup", ["config", "category"]),
     (".houseprefix <pfx>", "Set house name prefix", "Setup", ["house", "naming", "prefix"]),
     (".knockduration <sec>", "Set knock timeout duration", "Setup", ["knock", "timeout", "timer"]),
@@ -365,17 +380,19 @@ COMMAND_INDEX = [
     (".autopincorpse", "Auto pin corpse messages in houses", "Setup", ["corpse", "pin", "toggle", "dead"]),
     (".settime <event>", "Set daily game time via dropdowns (dayend/lynchend/presetend)", "Setup", ["time", "daily", "schedule", "set"]),
     (".times", "Show configured daily game times", "Setup", ["time", "daily", "schedule", "next"]),
-    (".move <#>", "Move player to house (leaves current)", "Moving", ["move", "house", "relocate"]),
+    (".move <#|name>", "Move to a house. Players send a request that Overseers approve; admins act directly", "Moving", ["move", "house", "relocate", "request"]),
     (".renmove #House", "Move to renamed house", "Moving", ["move", "renamed", "house"]),
     (".add <#>", "Add player to house (keeps current)", "Moving", ["add", "house", "join"]),
     (".remove <#>", "Remove player from house", "Moving", ["remove", "house", "kick"]),
-    (".knock <#>", "Knock on a house door", "Moving", ["knock", "door", "enter"]),
+    (".knock <#|name>", "Knock on a house. Players send a request that Overseers approve; admins act directly", "Moving", ["knock", "door", "enter", "request"]),
     (".pendingknock / .showknocks [restart]", "True/False if any knock is pending + oldest age (restart = scan all servers, owners only)", "Moving", ["knock", "pending", "status"]),
     (".renknock #House", "Knock on renamed house", "Moving", ["knock", "renamed", "house"]),
     (".pcadd #PC", "Add player to PC/renamed house", "Moving", ["pc", "add", "private"]),
     (".pcremove #PC", "Remove from PC/renamed house", "Moving", ["pc", "remove", "private"]),
     (".addhere #RC", "Add RC's player to this channel", "Moving", ["rc", "add", "channel"]),
+    (".addspons @sponsor #rc", "Add a sponsor directly to a rolechat (admin)", "Moving", ["sponsor", "rc", "rolechat", "add", "admin"]),
     (".movehouse #src #dest", "Bulk-move all residents from one house to another", "Moving", ["movehouse", "bulk", "move", "relocate"]),
+    (".pportal #a #b [N]", "Place a two-way portal between two houses (alive players get N uses each; omit N for unlimited)", "Moving", ["portal", "pportal", "teleport", "travel", "link"]),
     (".follow @player [stealth]", "Make players in this RC follow @target", "Surveillance", ["follow", "track", "stalk", "move"]),
     (".unfollow @player", "Stop following @player", "Surveillance", ["unfollow", "stop", "track"]),
     (".followlist", "Show all active follow pairs", "Surveillance", ["follow", "list", "pairs"]),
@@ -391,14 +408,16 @@ COMMAND_INDEX = [
     (".home return", "Bring all players home", "Home", ["home", "all", "return"]),
     (".leaveonlyhomes", "Remove all players in this RC from houses (not PCs)", "Home", ["leave", "houses", "remove", "rc"]),
     (".owner", "List house owners", "Home", ["owner", "house", "list"]),
+    (".owned", "In a Role Chat: show the house(s) owned by the player(s) there", "Home", ["owned", "owner", "house", "myhouses"]),
+    (".whorc [@player]", "Show the RoleChats you can send in, and who is in each (staff can check another player)", "Home", ["whorc", "rolechat", "who", "send"]),
     (".home initialize", "Assign RC + house to alive players", "Home", ["home", "init", "assign", "admin"]),
     (".home setup", "Move sponsors to their player's house", "Home", ["home", "sponsor", "admin"]),
     (".home set @player #house", "Set a player's home", "Home", ["home", "set", "admin"]),
     (".home mset", "Auto-set all current locations as home", "Home", ["home", "auto", "mass", "admin"]),
     (".home list", "List all players' homes", "Home", ["home", "list", "admin"]),
     (".home delete @player", "Make a player homeless", "Home", ["home", "delete", "remove", "admin"]),
-    (".rolechat initialize", "Assign RCs only (no houses)", "Home", ["rc", "rolechat", "init", "admin"]),
-    (".rolechat check", "List all RCs and their players", "Home", ["rc", "rolechat", "list", "admin"]),
+    (".rolechat initialize", "Rebuild RCs — one alive player per RC, clearing old ones", "Home", ["rc", "rolechat", "init", "admin"]),
+    (".rolechat list", "List all RCs and their players + sponsors (alias: lynch)", "Home", ["rc", "rolechat", "check", "list", "lynch", "admin"]),
     (".destroy #house", "Move to inaccessible, remove members, announce", "Handling", ["destroy", "house", "delete"]),
     (".fdestroy #house", "Force destroy instantly", "Handling", ["destroy", "force", "instant"]),
     (".decay #house", "Move to inaccessible, narrate in map", "Handling", ["decay", "house", "inactive"]),
@@ -432,6 +451,8 @@ COMMAND_INDEX = [
     (".remvote @player", "Remove all votes by/on player (all sessions)", "Voting", ["remvote", "remove", "vote", "clear", "all"]),
     (".skipnight <min_votes> [text]", "Start skip-night vote (custom title optional)", "Voting", ["skip", "night", "vote"]),
     (".skipnightvoters <message_id>", "Show voters on a skip-night vote (admin)", "Voting", ["skipnight", "voters", "admin"]),
+    (".pick [cap=#] [time=1m] <Title>, <Option> ...", "Start anonymous multi-option vote in this channel (Overseer)", "Voting", ["pick", "vote", "poll", "anon", "skipvote"]),
+    (".pickvoters <message_id>", "Reveal who voted on a pick poll (admin)", "Voting", ["pickvoters", "pick", "voters", "reveal", "admin"]),
     (".votelist", "Show all current votes", "Voting", ["vote", "list", "current"]),
     (".resetvotes", "Reset all votes", "Voting", ["reset", "vote", "clear"]),
     (".votehistory/vh [mode]", "Scan vote history (tracks .remvote/.removevote/.manipulate) — modes: grouped or range", "Voting", ["history", "vote", "log", "remvote"]),
@@ -455,6 +476,7 @@ COMMAND_INDEX = [
     (".houselistadd #house", "Add a house to the list", "Lists", ["house", "list", "add", "admin"]),
     (".houselistremove #house", "Remove a house from list", "Lists", ["house", "list", "remove", "admin"]),
     (".rollhouses / .rh <num>", "Randomly select N visitable houses", "Lists", ["house", "roll", "random", "pick"]),
+    (".rollhouse [#house] <num|all>", "Roll random alive members from a house", "Lists", ["house", "roll", "random", "alive"]),
     (".deadlist add @player <team> <role>", "Add to deadlist", "Lists", ["dead", "list", "add", "admin"]),
     (".deadlist remove @player", "Remove from deadlist", "Lists", ["dead", "list", "remove", "admin"]),
     (".deadlist edit @player <team> <role>", "Edit deadlist entry", "Lists", ["dead", "list", "edit", "admin"]),
@@ -464,9 +486,23 @@ COMMAND_INDEX = [
     (".dl", "Reply to a link to download the media and send it here", "Download", ["download", "media", "link", "yt-dlp"]),
     (".mdl", "Reply to a link to download its audio as an MP3", "Download", ["download", "mp3", "audio", "music", "yt-dlp"]),
     (".dsplit <N>", "Download and split a video into N equal parts (no number = minimum parts that fit)", "Download", ["download", "split", "parts", "video"]),
+    (".dclip <start> [end] [N]", "Reply to a link to clip a timestamp range (optionally split into N parts)", "Download", ["download", "clip", "cut", "timestamp", "trim", "split"]),
     (".day", "Unlock all day channels", "Utility", ["day", "unlock", "phase"]),
     (".night", "Lock all day channels", "Utility", ["night", "lock", "phase"]),
+    (".daywf", "Unlock the Future region's day channels", "Utility", ["day", "future", "unlock", "phase"]),
+    (".nightwf", "Lock the Future region's day channels", "Utility", ["night", "future", "lock", "phase"]),
+    (".daywp", "Unlock the Past region's day channels", "Utility", ["day", "past", "unlock", "phase"]),
+    (".nightwp", "Lock the Past region's day channels", "Utility", ["night", "past", "lock", "phase"]),
     (".broom", "Delete replied-to messages (logs kept)", "Utility", ["broom", "delete", "clean", "message"]),
+    (".actionstats", "View action completion counters", "Utility", ["actions", "stats", "log", "donestats"]),
+    (".autoroleadd @role", "Add auto-visit allocation to all RC channels with this role", "Moving", ["auto", "visit", "role", "allocation"]),
+    (".firstpin [count] [#channel]", "Show the oldest pinned message(s) as embeds", "Utility", ["pin", "first", "oldest"]),
+    (".rename <name> [#channel]", "Rename a channel (admin)", "Setup", ["rename", "channel", "admin"]),
+    (".execution @player", "Start a public execution vote for a player (admin)", "Voting", ["execution", "gallows", "vote", "admin"]),
+    (".help2", "Show additional command categories", "Other", ["help", "categories"]),
+    (".fmbot", "Show Last.fm bot commands by category", "Other", ["fmbot", "lastfm"]),
+    (".pins", "Reorder or delete pinned messages (Manage Messages)", "Utility", ["pin", "pins", "reorder", "manage"]),
+    (".unpinall [#channel]", "Remove every pin from a channel after confirming", "Utility", ["pin", "unpin", "unpinall", "clear"]),
     (".fbroom", "Force-delete messages including pinned (logs kept)", "Utility", ["fbroom", "force", "broom", "delete", "pinned"]),
     (".log", "Export messages to file: .log <count> [#source] [#destination]", "Utility", ["log", "message", "export"]),
     (".housecheck [hours]", "List quiet houses (default 24h)", "Utility", ["house", "quiet", "check", "inactive"]),
@@ -480,13 +516,13 @@ COMMAND_INDEX = [
     (".kills [@player] [#channel]", "View kill log (admin only, ephemeral)", "Utility", ["kill", "log", "view", "ephemeral"]),
     (".killremove <number>", "Remove a kill log entry by .kills number (admin only)", "Utility", ["kill", "log", "remove", "delete", "edit"]),
     (".addrole @role @users...", "Give role to members", "Utility", ["role", "add", "give", "admin"]),
-    (".removerole <role> <member>", "Remove role (admin)", "Utility", ["role", "remove", "admin"]),
+    (".removerole <role> <member...>", "Remove role from members (admin)", "Utility", ["role", "remove", "admin"]),
     (".addcategoryperms @role <cat> <perm>", "R=Read, S=Send", "Utility", ["perm", "category", "read", "send", "admin"]),
     (".addchannelperms @role #ch <perm>", "R=Read, S=Send", "Utility", ["perm", "channel", "read", "send", "admin"]),
     (".endgame", "Unlock all channels post-game", "Utility", ["game", "end", "unlock", "admin"]),
     (".statss", "Show message counts for day discussion, grouped by role (admin)", "Utility", ["stats", "message", "count", "admin"]),
-    (".serverstats", "Show server-wide message counts (excl. RCs), grouped by role (admin)", "Utility", ["stats", "server", "message", "count", "admin"]),
-    (".resetservstats", "Reset server-wide message counts", "Utility", ["tracking", "server", "reset", "admin"]),
+    (".serverstats", "Show server-wide counts; `lap <label>` saves (with confirmation), `laps` lists, `total` combines all (admin)", "Utility", ["stats", "server", "message", "count", "lap", "admin"]),
+    (".resetservstats", "Reset server-wide message counts; `true` also clears laps", "Utility", ["tracking", "server", "reset", "admin"]),
     (".setmessagetracking", "Enable/disable tracking", "Utility", ["tracking", "message", "toggle", "admin"]),
     (".start_tracking", "Start message tracking", "Utility", ["tracking", "start", "admin"]),
     (".stop_tracking", "Stop/pause tracking", "Utility", ["tracking", "stop", "pause", "admin"]),
@@ -501,6 +537,7 @@ COMMAND_INDEX = [
     (".help [category]", "Show this help menu", "Other", ["help", "menu", "command"]),
     (".who #ch", "List players in a channel", "Other", ["who", "list", "players", "channel"]),
     (".where #RC", "Show a player's current location (staff only, needs confirmation)", "Other", ["where", "location", "find"]),
+    (".housewho [#house|#RC]", "Show your house and who is inside it", "Other", ["housewho", "hw", "house", "who", "location"]),
     (".map", "Show the game map", "Other", ["map", "game", "overview"]),
     (".role", "Show the registered role package (paginated; role card excluded)", "Other", ["role", "package", "pinned", "first", "card"]),
     (".role register <1-4> <role name>", "Register pinned messages as a Role Package", "Other", ["role", "package", "register"]),
@@ -516,9 +553,13 @@ COMMAND_INDEX = [
     (".roll @role <n>", "Random players from a role", "Other", ["roll", "random", "pick"]),
     (".ping", "Bot online check", "Other", ["ping", "bot", "online", "check"]),
     (".ding", "Dong!", "Other", ["ding", "fun", "easter"]),
-    (".line / .banner [lines] [title]", "Draw a clean divider banner between text", "Other", ["line", "banner", "divider", "separator", "gap"]),
+    (".avatar [@member]", "Show your avatar (or another member's)", "Other", ["avatar", "pfp", "picture", "profile"]),
+    (".line / .banner [lines] [title]", "Draw a clean divider banner between text (admin)", "Other", ["line", "banner", "divider", "separator", "gap"]),
+    (".askos <question>", "Ask the Overseers from an RC, Dead RC or Alt (Alive/Sponsor/Alt/Dead)", "Other", ["ask", "overseer", "question", "osq", "askoverseer"]),
     (".narrate #ch <msg>", "Send narration to channels", "Other", ["narrate", "announce", "admin"]),
     (".narration/.n <text>", "Storybook embed (admin, pings)", "Other", ["narration", "story", "embed", "admin"]),
+    (".np <text>", "Storybook embed, no pin (admin)", "Other", ["narration", "story", "embed", "admin", "nopin"]),
+    (".react <1-10 | word>", "React to a replied message (admin/OS)", "Other", ["react", "reaction", "emoji", "admin"]),
     (".anarration/.na <text>", "Silent narration (admin)", "Other", ["narration", "silent", "admin"]),
     (".narrationcolor", "Pick embed color (admin)", "Other", ["narration", "color", "embed", "admin"]),
     (".dice <n>", "Roll 1-N", "Other", ["dice", "roll", "random", "number"]),
@@ -535,7 +576,7 @@ COMMAND_INDEX = [
     (".gettag <link>", "Get mentioned users from a message", "Other", ["tag", "mention", "get"]),
     (".timer <time> [tag] [#ch]", "Set a timer", "Other", ["timer", "remind", "countdown"]),
     (".deletechannel", "Delete this channel (admin)", "Other", ["delete", "channel", "admin"]),
-    (".deletecategory", "Delete this category (admin)", "Other", ["delete", "category", "admin"]),
+    (".deletecategory [category]", "Delete a category and all its channels (admin)", "Other", ["delete", "category", "delcat", "admin"]),
     (".timestamp <DD-MM> <HH:MM>", "Gen timestamp with timezone picker", "Other", ["timestamp", "time", "timezone", "convert"]),
     (".time", "Get sent time of replied-to message", "Other", ["time", "message", "sent"]),
     (".dropitem", "Drop interactive item (see docs)", "Other", ["drop", "item", "interactive"]),
@@ -566,7 +607,7 @@ COMMAND_INDEX = [
     (".buy <item> [qty]", "Buy from shop (to RC inventory, default qty=1)", "Economy", ["buy", "purchase", "shop"]),
     (".sell /.sell-item <item>", "Sell for 50% refund", "Economy", ["sell", "refund", "item"]),
     (".inv /.inventory [#ch]", "View RC inventory", "Economy", ["inventory", "items", "rc"]),
-    (".give @user <amt>", "Give RC coins (in houses)", "Economy", ["give", "coins", "transfer"]),
+    (".give @user <amt | item [qty|all]>", "Give RC coins, or items to a player in the same house", "Economy", ["give", "coins", "items", "gift", "transfer"]),
     (".give-money @user <amt>", "Transfer RC coins to another player", "Economy", ["money", "transfer", "rc"]),
     (".use <item>", "Use an item from inventory", "Economy", ["use", "item", "activate"]),
     (".additem <name> <price> [desc] [stock]", "Add new shop item (emoji first, no numbers in name — quote it if needed; trailing number = stock)", "Economy", ["item", "add", "shop", "admin"]),
@@ -577,10 +618,12 @@ COMMAND_INDEX = [
     (".addmoney #ch <amt>", "Add coins to RC", "Economy", ["money", "add", "coins", "rc", "admin"]),
     (".removemoney #ch <amt>", "Remove coins from RC", "Economy", ["money", "remove", "coins", "rc", "admin"]),
     (".add-money-role @role <amt>", "Add RC coins by role", "Economy", ["money", "role", "rc", "admin"]),
+    (".remove-money-role @role <amt>", "Remove RC coins by role", "Economy", ["money", "role", "remove", "rc", "admin"]),
     (".additemrole @role <item> <qty>", "Give items by role", "Economy", ["item", "role", "give", "admin"]),
     (".giveitem @player <item> [qty]", "Give items to player (admin)", "Economy", ["item", "give", "admin"]),
     (".removeitemplayer @player <item> [qty]", "Remove items from player (admin)", "Economy", ["item", "remove", "admin", "rip"]),
     (".trade @player <item> [qty]", "Trade items with another player (in houses)", "Economy", ["item", "trade", "transfer", "give"]),
+    (".sellshop on|off", "Admin: turn shop selling on or off", "Economy", ["sell", "shop", "toggle", "admin"]),
     (".reseteconomy [amt]", "Reset all balances (default 0)", "Economy", ["economy", "reset", "balance", "admin"]),
     (".clearinventory", "Clear all inventories", "Economy", ["inventory", "clear", "admin"]),
     (".collect", "Add set collect amount to every RC's balance (use .setcollect first)", "Economy", ["collect", "money", "rc", "admin"]),
@@ -632,7 +675,7 @@ COMMAND_INDEX = [
     (".stats [@player]", "View player statistics", "Library & Stats", ["stats", "player", "statistics"]),
     (".statsos <name or @ping>", "Overseer stats & team winrates", "Library & Stats", ["stats", "overseer", "host", "winrate"]),
     (".winrate", "Winrate stats by team", "Library & Stats", ["winrate", "stats", "team"]),
-    (".relations [@user]", "Allies and nemeses", "Library & Stats", ["relations", "ally", "nemesis"]),
+    (".relations [@user]", "Allies and nemeses (+ games played together for @user)", "Library & Stats", ["relations", "ally", "nemesis", "together"]),
     (".lib", "Browse the game library", "Library & Stats", ["library", "browse", "games"]),
     (".lib add", "Add a new game", "Library & Stats", ["library", "add", "game", "admin"]),
     (".lib summary", "Summary of all games", "Library & Stats", ["library", "summary", "overview"]),
@@ -852,6 +895,38 @@ class TimezoneSelectView(discord.ui.View):
         embed.set_footer(text=f"{dt_local.strftime('%d-%m %H:%M')} {value}")
 
         await interaction.response.edit_message(content=None, embed=embed, view=None)
+
+
+def find_category(guild, query: str):
+    """Find a category by ID, exact name or partial name.
+
+    Returns ``(category, error)`` — exactly one of the two is set.
+    """
+    query = (query or "").strip().strip("#")
+    if not query:
+        return None, "Give me a category name or ID."
+
+    if query.isdigit():
+        category = discord.utils.get(guild.categories, id=int(query))
+        if category:
+            return category, None
+
+    lowered = query.lower()
+    exact = [c for c in guild.categories if c.name.lower() == lowered]
+    if exact:
+        return exact[0], None
+
+    partial = [c for c in guild.categories if lowered in c.name.lower()]
+    if len(partial) > 1:
+        names = "\n".join(f"• `{c.name}`" for c in partial[:10])
+        return None, (
+            f"Multiple categories match `{query}`:\n{names}\n"
+            "Use the exact name or the category ID."
+        )
+    if partial:
+        return partial[0], None
+
+    return None, f"I couldn't find a category called `{query}`."
 
 
 class ConfirmDeleteView(discord.ui.View):
@@ -1176,6 +1251,7 @@ _PLAYER_COMMANDS = [
     (".who #ch", "List players in a channel by role"),
     (".where", "Check your location in your RoleChat (outside a RoleChat: admin-only, reply `yes`)"),
     (".where #RC", "Check a player's location (staff only, reply `yes`)"),
+    (".housewho [#house|#RC]", "Show your house and who is inside it"),
     (".owner", "List the owners of the current house"),
     (".p ,playerlist", "List all alive players"),
     (".map", "Show the game map"),
@@ -1184,6 +1260,7 @@ _PLAYER_COMMANDS = [
     (".sponsorlist", "List all sponsor members"),
     (".houselist ,hl", "List visitable houses"),
     (".rollhouses ,rh", "Pick random houses from the list"),
+    (".rollhouse [#house] <num|all>", "Roll random alive members from a house"),
     (".deadlist ,d", "Show dead players & their roles"),
     (".vote @user", "Cast or change your vote"),
     (".v ,votelist", "Show all current votes"),
@@ -1365,8 +1442,10 @@ class Other(commands.Cog):
         in_player_channel = ctx.channel.category in (rc_cat, dead_rc, alt_cat)
 
         category_houses = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name", ""))
-        category_pcs = discord.utils.get(ctx.guild.categories, name=guild_data.get("privc_category_name", ""))
-        category_publc = discord.utils.get(ctx.guild.categories, name=guild_data.get("publc_category_name", ""))
+        privc_base = guild_data.get("privc_category_name", "") or ""
+        publc_base = guild_data.get("publc_category_name", "") or ""
+        category_pcs_list = category_family(ctx.guild.categories, privc_base)
+        category_publc_list = category_family(ctx.guild.categories, publc_base)
 
         # Validate setup before choosing a branch, so a renamed role or category reports the
         # real problem instead of a misleading "not enough perms".
@@ -1380,7 +1459,7 @@ class Other(commands.Cog):
                 "server. Check the role names in your setup."
             )
             return
-        if category_houses is None and category_pcs is None and category_publc is None:
+        if category_houses is None and not category_pcs_list and not category_publc_list:
             await ctx.send(
                 "No house, private chat, or public channel category is configured in this server."
             )
@@ -1451,14 +1530,14 @@ class Other(commands.Cog):
                     if permissions.send_messages:
                         houses_list.append(house.mention)
             pcs_list = []
-            if category_pcs:
-                for pc in category_pcs.channels:
+            for cat_pc in category_pcs_list:
+                for pc in cat_pc.channels:
                     permissions = pc.permissions_for(member)
                     if permissions.send_messages:
                         pcs_list.append(pc.mention)
             publc_list = []
-            if category_publc:
-                for pubc in category_publc.channels:
+            for cat_pub in category_publc_list:
+                for pubc in cat_pub.channels:
                     permissions = pubc.permissions_for(member)
                     if permissions.send_messages:
                         publc_list.append(pubc.mention)
@@ -1561,6 +1640,165 @@ class Other(commands.Cog):
             embeds[-1].description = f"_{omitted} more player(s) not shown (limit {max_reports})._"
         for chunk in _embed_chunks(embeds):
             await ctx.send(embeds=chunk)
+
+    @commands.command(aliases=["hw", "wherewho", "whowhere"])
+    async def housewho(self, ctx, target: discord.TextChannel = None):
+        """Show your house and who is inside it."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded")
+            return
+
+        rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
+        dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
+        alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
+        houses_category = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name", ""))
+        is_admin = ctx.author.guild_permissions.administrator
+
+        in_player_channel = ctx.channel.category in (rc_cat, dead_rc, alt_cat) if ctx.channel and ctx.channel.category else False
+
+        if not houses_category:
+            await ctx.send("Houses category not found.")
+            return
+
+        if target is None:
+            if not in_player_channel:
+                await ctx.send("`.housewho` can only be used in Role Chat, Alt, or Dead RC channels.")
+                return
+            lookup_members = [m for m in ctx.channel.members if not m.bot]
+            if not lookup_members:
+                await ctx.send("No players found.")
+                return
+            member_houses = {}
+            for member in lookup_members:
+                house = self._housewho_house_of(houses_category, member)
+                if house is not None:
+                    member_houses[member.id] = house
+            if not member_houses:
+                await ctx.send("None of those players are currently in any house.")
+                return
+            house_to_members = {}
+            for mid, house in member_houses.items():
+                house_to_members.setdefault(house.id, {"house": house, "members": []})
+            for member in lookup_members:
+                if member.id in member_houses:
+                    house_to_members[member_houses[member.id].id]["members"].append(member)
+            for hid, data in house_to_members.items():
+                await self._housewho_show_house(ctx, data["house"], guild_data)
+            return
+
+        if not is_admin:
+            await ctx.send("You don't have enough perms to use this command")
+            return
+
+        if target.category in (rc_cat, dead_rc, alt_cat):
+            lookup_members = [m for m in target.members if not m.bot]
+            if not lookup_members:
+                await ctx.send("No players found.")
+                return
+            member_houses = {}
+            for member in lookup_members:
+                house = self._housewho_house_of(houses_category, member)
+                if house is not None:
+                    member_houses[member.id] = house
+            if not member_houses:
+                await ctx.send("None of those players are currently in any house.")
+                return
+            house_to_members = {}
+            for mid, house in member_houses.items():
+                house_to_members.setdefault(house.id, {"house": house, "members": []})
+            for member in lookup_members:
+                if member.id in member_houses:
+                    house_to_members[member_houses[member.id].id]["members"].append(member)
+            names = ", ".join(m.display_name for h in house_to_members for m in house_to_members[h]["members"])
+            await ctx.send(
+                f"⚠️ **This is sensitive** — it will show the house and members for {names}.\n"
+                "Reply **yes** within 30 seconds to continue, or anything else to cancel."
+            )
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+            try:
+                response = await self.bot.wait_for("message", timeout=30, check=check)
+            except asyncio.TimeoutError:
+                return await ctx.send("Timed out.")
+            if response.content.strip().lower() not in ("yes", "proceed"):
+                return await ctx.send("Cancelled.")
+            for hid, data in house_to_members.items():
+                await self._housewho_show_house(ctx, data["house"], guild_data)
+            return
+        elif target.category == houses_category and isinstance(target, discord.TextChannel):
+            await ctx.send(
+                f"⚠️ **This is sensitive** — it will show all members in {target.mention}.\n"
+                "Reply **yes** within 30 seconds to continue, or anything else to cancel."
+            )
+            def check(m):
+                return m.author == ctx.author and m.channel == ctx.channel
+            try:
+                response = await self.bot.wait_for("message", timeout=30, check=check)
+            except asyncio.TimeoutError:
+                return await ctx.send("Timed out.")
+            if response.content.strip().lower() not in ("yes", "proceed"):
+                return await ctx.send("Cancelled.")
+            return await self._housewho_show_house(ctx, target, guild_data)
+        else:
+            await ctx.send("Target must be a Role Chat, Alt, Dead RC, or a house channel.")
+            return
+
+    @staticmethod
+    def _housewho_house_of(houses_category, member):
+        """The house the player can send messages in right now (the same rule .trade and .give use)."""
+        return next(
+            (c for c in houses_category.channels
+             if isinstance(c, discord.TextChannel) and c.permissions_for(member).send_messages),
+            None,
+        )
+
+    @staticmethod
+    def _housewho_residents(ctx, house):
+        """Everyone who can send messages in this house, excluding bots."""
+        return [m for m in ctx.guild.members if not m.bot and house.permissions_for(m).send_messages]
+
+    async def _housewho_show_house(self, ctx, house_channel, guild_data, members=None):
+        alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name", ""))
+        sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name", ""))
+        alt_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alt_role_name", ""))
+        dead_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("dead_role_name", ""))
+
+        if members is None:
+            members = self._housewho_residents(ctx, house_channel)
+
+        alive_list = []
+        sponsor_list = []
+        dead_list = []
+        alt_list = []
+        for member in members:
+            if alive_role in member.roles:
+                alive_list.append(f"`[{member.display_name}]`")
+            elif sponsor_role in member.roles:
+                sponsor_list.append(f"`[{member.display_name}]`")
+            elif dead_role in member.roles:
+                dead_list.append(f"`[{member.display_name}]`")
+            elif alt_role in member.roles:
+                alt_list.append(f"`[{member.display_name}]`")
+
+        alive_label = alive_role.name if alive_role else guild_data.get("alive_role_name") or "Alive"
+        sponsor_label = sponsor_role.name if sponsor_role else guild_data.get("sponsor_role_name") or "Sponsor"
+        dead_label = dead_role.name if dead_role else guild_data.get("dead_role_name") or "Dead"
+        alt_label = alt_role.name if alt_role else guild_data.get("alt_role_name") or "Alt"
+
+        pages = _embed_pages(
+            f"{house_channel.name} — Members:",
+            "Village Game",
+            [
+                (f"{alive_label}:", alive_list),
+                (f"{sponsor_label}:", sponsor_list),
+                (f"{alt_label}:", alt_list),
+                (f"{dead_label}:", dead_list),
+            ],
+            0xff3fb9,
+        )
+        for i in range(0, len(pages), 10):
+            await ctx.send(embeds=pages[i:i + 10])
 
     @commands.command()
     async def loc(self, ctx):
@@ -1804,7 +2042,7 @@ class Other(commands.Cog):
                     houses.append(h)
         return houses
 
-    async def _send_narration(self, ctx, text, ping_roles=True):
+    async def _send_narration(self, ctx, text, ping_roles=True, pin=True):
         text = re.sub(r'@(everyone|here)', '@\u200b\\1', text)
         def _replace_role(m):
             r = ctx.guild.get_role(int(m.group(1)))
@@ -1846,7 +2084,7 @@ class Other(commands.Cog):
             await ctx.send("An error occurred while sending the narration.")
             return
 
-        if sent_messages:
+        if sent_messages and pin:
             try:
                 await sent_messages[0].pin()
                 await asyncio.sleep(0.5)
@@ -1929,6 +2167,21 @@ class Other(commands.Cog):
             return await ctx.send(embed=embed)
         await self._send_narration(ctx, text, ping_roles=False)
 
+    @commands.command(name="np")
+    async def np_narration(self, ctx, *, text: str = None):
+        """Send a narration embed without pinning it (admin only). Pings @Alive and @Sponsor."""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+        if text is None:
+            embed = discord.Embed(
+                title="📖 Narration (no pin)",
+                description="Usage: `.np <text>`\nSend a storybook-style narration embed without pinning it (admin only).\nPings @Alive and @Sponsor.\n\nSame as `.n` but the message is not pinned.",
+                color=0xff3fb9
+            )
+            embed.add_field(name="Example", value="`.np The detective quietly watched from the shadows.`", inline=False)
+            return await ctx.send(embed=embed)
+        await self._send_narration(ctx, text, ping_roles=True, pin=False)
+
     @commands.command(name="narrationcolor")
     async def narrationcolor(self, ctx):
         """Pick a narration embed color from presets (admin only)."""
@@ -1985,25 +2238,62 @@ class Other(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
-    @commands.command()
-    async def deletecategory(self, ctx):
-        """Delete the current channel's category and all its channels after confirmation (admin only)."""
-        if ctx.author.guild_permissions.administrator:
-            if ctx.channel.category:
-                category = ctx.channel.category
-                view = ConfirmDeleteView(ctx)
-                embed = discord.Embed(description=f"Are you sure you want to delete the category **{category.name}** and all its channels?", color=0xff0000)
-                msg = await ctx.send(embed=embed, view=view)
-                view.message = msg
-                await view.wait()
-                if view.confirmed:
-                    for channel in category.channels:
-                        await channel.delete()
-                    await category.delete()
-            else:
-                await ctx.send("This channel doesn't have a category")
+    @commands.command(aliases=["delcategory", "delcat"])
+    async def deletecategory(self, ctx, *, category: str = None):
+        """Delete a category and all of its channels (admin only).
+
+        Usage: `.deletecategory [category name or ID]`
+        Without an argument it deletes the category this channel is in.
+        """
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough perms to use this command")
+
+        if category is None:
+            target = ctx.channel.category
+            if target is None:
+                return await ctx.send(
+                    "This channel doesn't have a category. "
+                    "Give me a category name or ID instead: `.deletecategory ROLES`"
+                )
         else:
-            await ctx.send("You don't have enough perms to use this command")
+            target, error = find_category(ctx.guild, category)
+            if error:
+                return await ctx.send(error)
+
+        channel_count = len(target.channels)
+        view = ConfirmDeleteView(ctx)
+        embed = discord.Embed(
+            title="⚠️ Delete category",
+            description=(
+                f"Are you sure you want to delete **{target.name}** and its "
+                f"**{channel_count}** channel(s)?\nThis can't be undone."
+            ),
+            color=0xff0000,
+        )
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+        await view.wait()
+        if not view.confirmed:
+            return
+
+        failed = []
+        for channel in list(target.channels):
+            try:
+                await channel.delete()
+            except (discord.Forbidden, discord.HTTPException):
+                failed.append(channel.name)
+        try:
+            await target.delete()
+        except (discord.Forbidden, discord.HTTPException):
+            failed.append(f"category “{target.name}”")
+
+        if failed:
+            try:
+                await ctx.send(
+                    "⚠️ Couldn't delete: " + ", ".join(f"`{name}`" for name in failed)
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
     @commands.command(aliases=["ts"])
     async def timestamp(self, ctx, date_str: str = None, time_str: str = None):
@@ -2061,15 +2351,67 @@ class Other(commands.Cog):
         else:
             await ctx.reply("Please reply to a message or provide its ID/link.", mention_author=False)
             return
-        mentions = msg.mentions
+        mentions = list(msg.mentions)
+        # Discord excludes mentions inside embeds from Message.mentions, so scan
+        # embed text (description, fields, author, footer) for <@id> patterns.
+        embed_parts = []
+        for embed in msg.embeds:
+            if embed.description:
+                embed_parts.append(embed.description)
+            if embed.author and embed.author.name:
+                embed_parts.append(embed.author.name)
+            for field in embed.fields:
+                embed_parts.append(field.name)
+                embed_parts.append(field.value)
+            if embed.footer and embed.footer.text:
+                embed_parts.append(embed.footer.text)
+        if embed_parts:
+            seen_ids = {user.id for user in mentions}
+            for uid in re.findall(r'<@!?(\d+)>', '\n'.join(embed_parts)):
+                uid = int(uid)
+                if uid in seen_ids:
+                    continue
+                seen_ids.add(uid)
+                user = ctx.guild.get_member(uid) or self.bot.get_user(uid)
+                if user is None:
+                    try:
+                        user = await self.bot.fetch_user(uid)
+                    except discord.HTTPException:
+                        continue
+                mentions.append(user)
         if not mentions:
             return await ctx.reply("No user mentions found in that message.", mention_author=False)
         mention_list = ' '.join(user.mention for user in mentions)
         await ctx.send(mention_list, allowed_mentions=AllowedMentions(users=False, roles=False))
         
+    @staticmethod
+    def _pin_section(index, message, total):
+        """Render one pinned message as a labelled block for the merged embed."""
+        author = getattr(message, "author", None)
+        name = getattr(author, "display_name", None) or getattr(author, "name", None) or "Unknown"
+        created = getattr(message, "created_at", None)
+        stamp = f" · <t:{int(created.timestamp())}:f>" if created else ""
+        if total > 1:
+            heading = f"**{index}. {name}**{stamp}"
+        else:
+            heading = f"**{name}**{stamp}"
+        body = (getattr(message, "content", "") or "").strip() or "*[No content]*"
+        attachments = getattr(message, "attachments", None) or []
+        links = [a.url for a in attachments if getattr(a, "url", None)]
+        if links:
+            body = f"{body}\n{' '.join(links)}"
+        return f"{heading}\n{body}"
+
     @commands.command(name="firstpin")
-    async def firstpin(self, ctx, channel: discord.TextChannel = None):
-        """Show the oldest pinned message in a channel."""
+    async def firstpin(self, ctx, count: int = 1, channel: discord.TextChannel = None):
+        """Show the oldest pinned message(s) in a channel merged into one embed.
+
+        Pass a number to merge the first N pinned messages, e.g. `.firstpin 3`.
+        The embed grows with the merged length and is truncated to fit Discord's limits.
+        """
+        if count < 1 or count > 10:
+            await ctx.send("Please choose a number between 1 and 10.")
+            return
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
             await ctx.send("Guild data not loaded")
@@ -2100,11 +2442,28 @@ class Other(commands.Cog):
         if not pins:
             await ctx.send("No pinned messages were found in that channel.")
             return
-        first_pin = pins[-1]
-        embed = discord.Embed(title="First Pinned Message", description=first_pin.content or "*[No content]*", color=0xff3fb9, timestamp=datetime.now())
-        embed.add_field(name=" ", value=f"[Jump to the message!]({first_pin.jump_url})", inline=False)
-        embed.set_footer(text="Village Game")
+        # channel.pins() returns newest-pinned first; show the oldest pins in
+        # chronological (oldest-first) order so .firstpin reads naturally.
+        selected = list(reversed(pins[-count:]))
+        title = "First Pinned Message" if len(selected) == 1 else f"First {len(selected)} Pinned Messages"
+        separator = "\n\n" + "─" * 20 + "\n\n"
+        sections = [self._pin_section(index, message, len(selected)) for index, message in enumerate(selected, start=1)]
+        description = _truncate(separator.join(sections), MAX_EMBED_DESC)
+        footer = "Village Game"
+        links = "\n".join(
+            f"[{index}. Jump to the message!]({message.jump_url})"
+            for index, message in enumerate(selected, start=1)
+        )
+        # Keep the whole embed under Discord's 6000-char budget, footer included.
+        budget = MAX_EMBED_CHARS - len(title) - len(description) - len(footer)
+        if len(links) > budget:
+            links = _truncate(links, max(budget, 0))
+        embed = discord.Embed(title=title, description=description, color=0xff3fb9, timestamp=datetime.now())
+        if links:
+            embed.add_field(name=" ", value=links[:MAX_FIELD_VALUE], inline=False)
+        embed.set_footer(text=footer)
         await ctx.send(embed=embed)
+
             
     @commands.command(name="firstmsg")
     async def firstmsg(self, ctx, channel: discord.TextChannel = None):
@@ -2144,9 +2503,25 @@ class Other(commands.Cog):
         """Fun easter egg command that replies with "Dong!"."""
         await ctx.send("Dong! ||MF||")
 
+    @commands.command()
+    async def avatar(self, ctx, member: discord.Member = None):
+        """Show your own avatar, or another member's. Usage: .avatar [@member]"""
+        target = member or ctx.author
+        colour = getattr(target, "color", None)
+        embed = discord.Embed(
+            title=f"{target.display_name}'s Avatar",
+            color=colour.value if colour is not None and colour.value else 0xff3fb9,
+        )
+        embed.set_image(url=target.display_avatar.url)
+        embed.set_footer(
+            text=f"Requested by {ctx.author.display_name}",
+            icon_url=ctx.author.display_avatar.url,
+        )
+        await ctx.send(embed=embed)
+
     @commands.command(aliases=["banner"])
     async def line(self, ctx, *args):
-        """Draw a clean banner line to separate text.
+        """Draw a clean banner line to separate text. Admin only.
 
         Usage:
           .line                 → single divider line
@@ -2156,6 +2531,10 @@ class Other(commands.Cog):
                                   (odd n: title on the middle line;
                                    even n: title centered in the middle gap)
         """
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("❌ Only server admins can use this command.")
+            return
+
         count = 1
         title = None
         if args:
@@ -2413,7 +2792,7 @@ class Other(commands.Cog):
         embed.add_field(name="📌 - Sticky", value="5 Commands\n`.help2 sticky`", inline=True)
         embed.add_field(name="🏆 - Draft", value="24 Commands\n`.help2 draft`", inline=True)
         embed.add_field(name="↪ - Send Role", value="3 Commands\n`.help2 sendrole`", inline=True)
-        embed.add_field(name="⬇️ - Downloads", value="3 Commands\n`.help2 download`", inline=True)
+        embed.add_field(name="⬇️ - Downloads", value="4 Commands\n`.help2 download`", inline=True)
         embed.set_footer(text="Village Game • Use `.help2 {category}` for details • `.sh <kw>` to search commands")
         await self.send_help_page(ctx, embed, self.help2)
 
@@ -2486,6 +2865,7 @@ class Other(commands.Cog):
 
     @commands.command()
     async def help(self, ctx, category: str = None):
+        """Show the help homepage, or the commands for one category."""
         self._in_help2 = False
         if category is None:
             await self.help_homepage(ctx)
@@ -2577,7 +2957,7 @@ class Other(commands.Cog):
     async def help_homepage(self, ctx):
         embedh = discord.Embed(title="Village Game - Commands list", color=0xff3fb9)
         embedh.add_field(name="🏗️ - Setup", value="19 Commands\n`.help setup`", inline=True)
-        embedh.add_field(name="👟 - Moving", value="9 Commands\n`.help moving`", inline=True)
+        embedh.add_field(name="👟 - Moving", value="13 Commands\n`.help moving`", inline=True)
         embedh.add_field(name="🏡 - Home", value="12 Commands\n`.help home`", inline=True)
         embedh.add_field(name="🔓 - Houses and PCs handling", value="16 Commands\n`.help handling`", inline=True)
         embedh.add_field(name="📜 - Infos", value="4 Commands\n`.help infos`", inline=True)
@@ -2595,11 +2975,15 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedh, self.help_homepage)
 
     async def help_setup(self, ctx):
-        embeds = discord.Embed(title="🏗️ - Setup commands", description="22 Commands", color=0xff3fb9)
+        embeds = discord.Embed(title="🏗️ - Setup commands", description="23 Commands", color=0xff3fb9)
         embeds.add_field(name="Core Setup", value=(
             "**`.setup <num>`** ─ Setup roles, channels & categories\n"
             "**`.roleset <key> @role`** ─ Assign a role for the bot\n"
-            "**`.channelset <key> #ch`** ─ Assign a channel for the bot\n"
+            "**`.channelset <key> #ch`** ─ Assign a channel (mention, ID or name)\n"
+            "**`.addch <text>`** ─ Append text to the current channel name (admin)\n"
+            "**`.addch rename <name> [#ch]`** ─ Fully rename a channel (admin)\n"
+            "**`.rename <name> [#ch]`** ─ Rename a channel (admin)\n"
+            "**`.setlogserver <channel_id>`** ─ Set the logging server for role package archives (admin)\n"
             "**`.categoryset <key> <name>`** ─ Assign a category\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.houseprefix <pfx>`** ─ Set house name prefix\n"
@@ -2613,14 +2997,19 @@ class Other(commands.Cog):
         ), inline=False)
         embeds.add_field(name="`.channelset` keys", value=(
             "`daydiscussion` `megaphone` `lynchsession1` `lynchsession2` `lynchsession3`\n"
-            "`lynchsession4` `leaderelection` `votecount` `logchannel` `actionslogchannel`\n"
-            "`announcements` `map` `whisperlogs` `editdellogs` `joinleavelogs`\n"
-            "`narrationlog`\n"
+            "`lynchsession4` `lynchsession5` `lynchsession6` `leaderelection` `leaderelection2`\n"
+            "`votecount` `logchannel` `actionslogchannel` `announcements` `map`\n"
+            "`whisperlogs` `editdellogs` `joinleavelogs` `narrationlog`\n"
             "━━━━━━━━━━━━━━━━\n"
-            "↳ `lynchsession1-4` and `leaderelection` also store the channel ID, so you can\n"
-            "rename them freely. The other keys are matched by name — re-run `.channelset`\n"
-            "if you rename those channels.\n"
-            "Lynch sessions 3 and 4 are optional extra voting slots."
+            "↳ `lynchsession1-6` and `leaderelection`/`leaderelection2` also store the channel\n"
+            "ID, so you can rename them freely. The other keys are matched by name — re-run\n"
+            "`.channelset` if you rename those channels.\n"
+            "Lynch sessions run 1 to 6. Sessions 3-6 are optional extra voting slots.\n"
+            "`leaderelection2` is optional and is **not** created by `.setup` — assign an\n"
+            "existing channel with `.channelset leaderelection2` to enable it.\n"
+            "━━━━━━━━━━━━━━━━\n"
+            "The channel is matched by mention, ID, exact name, or a unique partial/close\n"
+            "name — emoji, punctuation and case are ignored (e.g. `vote count` → `📊│vote-count`)."
         ), inline=False)
         embeds.add_field(name="Toggles & Flags", value=(
             "**`.showwhispersender`** ─ Show/hide whisper sender\n"
@@ -2648,14 +3037,17 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embeds, self.help_setup)
 
     async def help_moving(self, ctx):
-        embedm = discord.Embed(title="👟 - Moving commands", description='Add "stealth" after any command to suppress join/leave narrations. Add "read" after add/move/renmove/pcadd for read-only access.', color=0xff3fb9)
+        embedm = discord.Embed(title="👟 - Moving commands", description='Add "stealth" after any command to suppress join/leave narrations. Add "read" after add/move/renmove/pcadd/addspons for read-only access.', color=0xff3fb9)
         embedm.add_field(name="Move & Knock", value=(
-            "**`.move <#>`** ─ Move player to house (leaves current)\n"
+            "**`.move <#|name>`** ─ Move to a house. Players send a request that Overseers approve; admins act directly\n"
             "**`.renmove #House`** ─ Move to renamed house\n"
             "**`.add <#>`** ─ Add player to house (keeps current)\n"
             "**`.remove <#>`** ─ Remove player from house\n"
             "━━━━━━━━━━━━━━━━\n"
-            "**`.knock <#>`** ─ Knock on a house door\n"
+            "**`.knock <#|name>`** ─ Knock on a house. Players send a request that Overseers approve; admins act directly\n"
+            "**`.pportal <#a> <#b>`** ─ Place a two-way portal between two houses\n"
+            "**`.movehouse <#src> <#dest>`** ─ Move every resident from one house to another (admin)\n"
+            "**`.autoroleadd @role`** ─ Add auto-visit allocation to all RC channels with this role\n"
             "  *Open* ─ Knocker joins (leaves current)\n"
             "  *Refuse* ─ Knocker sees occupants\n"
             "  *Expires* ─ OS notified in RC\n"
@@ -2666,7 +3058,8 @@ class Other(commands.Cog):
         embedm.add_field(name="PC & Misc", value=(
             "**`.pcadd #PC`** ─ Add player to PC/renamed house\n"
             "**`.pcremove #PC`** ─ Remove from PC/renamed house\n"
-            "**`.addhere #RC`** ─ Add RC's player to this channel"
+            "**`.addhere #RC`** ─ Add RC's player to this channel\n"
+            "**`.addspons @sponsor #rc`** ─ Add a sponsor directly to a rolechat"
         ), inline=False)
         embedm.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedm, self.help_moving)
@@ -2678,7 +3071,9 @@ class Other(commands.Cog):
             "**`.home stealth`** ─ Bring the player home silently (no join/leave messages)\n"
             "**`.home return`** ─ Bring all players home\n"
             "**`.leaveonlyhomes`** ─ Remove all players in this RC from houses (not PCs)\n"
-            "**`.owner`** ─ List house owners"
+            "**`.owner`** ─ List house owners\n"
+            "**`.owned`** ─ In a Role Chat: show the house(s) owned by the player(s) there\n"
+            "**`.whorc [@player]`** ─ Show the RoleChats you can send in, and who is in each (staff can check another player)\n"
         ), inline=False)
         embedh.add_field(name="Admin Commands", value=(
             "**`.home initialize`** ─ Assign RC + house to alive players\n"
@@ -2688,8 +3083,8 @@ class Other(commands.Cog):
             "**`.home list`** ─ List all players' homes\n"
             "**`.home delete @player`** ─ Make a player homeless\n"
             "━━━━━━━━━━━━━━━━\n"
-            "**`.rolechat initialize`** ─ Assign RCs only (no houses)\n"
-            "**`.rolechat check`** ─ List all RCs and their players"
+            "**`.rolechat initialize`** ─ Rebuild RCs, one alive player each\n"
+            "**`.rolechat list`** ─ List all RCs with their players + sponsors (alias `.rolechat lynch`)"
         ), inline=False)
         embedh.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedh, self.help_home)
@@ -2748,13 +3143,16 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedpres, self.help_presets)
 
     async def help_voting(self, ctx):
-        embedv = discord.Embed(title="🗳️ - Voting commands", description="12 commands", color=0xff3fb9)
+        embedv = discord.Embed(title="🗳️ - Voting commands", description="14 commands", color=0xff3fb9)
         embedv.add_field(name="Voting", value=(
             "**`.vote @player`** ─ Vote or change your vote\n"
             "**`.abstain`** ─ Abstain from voting\n"
             "**`.manipulate @target @vote`** ─ Manipulate a player's vote\n"
             "**`.removevote @player`** ─ Remove a player's vote\n"
             "**`.skipnight <min_votes> [text]`** ─ Start skip-night vote (custom title optional)\n"
+            "**`.pick [cap=#] [time=1m] <Title>, <Option> ...`** ─ Anonymous multi-option vote in this channel (Overseer)\n"
+            "  One vote per player, switched by voting again. `cap=N` = votes needed, `time=1m/90s` = closes voting\n"
+            "**`.pickvoters <message_id>`** ─ Reveal who voted on a pick poll (admin)\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.votelist`** ─ Show all current votes\n"
             "**`.resetvotes`** ─ Reset all votes\n"
@@ -2765,6 +3163,9 @@ class Other(commands.Cog):
         ), inline=False)
         embedv.add_field(name="Voting in RCs", value=(
             "**`.voteinrc true/false`** ─ Enable voting in RoleChats\n\n"
+            "**`.remvote @player`** ─ Remove all votes by and on a player across lynch sessions\n"
+            "**`.skipnightvoters <msg>`** ─ Show who voted on a skip-night vote (admin)\n"
+            "**`.execution @player`** ─ Start a public execution vote for a player (admin)\n"
             "When enabled, players vote in their RC. Append the session channel "
             "(e.g. `#lynch-session-1`) to specify vote type; defaults to "
             "#lynch-session-1 if omitted."
@@ -2801,7 +3202,9 @@ class Other(commands.Cog):
             "**`.playerlist`** ─ List alive members\n"
             "**`.sponsorlist`** ─ List sponsor members\n"
             "**`.houselist`** ─ List visitable houses\n"
-            "**`.deadlist`** ─ List dead players and their roles"
+            "**`.rollhouses`** / **`.rh <num>`** ─ Pick random houses from the list\n"
+            "**`.rollhouse`** [#house] <num|all> ─ Roll random alive members from a house\n"
+            "**`.deadlist`** ─ Show dead players & their roles"
         ), inline=False)
         embedu.add_field(name="Admin Commands", value=(
             "**`.setuphouselist`** ─ Init houselist from existing houses\n"
@@ -2832,7 +3235,7 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedsendrole, self.help_sendrole)
 
     async def help_download(self, ctx):
-        embedd = discord.Embed(title="⬇️ - Downloads", description="3 commands", color=0xff3fb9)
+        embedd = discord.Embed(title="⬇️ - Downloads", description="4 commands", color=0xff3fb9)
         embedd.add_field(name="Download", value=(
             "**`.dl`** ─ Reply to a link, download the media and send it here\n"
             "  YouTube, Spotify tracks, and other providers\n"
@@ -2840,17 +3243,36 @@ class Other(commands.Cog):
             "**`.dsplit <N>`** ─ Download and split evenly into **N** equal "
             "parts (no number = minimum parts that fit Discord's upload limit)\n"
             "  Too big for one file? It reports the size vs. this server's limit "
-            "and offers to send the first chunk that fits."
+            "and offers to send the first chunk that fits.\n"
+            "**`.dclip <start> [end] [N]`** ─ Reply to a link and cut out only "
+            "a timestamp range, e.g. `.dclip 1:30 2:45` = 1:30 to 2:45\n"
+            "  Timestamps take `90`, `1:30` or `1:02:03`; leave the end off to go "
+            "to the finish. Add **N** to split the clip too, e.g. `.dclip 1:30 2:45 3`"
         ), inline=False)
         embedd.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embedd, self.help_download)
 
     async def help_utility(self, ctx):
-        embedu = discord.Embed(title="⚙️ - Utility", description="28 commands", color=0xff3fb9)
+        embedu = discord.Embed(title="⚙️ - Utility", description="32 commands", color=0xff3fb9)
         embedu.add_field(name="General", value=(
             "**`.day`** ─ Unlock all day channels\n"
             "**`.night`** ─ Lock all day channels\n"
+            "**`.daywf`** ─ Unlock the Future region's day channels\n"
+            "**`.nightwf`** ─ Lock the Future region's day channels\n"
+            "**`.daywp`** ─ Unlock the Past region's day channels\n"
+            "**`.nightwp`** ─ Lock the Past region's day channels\n"
             "**`.broom`** ─ Delete replied-to messages (logs kept)\n"
+            "**`.pins`** ─ Reorder or delete pinned messages (Manage Messages)\n"
+            "**`.unpinall [#channel]`** ─ Remove every pin from a channel after confirming\n"
+            "**`.fbroom`** ─ Force-delete messages including pinned ones (logs kept)\n"
+            "**`.firstpin [count] [#ch]`** ─ Show the oldest pinned message(s) as embeds\n"
+            "**`.channelstats`** ─ [Admin] Channel count per category, with names on demand\n"
+            "**`.actionstats`** ─ Show action completion counters\n"
+            "**`.kill`** ─ Log a kill attribution (Overseer only)\n"
+            "**`.kills`** ─ View the kill log (admin)\n"
+            "**`.killremove <n>`** ─ Remove a kill log entry by number (admin)\n"
+        ), inline=False)
+        embedu.add_field(name="Utility (cont.)", value=(
             "**`.log <count> [#source] [#dest]`** ─ Export messages to a text file\n"
             "**`.housecheck [hours]`** ─ List quiet houses (default 24h)\n"
             "━━━━━━━━━━━━━━━━\n"
@@ -2865,7 +3287,7 @@ class Other(commands.Cog):
         ), inline=False)
         embedu.add_field(name="Admin — Roles & Perms", value=(
             "**`.addrole @role @users...`** ─ Give role to members\n"
-            "**`.removerole <role> <member>`** ─ Remove role (admin)\n"
+            "**`.removerole <role> <member...>`** ─ Remove role from members (admin)\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.addcategoryperms @role <cat> <perm>`** ─ R=Read, S=Send\n"
             "**`.addchannelperms @role #ch <perm>`** ─ R=Read, S=Send"
@@ -2873,13 +3295,14 @@ class Other(commands.Cog):
         embedu.add_field(name="Admin — Game & Tracking", value=(
             "**`.endgame`** ─ Unlock all channels post-game\n"
             "**`.statss`** ─ Message counts by role priority\n"
-            "**`.serverstats`** ─ Server-wide counts (excl. RCs)\n"
+            "**`.serverstats [laps|lap <label>|total]`** ─ Server-wide counts (excl. RCs)\n"
+            "↳ `lap day1` (label required) asks for confirmation, then saves and resets\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.setmessagetracking`** ─ Enable/disable tracking\n"
             "**`.start_tracking`** ─ Start message tracking\n"
             "**`.stop_tracking`** ─ Stop/pause tracking\n"
             "**`.reset_tracking`** ─ Reset message counts\n"
-            "**`.resetservstats`** ─ Reset server-wide counts"
+            "**`.resetservstats [true]`** ─ Reset current counts (true = also laps)"
         ), inline=False)
         embedu.add_field(name="Auto-Visit", value=(
             "**`.autovisits`** ─ Toggle auto-visit system\n"
@@ -2894,13 +3317,20 @@ class Other(commands.Cog):
         await self.send_help_page(ctx, embedu, self.help_utility)
 
     async def help_other(self, ctx):
-        embedo = discord.Embed(title="👽 - Other", description="43 commands", color=0xff3fb9)
+        embedo = discord.Embed(title="👽 - Other", description="45 commands", color=0xff3fb9)
         embedo.add_field(name="General", value=(
             "**`.help`** ─ Show this menu\n"
+            "**`.help2`** ─ Show additional command categories\n"
+            "**`.phelp`** ─ Show commands regular players can use\n"
+            "**`.searchhelp <keyword>`** ─ Search all commands by keyword\n"
+            "**`.fmbot`** ─ Show Last.fm bot commands by category\n"
+        ), inline=False)
+        embedo.add_field(name="Other (cont.)", value=(
             "**`.who #ch`** ─ List players in a channel\n"
             "**`.where #RC`** ─ Show a player's current location (staff only, reply `yes`)\n"
+            "**`.housewho [#house|#RC]`** ─ Show your house and who is inside it\n"
             "**`.map`** ─ Show the game map\n"
-            "**`.role`/`.firstpin`** ─ Show registered package or first pinned message\n"
+            "**`.role`/`.firstpin [1-10] [#ch]`** ─ Show registered package or merge the first n pinned messages\n"
             "**`.role register <1-4> <role name>`** ─ Register a Role Package\n"
             "**`.role registercard [message_id]`** ─ Register a Role Card\n"
             "**`.firstmsg [#ch]`** ─ Show first message in current channel (#ch needs admin)\n"
@@ -2908,11 +3338,16 @@ class Other(commands.Cog):
             "━━━━━━━━━━━━━━━━\n"
             "**`.ping`** ─ Bot online check\n"
             "**`.ding`** ─ Dong!\n"
-            "**`.line`/`.banner [lines] [title]`** ─ Draw a clean divider banner"
+            "**`.avatar [@member]`** ─ Show your own avatar (or someone else's)\n"
+            "**`.line`/`.banner [lines] [title]`** ─ Draw a clean divider banner (admin)\n"
+            "**`.askos <question>`** ─ Ask the Overseers from an RC, Dead RC or Alt\n"
+            "**`.react <1-10 | word>`** ─ React to a replied message (admin/OS). "
+            "Words spell out; repeats use lookalikes (E→3, L→1, O→0)"
         ), inline=False)
         embedo.add_field(name="Narration", value=(
             "**`.narrate #ch <msg>`** ─ Send narration to channels\n"
             "**`.narration`/`.n <text>`** ─ Storybook embed (admin, pings)\n"
+            "**`.np <text>`** ─ Same as `.n` but without pinning (admin)\n"
             "**`.anarration`/`.na <text>`** ─ Silent narration (admin)\n"
             "**`.narrationcolor`** ─ Pick embed color (admin)"
         ), inline=False)
@@ -2935,7 +3370,7 @@ class Other(commands.Cog):
             "**`.timer <time> [tag] [#ch]`** ─ Set a timer (1h2m10s)\n"
             "━━━━━━━━━━━━━━━━\n"
             "**`.deletechannel`** ─ Delete this channel (admin)\n"
-            "**`.deletecategory`** ─ Delete this category (admin)\n"
+            "**`.deletecategory [category]`** ─ Delete a category + all its channels (admin)\n"
             "**`.timestamp <DD-MM> <HH:MM>`** ─ Gen timestamp with timezone picker\n"
             "**`.time`** ─ Get sent time of replied-to message\n"
             "**`.dropitem`** ─ Drop interactive item (see docs)\n"
@@ -2986,7 +3421,7 @@ class Other(commands.Cog):
             "**`.buy <item> [qty]`** ─ Buy from shop (default qty=1)\n"
             "**`.sell`/`.sell-item <item>`** ─ Sell for 50% refund\n"
             "**`.inv`/`.inventory [#ch]`** ─ View RC inventory\n"
-            "**`.give @user <amt>`** ─ Give RC coins (in houses)\n"
+            "**`.give @user <amt | item [qty|all]>`** ─ Give RC coins, or items to a player in the same house\n"
             "**`.give-money @user <amt>`** ─ Transfer RC coins to another player\n"
             "**`.trade @user <item> [qty]`** ─ Give items to another player\n"
             "**`.use <item>`** ─ Use an item from inventory"
@@ -3002,8 +3437,10 @@ class Other(commands.Cog):
             "**`.addmoney #ch <amt>`** ─ Add coins to RC\n"
             "**`.removemoney #ch <amt>`** ─ Remove coins from RC\n"
             "**`.add-money-role @role <amt>`** ─ Add RC coins by role\n"
+            "**`.remove-money-role @role <amt>`** ─ Remove RC coins by role\n"
             "**`.additemrole @role <item> <qty>`** ─ Give items by role\n"
             "━━━━━━━━━━━━━━━━\n"
+            "**`.sellshop on|off`** ─ Turn shop selling on or off\n"
             "**`.giveitem @user <item> [qty]`** ─ Give items to a player\n"
             "**`.removeitemplayer`/`.rip @user <item> [qty]`** ─ Remove items from a player\n"
             "**`.reseteconomy [amt]`** ─ Reset all balances (default 0)\n"
@@ -3018,7 +3455,8 @@ class Other(commands.Cog):
             "✉ **Whisper** ─ Send anonymous private message\n"
             "🧹 **Broom** ─ Clear recent messages in a channel\n"
             "📜 **Will** ─ Notify OS to pin your last will\n"
-            "🔭 **Peep Hole** ─ See who knocks on your target house"
+            "🔭 **Peep Hole** ─ See who knocks on your target house\n"
+            "🔒 **Private PC** ─ Open a private channel with an alive player and all sponsors (`.use private pc`)"
         ), inline=False)
         embede.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embede, self.help_economy)
@@ -3101,7 +3539,7 @@ class Other(commands.Cog):
             "**`.gamesearch <conds>`** ─ Search games by team stats, outcomes & role counts — e.g. `Village > 69% AND Evil > 22% AND RK Win` or `VillageCount > 15 AND Players > 25`\n"
             "**`.gamesearchn <conds>`** ─ Same search with percentages excluding Neutral roles (role counts stay the same)\n"
             "**`.gamesearch`** *(no query)* ─ Prints the full usage reference: teams, % conditions, Win/Lose & the count variables `VillageCount`, `EvilCount`, `RKCount`, `NeutralCount`, `Players`*\n"
-            "**`.relations [@user]`** ─ Allies and nemeses"
+            "**`.relations [@user]`** ─ Allies and nemeses (with `@user`: also a **Games Together** button listing every game you both played)"
         ), inline=False)
         embed.add_field(name="Library — Browse & Manage", value=(
             "**`.lib`** ─ Browse the game library\n"

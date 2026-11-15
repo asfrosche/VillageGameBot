@@ -17,8 +17,8 @@ class TestHome:
     def test_home_has_help(self):
         """Verify home command has help text."""
         method = getattr(home_cog.Home, 'home')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_rolechat_exists(self):
         """Verify rolechat command exists on the cog."""
@@ -27,8 +27,8 @@ class TestHome:
     def test_rolechat_has_help(self):
         """Verify rolechat command has help text."""
         method = getattr(home_cog.Home, 'rolechat')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_owner_exists(self):
         """Verify owner command exists on the cog."""
@@ -37,5 +37,5 @@ class TestHome:
     def test_owner_has_help(self):
         """Verify owner command has help text."""
         method = getattr(home_cog.Home, 'owner')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

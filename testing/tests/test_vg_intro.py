@@ -17,8 +17,8 @@ class TestVgIntro:
     def test_vgintro_has_help(self):
         """Verify vgintro command has help text."""
         method = getattr(vg_intro.VgIntro, 'vgintro')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_vgintro_it_exists(self):
         """Verify vgintro_it command exists on the cog."""
@@ -27,15 +27,7 @@ class TestVgIntro:
     def test_vgintro_it_has_help(self):
         """Verify vgintro_it command has help text."""
         method = getattr(vg_intro.VgIntro, 'vgintro_it')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_mechanicsview_instantiates(self):
-        """Verify MechanicsView view can be instantiated."""
-        # MechanicsView — requires cog/bot context to instantiate
-        pass
 
-    def test_mechanicsindexview_instantiates(self):
-        """Verify MechanicsIndexView view can be instantiated."""
-        # MechanicsIndexView — requires cog/bot context to instantiate
-        pass

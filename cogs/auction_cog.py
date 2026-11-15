@@ -455,9 +455,13 @@ class AuctionCog(commands.Cog):
         if not self._is_alive(ctx.author, guild_data) and not self._is_overseer_or_admin(ctx.author, guild_data):
             await ctx.send("Only Alive players can open an auction.")
             return
-        if self.auctions.get(ctx.guild.id) is not None:
+        existing = self.auctions.get(ctx.guild.id)
+        if existing is not None and existing.status == "open":
             await ctx.send("An auction is already open in this server.")
             return
+        if existing is not None and existing.status != "open":
+            self.auctions.pop(ctx.guild.id, None)
+            self.board_views.pop(ctx.guild.id, None)
 
         parts = args.strip().split()
         if len(parts) < 2:
@@ -542,9 +546,11 @@ class AuctionCog(commands.Cog):
             return
         auction = self.auctions.get(ctx.guild.id)
         if auction is None or auction.status != "open":
-            await ctx.send("There is no open auction.")
+            await ctx.send("There is no open auction to close.")
             return
         await self._resolve_auction(auction, ctx.guild)
+        self.auctions.pop(ctx.guild.id, None)
+        self.board_views.pop(ctx.guild.id, None)
         await ctx.send("Auction closed.")
 
     @auc.command(name="cancel")
@@ -555,8 +561,8 @@ class AuctionCog(commands.Cog):
             await ctx.send("Overseer permission required.")
             return
         auction = self.auctions.get(ctx.guild.id)
-        if auction is None:
-            await ctx.send("There is no auction to cancel.")
+        if auction is None or auction.status != "open":
+            await ctx.send("There is no open auction to cancel.")
             return
         for pid, held in list(auction.reserved.items()):
             if held > 0:
@@ -568,6 +574,8 @@ class AuctionCog(commands.Cog):
         auction.status = "cancelled"
         delete_live_auction(auction.guild_id)
         await self._refresh_board(auction)
+        self.auctions.pop(ctx.guild.id, None)
+        self.board_views.pop(ctx.guild.id, None)
         await ctx.send(embed=info_embed(title="❌ Auction Cancelled", description=f"**{auction.item}** was cancelled. All escrowed bids were refunded.", timestamp=False))
 
     @auc.command(name="alias")
@@ -638,6 +646,8 @@ class AuctionCog(commands.Cog):
                         description=f"**{auction.item}** closed with no qualifying bids. Nothing was charged.",
                     )
                 )
+            self.auctions.pop(auction.guild_id, None)
+            self.board_views.pop(auction.guild_id, None)
             return
 
         paid_note = ""
@@ -671,6 +681,8 @@ class AuctionCog(commands.Cog):
                     f"{winner['alias']} (revealed){paid_note}{overlay}",
                 )
             )
+        self.auctions.pop(auction.guild_id, None)
+        self.board_views.pop(auction.guild_id, None)
 
     @commands.group(name="aucset", aliases=["auctionconfig"], invoke_without_command=True)
     async def aucset(self, ctx: commands.Context):

@@ -17,8 +17,8 @@ class TestUtility:
     def test_broom_has_help(self):
         """Verify broom command has help text."""
         method = getattr(utility_cog.Utility, 'broom')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_housecheck_exists(self):
         """Verify housecheck command exists on the cog."""
@@ -27,8 +27,8 @@ class TestUtility:
     def test_housecheck_has_help(self):
         """Verify housecheck command has help text."""
         method = getattr(utility_cog.Utility, 'housecheck')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_log_exists(self):
         """Verify log command exists on the cog."""
@@ -37,8 +37,8 @@ class TestUtility:
     def test_log_has_help(self):
         """Verify log command has help text."""
         method = getattr(utility_cog.Utility, 'log')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_day_exists(self):
         """Verify day command exists on the cog."""
@@ -47,8 +47,8 @@ class TestUtility:
     def test_day_has_help(self):
         """Verify day command has help text."""
         method = getattr(utility_cog.Utility, 'day')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_night_exists(self):
         """Verify night command exists on the cog."""
@@ -57,8 +57,8 @@ class TestUtility:
     def test_night_has_help(self):
         """Verify night command has help text."""
         method = getattr(utility_cog.Utility, 'night')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_whisper_exists(self):
         """Verify whisper command exists on the cog."""
@@ -67,8 +67,8 @@ class TestUtility:
     def test_whisper_has_help(self):
         """Verify whisper command has help text."""
         method = getattr(utility_cog.Utility, 'whisper')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_switch_exists(self):
         """Verify switch command exists on the cog."""
@@ -77,8 +77,8 @@ class TestUtility:
     def test_switch_has_help(self):
         """Verify switch command has help text."""
         method = getattr(utility_cog.Utility, 'switch')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_dead_exists(self):
         """Verify dead command exists on the cog."""
@@ -87,8 +87,8 @@ class TestUtility:
     def test_dead_has_help(self):
         """Verify dead command has help text."""
         method = getattr(utility_cog.Utility, 'dead')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deadc_exists(self):
         """Verify deadc command exists on the cog."""
@@ -97,8 +97,8 @@ class TestUtility:
     def test_deadc_has_help(self):
         """Verify deadc command has help text."""
         method = getattr(utility_cog.Utility, 'deadc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deadrole_exists(self):
         """Verify deadrole command exists on the cog."""
@@ -107,8 +107,8 @@ class TestUtility:
     def test_deadrole_has_help(self):
         """Verify deadrole command has help text."""
         method = getattr(utility_cog.Utility, 'deadrole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addrole_exists(self):
         """Verify addrole command exists on the cog."""
@@ -117,8 +117,8 @@ class TestUtility:
     def test_addrole_has_help(self):
         """Verify addrole command has help text."""
         method = getattr(utility_cog.Utility, 'addrole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removerole_exists(self):
         """Verify removerole command exists on the cog."""
@@ -127,8 +127,8 @@ class TestUtility:
     def test_removerole_has_help(self):
         """Verify removerole command has help text."""
         method = getattr(utility_cog.Utility, 'removerole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addchannelperms_exists(self):
         """Verify addchannelperms command exists on the cog."""
@@ -137,8 +137,8 @@ class TestUtility:
     def test_addchannelperms_has_help(self):
         """Verify addchannelperms command has help text."""
         method = getattr(utility_cog.Utility, 'addchannelperms')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addcategoryperms_exists(self):
         """Verify addcategoryperms command exists on the cog."""
@@ -147,8 +147,8 @@ class TestUtility:
     def test_addcategoryperms_has_help(self):
         """Verify addcategoryperms command has help text."""
         method = getattr(utility_cog.Utility, 'addcategoryperms')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_endgame_exists(self):
         """Verify endgame command exists on the cog."""
@@ -157,8 +157,8 @@ class TestUtility:
     def test_endgame_has_help(self):
         """Verify endgame command has help text."""
         method = getattr(utility_cog.Utility, 'endgame')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_skipnight_exists(self):
         """Verify skipnight command exists on the cog."""
@@ -167,10 +167,6 @@ class TestUtility:
     def test_skipnight_has_help(self):
         """Verify skipnight command has help text."""
         method = getattr(utility_cog.Utility, 'skipnight')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_skipnightview_instantiates(self):
-        """Verify SkipNightView view can be instantiated."""
-        # SkipNightView — requires cog/bot context to instantiate
-        pass

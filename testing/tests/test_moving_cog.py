@@ -17,8 +17,8 @@ class TestMoving:
     def test_add_has_help(self):
         """Verify add command has help text."""
         method = getattr(moving_cog.Moving, 'add')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_pcadd_exists(self):
         """Verify pcadd command exists on the cog."""
@@ -27,8 +27,8 @@ class TestMoving:
     def test_pcadd_has_help(self):
         """Verify pcadd command has help text."""
         method = getattr(moving_cog.Moving, 'pcadd')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addhere_exists(self):
         """Verify addhere command exists on the cog."""
@@ -37,8 +37,8 @@ class TestMoving:
     def test_addhere_has_help(self):
         """Verify addhere command has help text."""
         method = getattr(moving_cog.Moving, 'addhere')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_remove_exists(self):
         """Verify remove command exists on the cog."""
@@ -47,8 +47,8 @@ class TestMoving:
     def test_remove_has_help(self):
         """Verify remove command has help text."""
         method = getattr(moving_cog.Moving, 'remove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_pcremove_exists(self):
         """Verify pcremove command exists on the cog."""
@@ -57,8 +57,8 @@ class TestMoving:
     def test_pcremove_has_help(self):
         """Verify pcremove command has help text."""
         method = getattr(moving_cog.Moving, 'pcremove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_move_exists(self):
         """Verify move command exists on the cog."""
@@ -67,8 +67,8 @@ class TestMoving:
     def test_move_has_help(self):
         """Verify move command has help text."""
         method = getattr(moving_cog.Moving, 'move')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_renmove_exists(self):
         """Verify renmove command exists on the cog."""
@@ -77,8 +77,8 @@ class TestMoving:
     def test_renmove_has_help(self):
         """Verify renmove command has help text."""
         method = getattr(moving_cog.Moving, 'renmove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_knock_exists(self):
         """Verify knock command exists on the cog."""
@@ -87,8 +87,8 @@ class TestMoving:
     def test_knock_has_help(self):
         """Verify knock command has help text."""
         method = getattr(moving_cog.Moving, 'knock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_renknock_exists(self):
         """Verify renknock command exists on the cog."""
@@ -97,8 +97,8 @@ class TestMoving:
     def test_renknock_has_help(self):
         """Verify renknock command has help text."""
         method = getattr(moving_cog.Moving, 'renknock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_pendingknock_exists(self):
         """Verify pendingknock command exists on the cog."""
@@ -107,5 +107,5 @@ class TestMoving:
     def test_pendingknock_has_help(self):
         """Verify pendingknock command has help text."""
         method = getattr(moving_cog.Moving, 'pendingknock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

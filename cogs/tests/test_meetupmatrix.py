@@ -17,8 +17,8 @@ class TestMeetup:
     def test_setup_meetup_matrix_has_help(self):
         """Verify setup_meetup_matrix command has help text."""
         method = getattr(meetupmatrix.Meetup, 'setup_meetup_matrix')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setphase_exists(self):
         """Verify setphase command exists on the cog."""
@@ -27,8 +27,8 @@ class TestMeetup:
     def test_setphase_has_help(self):
         """Verify setphase command has help text."""
         method = getattr(meetupmatrix.Meetup, 'setphase')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_forcemeet_exists(self):
         """Verify forcemeet command exists on the cog."""
@@ -37,8 +37,8 @@ class TestMeetup:
     def test_forcemeet_has_help(self):
         """Verify forcemeet command has help text."""
         method = getattr(meetupmatrix.Meetup, 'forcemeet')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_allmeets_exists(self):
         """Verify allmeets command exists on the cog."""
@@ -47,8 +47,8 @@ class TestMeetup:
     def test_allmeets_has_help(self):
         """Verify allmeets command has help text."""
         method = getattr(meetupmatrix.Meetup, 'allmeets')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_meetupmatrix_exists(self):
         """Verify meetupmatrix command exists on the cog."""
@@ -57,5 +57,5 @@ class TestMeetup:
     def test_meetupmatrix_has_help(self):
         """Verify meetupmatrix command has help text."""
         method = getattr(meetupmatrix.Meetup, 'meetupmatrix')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

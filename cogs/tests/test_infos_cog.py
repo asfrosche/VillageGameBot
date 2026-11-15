@@ -17,5 +17,5 @@ class TestInfos:
     def test_info_has_help(self):
         """Verify info command has help text."""
         method = getattr(infos_cog.Infos, 'info')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

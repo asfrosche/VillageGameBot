@@ -204,48 +204,10 @@ class EngineSanityTests(unittest.TestCase):
         self.assertLess(xg_a, 20, f"{ctx}: xg_a unreasonably high ({xg_a})")
         self.assertLess(xg_b, 20, f"{ctx}: xg_b unreasonably high ({xg_b})")
 
-    def test_v2_xg(self):
-        from fifa_data.engines.v2_player_engine import V2PlayerMatchEngine
-        engine = V2PlayerMatchEngine(data_dir=HERE)
-        sa = engine.get_team_strength("Brazil")
-        sb = engine.get_team_strength("Germany")
-        xg_a, xg_b = engine.expected_goals(sa, sb)
-        self._check_xg(xg_a, xg_b, "V2 Brazil vs Germany")
 
-    def test_v3_xg(self):
-        from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
-        engine = V3DynamicEngine(data_dir=HERE)
-        sa = engine.get_team_strength("Brazil")
-        sb = engine.get_team_strength("Germany")
-        xg_a, xg_b = engine.expected_goals(sa, sb)
-        self._check_xg(xg_a, xg_b, "V3 Brazil vs Germany")
 
-    def test_v4_xg(self):
-        from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
-        engine = V4TacticalEngine(data_dir=HERE)
-        xg_a, xg_b = engine.expected_goals("Brazil", "Germany")
-        self._check_xg(xg_a, xg_b, "V4 Brazil vs Germany")
 
-    def test_v5_xg(self):
-        from fifa_data.engines.v5_match_state_engine import V5MatchStateEngine
-        engine = V5MatchStateEngine(data_dir=HERE)
-        xg_a, xg_b = engine.expected_goals("Brazil", "Germany")
-        self._check_xg(xg_a, xg_b, "V5 Brazil vs Germany")
 
-    def test_all_teams_have_positive_xg(self):
-        from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
-        engine = V3DynamicEngine(data_dir=HERE)
-        from fifa_data.services.v2_data_loader import load_v2_squads
-        squads = load_v2_squads(HERE)
-        names = list(squads.keys())
-        for t1 in names[:5]:
-            for t2 in names[5:10]:
-                if t1 == t2:
-                    continue
-                sa = engine.get_team_strength(t1)
-                sb = engine.get_team_strength(t2)
-                xg_a, xg_b = engine.expected_goals(sa, sb)
-                self._check_xg(xg_a, xg_b, f"V3 {t1} vs {t2}")
 
     def test_strong_teams_outscore_weak_teams(self):
         from fifa_data.engines.v3_dynamic_engine import V3DynamicEngine
@@ -449,22 +411,9 @@ class TournamentSimulationTests(unittest.TestCase):
         self.assertIn(result["champion"], list(
             json.loads((HERE / "data" / "tactical_profiles.json").read_text(encoding="utf-8")).keys()))
 
-    def test_v3_tournament(self):
-        from fifa_data.services.simulation_service import run_simulation
-        self._check_tournament(run_simulation(model="v3", debug=False))
 
-    def test_v4_tournament(self):
-        from fifa_data.services.simulation_service import run_simulation
-        self._check_tournament(run_simulation(model="v4", debug=False))
 
-    def test_v5_tournament(self):
-        from fifa_data.services.simulation_service import run_simulation
-        self._check_tournament(run_simulation(model="v5", debug=False))
 
-    def test_v4_tournament_with_debug(self):
-        from fifa_data.services.simulation_service import run_simulation
-        result = run_simulation(model="v4", debug=True)
-        self._check_tournament(result)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

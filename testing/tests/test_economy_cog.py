@@ -17,8 +17,8 @@ class TestEconomy:
     def test_balance_has_help(self):
         """Verify balance command has help text."""
         method = getattr(economy_cog.Economy, 'balance')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_collect_exists(self):
         """Verify collect command exists on the cog."""
@@ -27,8 +27,8 @@ class TestEconomy:
     def test_collect_has_help(self):
         """Verify collect command has help text."""
         method = getattr(economy_cog.Economy, 'collect')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setcollect_exists(self):
         """Verify setcollect command exists on the cog."""
@@ -37,8 +37,8 @@ class TestEconomy:
     def test_setcollect_has_help(self):
         """Verify setcollect command has help text."""
         method = getattr(economy_cog.Economy, 'setcollect')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_shop_exists(self):
         """Verify shop command exists on the cog."""
@@ -47,8 +47,8 @@ class TestEconomy:
     def test_shop_has_help(self):
         """Verify shop command has help text."""
         method = getattr(economy_cog.Economy, 'shop')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_buy_exists(self):
         """Verify buy command exists on the cog."""
@@ -57,8 +57,8 @@ class TestEconomy:
     def test_buy_has_help(self):
         """Verify buy command has help text."""
         method = getattr(economy_cog.Economy, 'buy')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_inventory_exists(self):
         """Verify inventory command exists on the cog."""
@@ -67,8 +67,8 @@ class TestEconomy:
     def test_inventory_has_help(self):
         """Verify inventory command has help text."""
         method = getattr(economy_cog.Economy, 'inventory')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_give_exists(self):
         """Verify give command exists on the cog."""
@@ -77,8 +77,8 @@ class TestEconomy:
     def test_give_has_help(self):
         """Verify give command has help text."""
         method = getattr(economy_cog.Economy, 'give')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_additem_exists(self):
         """Verify additem command exists on the cog."""
@@ -87,8 +87,8 @@ class TestEconomy:
     def test_additem_has_help(self):
         """Verify additem command has help text."""
         method = getattr(economy_cog.Economy, 'additem')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_edititem_exists(self):
         """Verify edititem command exists on the cog."""
@@ -97,8 +97,8 @@ class TestEconomy:
     def test_edititem_has_help(self):
         """Verify edititem command has help text."""
         method = getattr(economy_cog.Economy, 'edititem')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_delitem_exists(self):
         """Verify delitem command exists on the cog."""
@@ -107,8 +107,8 @@ class TestEconomy:
     def test_delitem_has_help(self):
         """Verify delitem command has help text."""
         method = getattr(economy_cog.Economy, 'delitem')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_reset_economy_exists(self):
         """Verify reset_economy command exists on the cog."""
@@ -117,8 +117,8 @@ class TestEconomy:
     def test_reset_economy_has_help(self):
         """Verify reset_economy command has help text."""
         method = getattr(economy_cog.Economy, 'reset_economy')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_clear_inventory_exists(self):
         """Verify clear_inventory command exists on the cog."""
@@ -127,8 +127,8 @@ class TestEconomy:
     def test_clear_inventory_has_help(self):
         """Verify clear_inventory command has help text."""
         method = getattr(economy_cog.Economy, 'clear_inventory')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addmoney_exists(self):
         """Verify addmoney command exists on the cog."""
@@ -137,8 +137,8 @@ class TestEconomy:
     def test_addmoney_has_help(self):
         """Verify addmoney command has help text."""
         method = getattr(economy_cog.Economy, 'addmoney')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removemoney_exists(self):
         """Verify removemoney command exists on the cog."""
@@ -147,8 +147,8 @@ class TestEconomy:
     def test_removemoney_has_help(self):
         """Verify removemoney command has help text."""
         method = getattr(economy_cog.Economy, 'removemoney')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_give_money_exists(self):
         """Verify give_money command exists on the cog."""
@@ -157,8 +157,8 @@ class TestEconomy:
     def test_give_money_has_help(self):
         """Verify give_money command has help text."""
         method = getattr(economy_cog.Economy, 'give_money')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_sell_item_exists(self):
         """Verify sell_item command exists on the cog."""
@@ -167,8 +167,8 @@ class TestEconomy:
     def test_sell_item_has_help(self):
         """Verify sell_item command has help text."""
         method = getattr(economy_cog.Economy, 'sell_item')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_add_money_role_exists(self):
         """Verify add_money_role command exists on the cog."""
@@ -177,8 +177,8 @@ class TestEconomy:
     def test_add_money_role_has_help(self):
         """Verify add_money_role command has help text."""
         method = getattr(economy_cog.Economy, 'add_money_role')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_leaderboard_exists(self):
         """Verify leaderboard command exists on the cog."""
@@ -187,8 +187,8 @@ class TestEconomy:
     def test_leaderboard_has_help(self):
         """Verify leaderboard command has help text."""
         method = getattr(economy_cog.Economy, 'leaderboard')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_use_item_exists(self):
         """Verify use_item command exists on the cog."""
@@ -197,8 +197,8 @@ class TestEconomy:
     def test_use_item_has_help(self):
         """Verify use_item command has help text."""
         method = getattr(economy_cog.Economy, 'use_item')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_additemrole_exists(self):
         """Verify additemrole command exists on the cog."""
@@ -207,8 +207,8 @@ class TestEconomy:
     def test_additemrole_has_help(self):
         """Verify additemrole command has help text."""
         method = getattr(economy_cog.Economy, 'additemrole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removeitem_exists(self):
         """Verify removeitem command exists on the cog."""
@@ -217,8 +217,8 @@ class TestEconomy:
     def test_removeitem_has_help(self):
         """Verify removeitem command has help text."""
         method = getattr(economy_cog.Economy, 'removeitem')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_confirmview_defined(self):
         """Verify ConfirmView view is defined in the module."""

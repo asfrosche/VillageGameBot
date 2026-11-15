@@ -125,7 +125,8 @@ Some files exist in the repo but are **not loaded** by the running bot. They are
 |---|---|
 | `cogs/other_cog.py` | 100% commented-out legacy copy of `help_misc_cog`. Not loaded. |
 | `cogs/auto_visit_cog.py` | Feature-complete auto-visit scheduling cog (`AutoVisit`). **Not loaded** in `main.py`. |
-| `cogs/track_stalk_utils.py` | Orphaned utility; tests assert it should not exist. |
+| `cogs/track_stalk_utils.py` | Removed. Was a stale duplicate of `after_movement_update`, which now lives in `cogs/surveillance_cog.py` (all 12 call sites import it from there). A guard test keeps it from returning. |
+| `cogs/dashboard_cog.py` | **Not loaded** in `main.py` (disabled). ~9 help entries still advertise its commands. |
 | `.senet` / `.soldiers` | Advertised in the help index but the cog modules are not present in this release. |
 
 ---

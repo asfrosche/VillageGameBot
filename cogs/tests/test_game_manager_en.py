@@ -70,28 +70,12 @@ class TestGameManagerEn:
     def test_calendar_cmd_has_help(self):
         """Verify calendar_cmd command has help text."""
         method = getattr(game_manager_en.GameManagerEn, 'calendar_cmd')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_addgamewizardview_instantiates(self):
-        """Verify AddGameWizardView view can be instantiated."""
-        # AddGameWizardView — requires cog/bot context to instantiate
-        pass
 
-    def test_calendarview_instantiates(self):
-        """Verify CalendarView view can be instantiated."""
-        # CalendarView — requires cog/bot context to instantiate
-        pass
 
-    def test_gamedetailview_instantiates(self):
-        """Verify GameDetailView view can be instantiated."""
-        # GameDetailView — requires cog/bot context to instantiate
-        pass
 
-    def test_playerlistview_instantiates(self):
-        """Verify PlayerlistView view can be instantiated."""
-        # PlayerlistView — requires cog/bot context to instantiate
-        pass
 
 
 class TestInviteHelpers:

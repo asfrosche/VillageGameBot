@@ -17,8 +17,8 @@ class TestMeetingCog:
     def test_meeting_has_help(self):
         """Verify meeting command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'meeting')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_endmeeting_exists(self):
         """Verify endmeeting command exists on the cog."""
@@ -27,8 +27,8 @@ class TestMeetingCog:
     def test_endmeeting_has_help(self):
         """Verify endmeeting command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'endmeeting')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_meetingenable_exists(self):
         """Verify meetingenable command exists on the cog."""
@@ -37,8 +37,8 @@ class TestMeetingCog:
     def test_meetingenable_has_help(self):
         """Verify meetingenable command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'meetingenable')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setmeetingchannel_exists(self):
         """Verify setmeetingchannel command exists on the cog."""
@@ -47,8 +47,8 @@ class TestMeetingCog:
     def test_setmeetingchannel_has_help(self):
         """Verify setmeetingchannel command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'setmeetingchannel')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setmeetingtargetguild_exists(self):
         """Verify setmeetingtargetguild command exists on the cog."""
@@ -57,8 +57,8 @@ class TestMeetingCog:
     def test_setmeetingtargetguild_has_help(self):
         """Verify setmeetingtargetguild command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'setmeetingtargetguild')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setmeetingcategory_exists(self):
         """Verify setmeetingcategory command exists on the cog."""
@@ -67,8 +67,8 @@ class TestMeetingCog:
     def test_setmeetingcategory_has_help(self):
         """Verify setmeetingcategory command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'setmeetingcategory')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_meetingconfig_exists(self):
         """Verify meetingconfig command exists on the cog."""
@@ -77,8 +77,8 @@ class TestMeetingCog:
     def test_meetingconfig_has_help(self):
         """Verify meetingconfig command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'meetingconfig')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_blockmeeting_exists(self):
         """Verify blockmeeting command exists on the cog."""
@@ -87,8 +87,8 @@ class TestMeetingCog:
     def test_blockmeeting_has_help(self):
         """Verify blockmeeting command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'blockmeeting')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_unblockmeeting_exists(self):
         """Verify unblockmeeting command exists on the cog."""
@@ -97,8 +97,8 @@ class TestMeetingCog:
     def test_unblockmeeting_has_help(self):
         """Verify unblockmeeting command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'unblockmeeting')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removecooldown_exists(self):
         """Verify removecooldown command exists on the cog."""
@@ -107,8 +107,8 @@ class TestMeetingCog:
     def test_removecooldown_has_help(self):
         """Verify removecooldown command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'removecooldown')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_checkcooldown_exists(self):
         """Verify checkcooldown command exists on the cog."""
@@ -117,8 +117,8 @@ class TestMeetingCog:
     def test_checkcooldown_has_help(self):
         """Verify checkcooldown command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'checkcooldown')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_forcemeeting_exists(self):
         """Verify forcemeeting command exists on the cog."""
@@ -127,8 +127,8 @@ class TestMeetingCog:
     def test_forcemeeting_has_help(self):
         """Verify forcemeeting command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'forcemeeting')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_listblocked_exists(self):
         """Verify listblocked command exists on the cog."""
@@ -137,8 +137,8 @@ class TestMeetingCog:
     def test_listblocked_has_help(self):
         """Verify listblocked command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'listblocked')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_listcooldowns_exists(self):
         """Verify listcooldowns command exists on the cog."""
@@ -147,8 +147,8 @@ class TestMeetingCog:
     def test_listcooldowns_has_help(self):
         """Verify listcooldowns command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'listcooldowns')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_cancelmeeting_admin_exists(self):
         """Verify cancelmeeting_admin command exists on the cog."""
@@ -157,8 +157,8 @@ class TestMeetingCog:
     def test_cancelmeeting_admin_has_help(self):
         """Verify cancelmeeting_admin command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'cancelmeeting_admin')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_meetingstats_exists(self):
         """Verify meetingstats command exists on the cog."""
@@ -167,8 +167,8 @@ class TestMeetingCog:
     def test_meetingstats_has_help(self):
         """Verify meetingstats command has help text."""
         method = getattr(meeting_cog.MeetingCog, 'meetingstats')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_confirmview_defined(self):
         """Verify ConfirmView view is defined in the module."""

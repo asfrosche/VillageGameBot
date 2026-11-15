@@ -17,8 +17,8 @@ class TestEstate:
     def test_estatehelp_has_help(self):
         """Verify estatehelp command has help text."""
         method = getattr(estate_cog.Estate, 'estatehelp')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_estate_exists(self):
         """Verify estate command exists on the cog."""
@@ -27,5 +27,5 @@ class TestEstate:
     def test_estate_has_help(self):
         """Verify estate command has help text."""
         method = getattr(estate_cog.Estate, 'estate')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

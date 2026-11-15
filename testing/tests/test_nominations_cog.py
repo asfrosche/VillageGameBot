@@ -17,8 +17,8 @@ class TestNominations:
     def test_addtokens_has_help(self):
         """Verify addtokens command has help text."""
         method = getattr(nominations_cog.Nominations, 'addtokens')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removetokens_exists(self):
         """Verify removetokens command exists on the cog."""
@@ -27,8 +27,8 @@ class TestNominations:
     def test_removetokens_has_help(self):
         """Verify removetokens command has help text."""
         method = getattr(nominations_cog.Nominations, 'removetokens')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_tokens_exists(self):
         """Verify tokens command exists on the cog."""
@@ -37,8 +37,8 @@ class TestNominations:
     def test_tokens_has_help(self):
         """Verify tokens command has help text."""
         method = getattr(nominations_cog.Nominations, 'tokens')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_intervene_exists(self):
         """Verify intervene command exists on the cog."""
@@ -47,8 +47,8 @@ class TestNominations:
     def test_intervene_has_help(self):
         """Verify intervene command has help text."""
         method = getattr(nominations_cog.Nominations, 'intervene')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_accuse_exists(self):
         """Verify accuse command exists on the cog."""
@@ -57,8 +57,8 @@ class TestNominations:
     def test_accuse_has_help(self):
         """Verify accuse command has help text."""
         method = getattr(nominations_cog.Nominations, 'accuse')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_voten_exists(self):
         """Verify voten command exists on the cog."""
@@ -67,8 +67,8 @@ class TestNominations:
     def test_voten_has_help(self):
         """Verify voten command has help text."""
         method = getattr(nominations_cog.Nominations, 'voten')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_showvotesn_exists(self):
         """Verify showvotesn command exists on the cog."""
@@ -77,8 +77,8 @@ class TestNominations:
     def test_showvotesn_has_help(self):
         """Verify showvotesn command has help text."""
         method = getattr(nominations_cog.Nominations, 'showvotesn')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_stopvotes_exists(self):
         """Verify stopvotes command exists on the cog."""
@@ -87,8 +87,8 @@ class TestNominations:
     def test_stopvotes_has_help(self):
         """Verify stopvotes command has help text."""
         method = getattr(nominations_cog.Nominations, 'stopvotes')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_resumevotes_exists(self):
         """Verify resumevotes command exists on the cog."""
@@ -97,8 +97,8 @@ class TestNominations:
     def test_resumevotes_has_help(self):
         """Verify resumevotes command has help text."""
         method = getattr(nominations_cog.Nominations, 'resumevotes')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_clearvotes_exists(self):
         """Verify clearvotes command exists on the cog."""
@@ -107,8 +107,8 @@ class TestNominations:
     def test_clearvotes_has_help(self):
         """Verify clearvotes command has help text."""
         method = getattr(nominations_cog.Nominations, 'clearvotes')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_confirmview_defined(self):
         """Verify ConfirmView view is defined in the module."""

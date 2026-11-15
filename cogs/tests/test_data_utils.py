@@ -26,6 +26,44 @@ class _FakeGuild:
         return next((c for c in self.channels if c.id == cid), None)
 
 
+class TestLoadGuildDataBackfill:
+    """Older guild data must not KeyError on settings added later."""
+
+    def _load(self, stored):
+        with patch.object(data_utils._bot_db, "get_guild_data", return_value=stored), \
+             patch.object(data_utils._bot_db, "upsert_guild_data") as up, \
+             patch.object(data_utils, "_ensure_db_ready"):
+            data = data_utils.load_guild_data(55)
+        return data, up
+
+    def test_backfills_missing_keys(self):
+        """A guild saved before leader_votes2 existed gets the new default."""
+        data, up = self._load({"alive_role_name": "Alive"})
+        assert data["alive_role_name"] == "Alive"
+        assert data["leader_votes2"] == {}
+        up.assert_called_once()
+
+    def test_present_data_is_unchanged_and_not_rewritten(self):
+        """Fully-populated data is returned untouched with no extra write."""
+        stored = dict(data_utils.base_variables)
+        data, up = self._load(stored)
+        assert data == stored
+        up.assert_not_called()
+
+    def test_missing_guild_returns_none(self):
+        with patch.object(data_utils._bot_db, "get_guild_data", return_value=None), \
+             patch.object(data_utils, "_ensure_db_ready"):
+            assert data_utils.load_guild_data(55) is None
+
+    def test_mutable_defaults_are_not_shared(self):
+        """Back-filled dict/list defaults must be per-guild copies."""
+        a, _ = self._load({})
+        b, _ = self._load({})
+        a["lynch_votes1"]["x"] = 1
+        assert b["lynch_votes1"] == {}
+        assert data_utils.base_variables["lynch_votes1"] == {}
+
+
 class TestGetLynchChannel:
     """Lynch/leader channels resolve by ID so renames don't break them."""
 
@@ -68,13 +106,16 @@ class TestGetLynchChannel:
         assert data_utils.get_lynch_channel(_FakeGuild(55, []), {}, "lynch_channel_name1") is None
 
     def test_all_three_keys_covered(self):
-        """Session 1, session 2 and the leader channel all map to ID keys."""
+        """Sessions 1-6 and both leader channels all map to ID keys."""
         assert data_utils.LYNCH_CHANNEL_ID_KEYS == {
             "lynch_channel_name1": "lynch_channel_id1",
             "lynch_channel_name2": "lynch_channel_id2",
             "lynch_channel_name3": "lynch_channel_id3",
             "lynch_channel_name4": "lynch_channel_id4",
+            "lynch_channel_name5": "lynch_channel_id5",
+            "lynch_channel_name6": "lynch_channel_id6",
             "leader_channel_name": "leader_channel_id",
+            "leader_channel_name2": "leader_channel_id2",
         }
 
     def test_set_lynch_channel_stores_name_and_id(self):

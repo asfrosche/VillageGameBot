@@ -20,8 +20,8 @@ class TestVoting:
     def test_vote_has_help(self):
         """Verify vote command has help text."""
         method = getattr(voting_cog.Voting, 'vote')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_abstain_exists(self):
         """Verify abstain command exists on the cog."""
@@ -30,8 +30,8 @@ class TestVoting:
     def test_abstain_has_help(self):
         """Verify abstain command has help text."""
         method = getattr(voting_cog.Voting, 'abstain')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_manipulate_exists(self):
         """Verify manipulate command exists on the cog."""
@@ -40,8 +40,8 @@ class TestVoting:
     def test_manipulate_has_help(self):
         """Verify manipulate command has help text."""
         method = getattr(voting_cog.Voting, 'manipulate')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removevote_exists(self):
         """Verify removevote command exists on the cog."""
@@ -50,8 +50,8 @@ class TestVoting:
     def test_removevote_has_help(self):
         """Verify removevote command has help text."""
         method = getattr(voting_cog.Voting, 'removevote')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_voteinrc_exists(self):
         """Verify voteinrc command exists on the cog."""
@@ -60,8 +60,8 @@ class TestVoting:
     def test_voteinrc_has_help(self):
         """Verify voteinrc command has help text."""
         method = getattr(voting_cog.Voting, 'voteinrc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_votelist_exists(self):
         """Verify votelist command exists on the cog."""
@@ -70,8 +70,8 @@ class TestVoting:
     def test_votelist_has_help(self):
         """Verify votelist command has help text."""
         method = getattr(voting_cog.Voting, 'votelist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_resetvotes_exists(self):
         """Verify resetvotes command exists on the cog."""
@@ -80,8 +80,8 @@ class TestVoting:
     def test_resetvotes_has_help(self):
         """Verify resetvotes command has help text."""
         method = getattr(voting_cog.Voting, 'resetvotes')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_votehistory_exists(self):
         """Verify votehistory command exists on the cog."""
@@ -90,8 +90,8 @@ class TestVoting:
     def test_votehistory_has_help(self):
         """Verify votehistory command has help text."""
         method = getattr(voting_cog.Voting, 'votehistory')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
 
 
@@ -104,8 +104,8 @@ class TestVoting:
     def test_updatevotes_has_help(self):
         """Verify updatevotes command has help text."""
         method = getattr(voting_cog.Voting, 'updatevotes')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_updatevotes_uv_alias(self):
         """Verify updatevotes has a .uv alias."""
@@ -169,20 +169,26 @@ class TestVoteHistoryRemovals:
         assert voting_cog.Voting._resolve_target_from_message(message, "dave", guild) is player
 
 
-class TestFourLynchSessions:
-    """Sessions 3 and 4 are optional, persistent slots (not the old .addlynch)."""
+class TestSixLynchSessions:
+    """Sessions 3-6 are optional, persistent slots (not the old .addlynch)."""
 
-    def test_base_variables_defines_four_sessions(self):
-        """Two extra optional sessions exist as first-class config keys."""
-        for n in (1, 2, 3, 4):
+    def test_base_variables_defines_six_sessions(self):
+        """Six voting slots exist as first-class config keys."""
+        for n in range(1, 7):
             assert f"lynch_channel_name{n}" in base_variables
             assert f"lynch_channel_id{n}" in base_variables
             assert f"lynch_votes{n}" in base_variables
 
     def test_extra_session_vote_dicts_default_empty(self):
         """The new vote dicts start empty so no KeyError on first use."""
-        assert base_variables["lynch_votes3"] == {}
-        assert base_variables["lynch_votes4"] == {}
+        for n in range(3, 7):
+            assert base_variables[f"lynch_votes{n}"] == {}
+
+    def test_second_leader_election_config(self):
+        """A second leader election slot exists as a first-class config key."""
+        assert base_variables["leader_channel_name2"] == '👑│leader-election-2'
+        assert base_variables["leader_channel_id2"] is None
+        assert base_variables["leader_votes2"] == {}
 
     def test_removed_commands_are_gone(self):
         """.addlynch/.rmlynch and the in-memory registry are fully removed."""
@@ -191,26 +197,35 @@ class TestFourLynchSessions:
         assert not hasattr(voting_cog, "extra_lynch_sessions")
         assert not hasattr(voting_cog.Voting, "_extra_session")
 
-    def test_votelist_accepts_all_four(self):
-        """.votelist exposes lynch1..lynch4 plus leader."""
+    def test_votelist_accepts_all_sessions(self):
+        """.votelist exposes lynch1..lynch6 plus both leader elections."""
         src = pathlib.Path(voting_cog.__file__).read_text(encoding="utf-8")
-        assert "'lynch1', 'lynch2', 'lynch3', 'lynch4', 'leader'" in src
+        assert 'f"lynch{i}": f"LYNCH SESSION {i}"' in src
+        assert 'session_labels["leader"] = "LEADER ELECTION"' in src
+        assert 'session_labels["leader2"] = "LEADER ELECTION 2"' in src
 
-    def test_vote_routing_indexes_all_four(self):
-        """Session 3/4 votes land in lynch_votes3/lynch_votes4, not lynch_votes2."""
+    def test_votelist_looks_up_by_label(self):
+        """.votelist <type> picks its own board, not a position in a filtered list."""
+        src = pathlib.Path(voting_cog.__file__).read_text(encoding="utf-8")
+        assert "label = session_labels[type.lower()]" in src
+        assert "if label in embeds_by_label:" in src
+
+    def test_vote_routing_indexes_all_sessions(self):
+        """Session votes land in the matching lynch_votesN dict."""
         src = pathlib.Path(voting_cog.__file__).read_text(encoding="utf-8")
         assert 'guild_data[f"lynch_votes{lidx + 1}"]' in src
 
-    def test_resetvotes_clears_all_four(self):
-        """.resetvotes wipes sessions 3 and 4 too."""
+    def test_resetvotes_clears_all_sessions(self):
+        """.resetvotes wipes every lynch session, including 5 and 6."""
         src = pathlib.Path(voting_cog.__file__).read_text(encoding="utf-8")
-        assert 'guild_data["lynch_votes3"] = {}' in src
-        assert 'guild_data["lynch_votes4"] = {}' in src
+        assert "for key in LYNCH_SESSION_VOTE_KEYS:" in src
+        assert 'guild_data["leader_votes"] = {}' in src
+        assert 'guild_data["leader_votes2"] = {}' in src
 
-    def test_remvote_embed_covers_all_four(self):
-        """The Votes Removed embed is posted to sessions 1-4 and leader."""
+    def test_remvote_embed_covers_all_sessions(self):
+        """The Votes Removed embed is posted to every session and both leaders."""
         src = pathlib.Path(voting_cog.__file__).read_text(encoding="utf-8")
-        assert "for channel in [lynch_channel1, lynch_channel2, lynch_channel3, lynch_channel4, leader_channel]:" in src
+        assert "for channel in [*lynch_channels, leader_channel, leader_channel2]:" in src
 
 
 PREFIXES = [
@@ -218,16 +233,22 @@ PREFIXES = [
     "# LYNCH VOTES 2:",
     "# LYNCH VOTES 3:",
     "# LYNCH VOTES 4:",
+    "# LYNCH VOTES 5:",
+    "# LYNCH VOTES 6:",
     "# LEADER VOTES:",
+    "# LEADER VOTES 2:",
 ]
 SESSION_KEYS = [
     "lynch_channel_name1",
     "lynch_channel_name2",
     "lynch_channel_name3",
     "lynch_channel_name4",
+    "lynch_channel_name5",
+    "lynch_channel_name6",
     "leader_channel_name",
+    "leader_channel_name2",
 ]
-VOTE_KEYS = ["lynch_votes1", "lynch_votes2", "lynch_votes3", "lynch_votes4", "leader_votes"]
+VOTE_KEYS = ["lynch_votes1", "lynch_votes2", "lynch_votes3", "lynch_votes4", "lynch_votes5", "lynch_votes6", "leader_votes", "leader_votes2"]
 
 
 class _FakeHistory:
@@ -245,7 +266,7 @@ class _FakeHistory:
 
 
 def _build_ctx():
-    """Guild with 5 session channels, 5 existing boards and the voted member."""
+    """Guild with 8 session channels, 8 existing boards and the voted member."""
     target = MagicMock()
     target.id = 222
     target.mention = "<@222>"
@@ -258,7 +279,7 @@ def _build_ctx():
     guild.get_member = lambda uid: target if uid == 222 else None
 
     session_channels = []
-    for n in range(5):
+    for n in range(len(PREFIXES)):
         ch = MagicMock()
         ch.id = n + 1
         ch.name = f"session-{n + 1}"
@@ -298,6 +319,7 @@ def _guild_data():
         "lynch_votes3": {str(111): 222},
         "lynch_votes4": {},
         "leader_votes": {},
+        "leader_votes2": {},
     }
 
 
@@ -320,7 +342,7 @@ class TestAggiornaRisultati:
 
         return boards, vote_count_channel
 
-    @pytest.mark.parametrize("idx", [0, 1, 2, 3, 4])
+    @pytest.mark.parametrize("idx", [0, 1, 2, 3, 4, 5, 6, 7])
     async def test_vote_edits_only_its_own_board(self, idx):
         """A vote in any session edits that board and touches nothing else."""
         ctx, session_channels, boards, vote_count_channel = _build_ctx()
@@ -347,7 +369,7 @@ class TestAggiornaRisultati:
         assert "**1** votes" in boards[PREFIXES[idx]].edit.await_args.kwargs["content"]
 
     async def test_full_refresh_rebuilds_every_board_in_order(self):
-        """Day start / .resetvotes (no channel) still rebuilds all five."""
+        """Day start / .resetvotes (no channel) still rebuilds all eight."""
         boards, vote_count_channel = await self._run(None)
         for prefix in PREFIXES:
             assert boards[prefix].delete.await_count == 1, prefix

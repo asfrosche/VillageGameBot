@@ -1,13 +1,11 @@
 import asyncio
-import os
 import random
 import re
-import tempfile
 from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands
-from discord.ui import Modal, Select, View
+from discord.ui import Modal, Select, View, Button
 
 from cogs.data_utils import (
     load_guild_data,
@@ -21,6 +19,7 @@ from utils.economy_db import (
     get_economy_channel_balance,
     get_inventory_channel,
     get_removed_default_items,
+    get_shop_item_by_id,
     get_shop_item_by_name,
     get_shop_items,
     get_top_economy_channels,
@@ -33,6 +32,8 @@ from utils.economy_db import (
     update_shop_item_by_name,
 )
 from utils.embeds import info_embed, success_embed, plain_embed
+from cogs.handling_cog import get_pc_category, role_pings
+from utils.private_pc import create_private_pc, sponsor_members
 
 
 DEFAULT_SHOP_ITEMS = [
@@ -42,6 +43,7 @@ DEFAULT_SHOP_ITEMS = [
     {"name": "🧹 Broom", "description": "Clears messages in a house channel", "price": 300},
     {"name": "📜 Will", "description": "Notify Overseers to pin your last will", "price": 150},
     {"name": "🔭 Peep Hole", "description": "See who knocks on this house for 24h", "price": 150},
+    {"name": "🔒 Private PC", "description": "Open a private channel with an alive player and all sponsors", "price": 1500},
 ]
 
 # Maximum value accepted by .setcollect to prevent accidental huge payouts.
@@ -88,7 +90,27 @@ def _is_rolechat_category(
     rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
     alt_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("alt_category_name"))
     dead_rc = discord.utils.get(ctx.guild.categories, name=guild_data.get("dead_rc_category_name"))
-    return channel.category in (rc_cat, alt_cat, dead_rc)
+    return channel.category is not None and channel.category in (rc_cat, alt_cat, dead_rc)
+
+
+def _player_rolechat_channels(guild, guild_data) -> list:
+    """Text channels in the player rolechat categories (RoleChats and ALTs).
+
+    Players who overflow into ALT rolechats are included, so whispers and house items reach them.
+    """
+    cats = [
+        discord.utils.get(guild.categories, name=guild_data.get("rc_category_name")),
+        discord.utils.get(guild.categories, name=guild_data.get("alt_category_name")),
+    ]
+    return [ch for cat in cats if cat is not None for ch in cat.text_channels]
+
+
+def _players_rolechat(ctx, guild_data):
+    """The rolechat the author can read and send in (used for house items), or an error string."""
+    for channel in _player_rolechat_channels(ctx.guild, guild_data):
+        if ctx.author in channel.members and channel.permissions_for(ctx.author).send_messages:
+            return channel
+    return "Could not find your rolechat to check inventory."
 
 
 def _is_houses_category(
@@ -106,7 +128,7 @@ def _is_houses_category(
     if not guild_data:
         return False
     houses = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
-    return channel.category == houses
+    return channel.category is not None and channel.category == houses
 
 
 def _find_player_rolechat(
@@ -169,6 +191,108 @@ async def _log_economy(
         pass
 
 
+def move_items_between_rcs(guild_id: int, sender_rc_id: int, target_rc_id: int, item: dict, quantity: int) -> tuple[bool, str]:
+    """Move items from one rolechat inventory to another. Returns (ok, message).
+
+    The sender is debited first. If the recipient's credit fails (the item was removed from the
+    shop meanwhile), the sender is refunded, so no items are created or lost.
+    """
+    held = next((i for i in get_inventory_channel(guild_id, sender_rc_id) if i["item_id"] == item["id"]), None)
+    have = held["quantity"] if held else 0
+    if have < quantity:
+        return False, f"You only have **{have}× {item['name']}** here."
+    add_inventory_item_channel(guild_id, sender_rc_id, item["id"], -quantity)
+    new_qty = add_inventory_item_channel(guild_id, target_rc_id, item["id"], quantity)
+    if new_qty < quantity:
+        add_inventory_item_channel(guild_id, sender_rc_id, item["id"], quantity)
+        return False, f"**{item['name']}** is no longer available. Nothing was moved."
+    return True, ""
+
+
+SELLING_KEY = "shop_selling_enabled"
+
+
+def selling_enabled(guild_id: int) -> bool:
+    """Selling is on unless an admin has turned it off (the default is on)."""
+    return bool((load_guild_data(guild_id) or {}).get(SELLING_KEY, True))
+
+
+def set_selling_enabled(guild_id: int, enabled: bool) -> None:
+    guild_data = load_guild_data(guild_id) or {}
+    guild_data[SELLING_KEY] = bool(enabled)
+    save_guild_data(guild_id, guild_data)
+
+
+SELL_DISABLED_MESSAGE = "Selling is turned off on this server."
+
+
+PRIVATE_PC_PAGE_SIZE = 25
+
+
+def private_pc_targets(guild, guild_data, author):
+    """Alive players the buyer can open a private PC with, or an error message string."""
+    alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
+    if not alive_role:
+        return "Alive role not configured."
+    members = [m for m in guild.members if alive_role in m.roles and not m.bot and m.id != author.id]
+    if not members:
+        return "No other alive players to open a private channel with."
+    members.sort(key=lambda m: m.display_name.lower())
+    return members
+
+
+async def open_private_pc_with(guild, guild_data, initiator, target):
+    """Create the private PC between *initiator* and *target* plus sponsors. Returns (ok, message)."""
+    alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
+    if alive_role is None or alive_role not in target.roles:
+        return False, f"{target.display_name} is no longer an alive player."
+    category = await get_pc_category(guild, guild_data, "private")
+    if category is None:
+        return False, "No private channel category exists. Check your setup."
+    sponsor_role = discord.utils.get(guild.roles, name=guild_data.get("sponsor_role_name"))
+    try:
+        channel = await create_private_pc(guild, category, initiator, target, sponsor_role)
+    except discord.HTTPException as error:
+        return False, f"Could not open the private channel: {error}"
+    return True, f"🔒 Private channel opened: {channel.mention}"
+
+
+def private_pc_menu(invoker, targets, on_pick, result, done):
+    """Player dropdowns, paginated like the whisper menu. Choosing a player runs on_pick."""
+    view = View(timeout=300)
+    total_pages = (len(targets) + PRIVATE_PC_PAGE_SIZE - 1) // PRIVATE_PC_PAGE_SIZE
+    for start in range(0, len(targets), PRIVATE_PC_PAGE_SIZE):
+        chunk = targets[start:start + PRIVATE_PC_PAGE_SIZE]
+        page = start // PRIVATE_PC_PAGE_SIZE + 1
+        select = discord.ui.Select(
+            placeholder=f"Choose a player... ({page}/{total_pages})",
+            min_values=1,
+            max_values=1,
+            options=[discord.SelectOption(label=m.display_name[:95], value=str(m.id)) for m in chunk],
+        )
+
+        async def on_select(interaction, sel=select):
+            if interaction.user != invoker:
+                return await interaction.response.send_message("Not your menu.", ephemeral=True)
+            target = next((m for m in targets if str(m.id) == sel.values[0]), None)
+            for child in view.children:
+                child.disabled = True
+            if target is None:
+                ok, text = False, "That player is no longer available."
+            else:
+                ok, text = await on_pick(target)
+            result["ok"] = ok
+            try:
+                await interaction.response.edit_message(content=text, embed=None, view=None)
+            except discord.HTTPException:
+                await interaction.followup.send(text, ephemeral=True)
+            done.set()
+
+        select.callback = on_select
+        view.add_item(select)
+    return view
+
+
 # ─────────────────────────────────────────────
 # Inventory use components
 # ─────────────────────────────────────────────
@@ -224,14 +348,18 @@ class InventoryView(View):
             ok = await self._do_fireworks(interaction)
         elif "whisper" in name_lower:
             ok = await self._do_whisper(interaction)
-        elif "broom" in name_lower:
-            ok = await self._do_broom(interaction)
+        elif "private pc" in name_lower:
+            ok = await self._do_private_pc(interaction)
+        elif "broom" in name_lower or "peep" in name_lower:
+            keyword = "broom" if "broom" in name_lower else "peep"
+            await interaction.response.send_message(
+                f"Use **{owned['name']}** from a House channel with `.use {keyword}`.", ephemeral=True
+            )
+            return
         elif "shoe" in name_lower:
             ok = await self._do_extra_visit(interaction)
         elif "will" in name_lower:
             ok = await self._do_will(interaction)
-        elif "peep" in name_lower:
-            ok = await self._do_peephole(interaction)
         else:
             ok = True
             await interaction.response.send_message(f"Used **{owned['name']}**.", ephemeral=True)
@@ -247,12 +375,14 @@ class InventoryView(View):
             )
 
     async def _do_sell(self, interaction: discord.Interaction) -> None:
+        if not selling_enabled(interaction.guild_id):
+            return await interaction.response.send_message(SELL_DISABLED_MESSAGE, ephemeral=True)
         owned = self._get_owned(interaction, self.selected_item_id)
         if not owned:
             await interaction.response.send_message("Item no longer available. Refresh with `.inv`.", ephemeral=True)
             return
 
-        item = get_shop_item_by_name(interaction.guild_id, owned["name"])
+        item = get_shop_item_by_id(interaction.guild_id, owned["item_id"])
         if not item:
             await interaction.response.send_message("Could not determine shop price for that item.", ephemeral=True)
             return
@@ -312,7 +442,7 @@ class InventoryView(View):
             await interaction.response.send_message(err, ephemeral=True)
             return False
         await ann_ch.send(
-            f"{alive_role.mention}{sponsor_role.mention}\n{user.mention} is in {house.name}"
+            f"{role_pings(alive_role, sponsor_role)}\n{user.mention} is in {house.name}"
         )
         await ann_ch.send(gif)
         await interaction.response.send_message("🎆 Fireworks launched!", ephemeral=True)
@@ -382,12 +512,12 @@ class InventoryView(View):
                         await interaction.channel.send("Whisper cancelled (timeout).")
                         return
 
-                    rc_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("rc_category_name"))
-                    if not rc_cat:
+                    rolechats = _player_rolechat_channels(interaction.guild, guild_data)
+                    if not rolechats:
                         await interaction.channel.send("RoleChats category not configured.")
                         return
                     log_ch = discord.utils.get(interaction.guild.channels, name=guild_data.get("whisper_logs_channel_name"))
-                    for ch in rc_cat.text_channels:
+                    for ch in rolechats:
                         if target in ch.members:
                             embed = info_embed()
                             content = reply.content[:1021] + "..." if len(reply.content) > 1024 else reply.content
@@ -403,6 +533,8 @@ class InventoryView(View):
                                 await log_ch.send(embed=log_embed)
                             delivered = True
                             break
+                    if not delivered:
+                        await interaction.channel.send(f"✉ Whisper not sent: {target.display_name} isn't in a RoleChat right now.")
                     if delivered:
                         await interaction.channel.send("✉ Whisper sent.")
                 except Exception as e:
@@ -424,6 +556,31 @@ class InventoryView(View):
         except asyncio.TimeoutError:
             pass
         return delivered
+
+    async def _do_private_pc(self, interaction: discord.Interaction) -> bool:
+        guild_data = load_guild_data(interaction.guild_id)
+        targets = private_pc_targets(interaction.guild, guild_data, interaction.user)
+        if isinstance(targets, str):
+            await interaction.response.send_message(targets, ephemeral=True)
+            return False
+        await interaction.response.defer()
+
+        result, done = {"ok": False}, asyncio.Event()
+
+        async def on_pick(target):
+            return await open_private_pc_with(interaction.guild, guild_data, interaction.user, target)
+
+        view = private_pc_menu(interaction.user, targets, on_pick, result, done)
+        await interaction.followup.send(
+            embed=plain_embed(title="🔒 Private PC", description="Choose the player to open a private channel with. Every sponsor is added automatically."),
+            view=view,
+            ephemeral=True,
+        )
+        try:
+            await asyncio.wait_for(done.wait(), timeout=300)
+        except asyncio.TimeoutError:
+            return False
+        return result["ok"]
 
     async def _do_broom(self, interaction: discord.Interaction) -> bool:
         guild_data = load_guild_data(interaction.guild_id)
@@ -459,12 +616,16 @@ class InventoryView(View):
                 return False
 
             anchor = reply.reference.resolved
-            if not anchor:
-                await interaction.channel.send("Could not resolve the target message.")
-                return False
+            if not isinstance(anchor, discord.Message):
+                try:
+                    anchor = await interaction.channel.fetch_message(reply.reference.message_id)
+                except (discord.NotFound, discord.HTTPException):
+                    await interaction.channel.send("Could not resolve the target message.")
+                    return False
 
-            to_delete = []
-            async for msg in interaction.channel.history(after=anchor):
+            # The replied-to message is part of the sweep, unless it is pinned.
+            to_delete = [] if anchor.pinned else [anchor]
+            async for msg in interaction.channel.history(after=anchor, limit=None, oldest_first=True):
                 if not msg.pinned:
                     to_delete.append(msg)
 
@@ -472,24 +633,11 @@ class InventoryView(View):
                 await interaction.channel.send("No unpinned messages to delete.")
                 return False
 
-            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_log:
-                for msg in to_delete:
-                    ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                    content = msg.content.replace('\n', ' ')[:1000]
-                    temp_log.write(f"{ts} - {msg.author}: {content}\n")
-                temp_log_name = temp_log.name
-
-            for i in range(0, len(to_delete), 100):
-                await interaction.channel.delete_messages(to_delete[i:i + 100])
-
-            broom_log_name = guild_data.get("edit_del_logs")
-            if broom_log_name:
-                broom_ch = discord.utils.get(interaction.guild.text_channels, name=broom_log_name)
-                if broom_ch:
-                    await broom_ch.send(f'🧹 **{interaction.user}** used a broom in {interaction.channel.mention}')
-                    await broom_ch.send(file=discord.File(temp_log_name))
-
-            os.remove(temp_log_name)
+            utility = interaction.client.get_cog("Utility")
+            if not utility:
+                await interaction.channel.send("Utility cog is not loaded. Cannot broom.")
+                return False
+            await utility.broom_delete(interaction, to_delete, individual_limit=None)
             return True
         except discord.Forbidden:
             await interaction.followup.send("I need Manage Messages permission to use the broom here.", ephemeral=True)
@@ -628,7 +776,7 @@ class EditPriceModal(Modal):
             return await interaction.response.send_message("Must be a number.", ephemeral=True)
         if price < 0:
             return await interaction.response.send_message("Price must be >= 0.", ephemeral=True)
-        update_shop_item_by_name(self.guild_id, self.item["name"], price=price)
+        update_shop_item_by_name(self.guild_id, self.item["name"], price=price, item_id=self.item["id"])
         await interaction.response.send_message(
             f"**{self.item['name']}** price → **{price:,}**.", ephemeral=True
         )
@@ -650,8 +798,9 @@ class ShopView(View):
 
     def _build_embed(self) -> discord.Embed:
         embed = plain_embed(title="🛒 Shop", description=self.pages[self.page_index])
+        state = "on" if selling_enabled(self.guild_id) else "off"
         embed.set_footer(
-            text=f"Page {self.page_index + 1}/{len(self.pages)} • Select item, then Buy"
+            text=f"Page {self.page_index + 1}/{len(self.pages)} • Select item, then Buy • Selling: {state}"
         )
         return embed
 
@@ -667,6 +816,9 @@ class ShopView(View):
 
         self.add_item(self.btn_buy)
         if self.invoker.guild_permissions.administrator:
+            self.btn_toggle_sell.label = "Selling: ON" if selling_enabled(self.guild_id) else "Selling: OFF"
+            self.btn_toggle_sell.style = discord.ButtonStyle.success if selling_enabled(self.guild_id) else discord.ButtonStyle.danger
+            self.add_item(self.btn_toggle_sell)
             self.add_item(self.btn_edit_price)
 
     @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.secondary, row=0)
@@ -724,6 +876,24 @@ class ShopView(View):
             action="Purchase",
             actor=interaction.user,
             details=f"Bought **{item['name']}** for **{item['price']:,}** coins in {interaction.channel.mention}. ×{new_qty}",
+        )
+
+    @discord.ui.button(label="Selling: ON", emoji="💰", style=discord.ButtonStyle.success, row=3)
+    async def btn_toggle_sell(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.invoker:
+            return await interaction.response.send_message("Not your menu.", ephemeral=True)
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("Admin only.", ephemeral=True)
+        now_enabled = not selling_enabled(self.guild_id)
+        set_selling_enabled(self.guild_id, now_enabled)
+        self._rebuild()
+        await interaction.response.edit_message(embed=self._build_embed(), view=self)
+        await _log_economy(
+            interaction.guild,
+            load_guild_data(self.guild_id) or {},
+            action="Selling Toggled",
+            actor=interaction.user,
+            details=f"Selling is now **{'on' if now_enabled else 'off'}** (shop in {interaction.channel.mention}).",
         )
 
     @discord.ui.button(label="Edit Price", emoji="✏️", style=discord.ButtonStyle.secondary, row=2)
@@ -872,7 +1042,9 @@ class Economy(commands.Cog):
         pick = candidates[0]
         if len(candidates) > 1:
             top, second = candidates[0], candidates[1]
-            unambiguous = top["score"] == 1.0 or (top["score"] - second["score"]) >= 0.1
+            # An exact match wins unless another item is also exact; near-misses need a clear gap.
+            exact_win = top["score"] == 1.0 and second["score"] < 1.0
+            unambiguous = exact_win or (top["score"] - second["score"]) >= 0.1
             if not unambiguous:
                 pick = await self._ask_item_choice(ctx, candidates)
                 if pick is None:
@@ -1023,6 +1195,19 @@ class Economy(commands.Cog):
         save_guild_data(ctx.guild.id, guild_data)
         await ctx.send(f"Collect amount set to **{value:,}**.")
 
+    @commands.command(name="sellshop")
+    async def sellshop(self, ctx: commands.Context, state: str = None):
+        """Admin: turn selling on or off for the whole server. Usage: .sellshop on|off"""
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("Admin only.")
+        if state is None:
+            return await ctx.send(f"Selling is **{'on' if selling_enabled(ctx.guild.id) else 'off'}**. Use `.sellshop on` or `.sellshop off`.")
+        value = state.strip().lower()
+        if value not in ("on", "off"):
+            return await ctx.send("Use `.sellshop on` or `.sellshop off`.")
+        set_selling_enabled(ctx.guild.id, value == "on")
+        await ctx.send(f"Selling is now **{value}**.")
+
     @commands.command(name="shop")
     async def shop(self, ctx: commands.Context):
         """View the server shop."""
@@ -1127,8 +1312,15 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed, view=view)
 
     @commands.command(name="give")
-    async def give(self, ctx: commands.Context, member: discord.Member, amount: str):
-        """Give coins to a member. Use `.give @user <amount>` or `.give @user all`. Must be in a house channel."""
+    async def give(self, ctx: commands.Context, member: discord.Member, *, amount: str):
+        """Give coins or items to a player in a house.
+
+        `.give @user <amount>` or `.give @user all` gives coins.
+        `.give @user <item> [qty]` or `.give @user <item> all` gives items from your inventory.
+        """
+        token = amount.strip().lower()
+        if not (token == "all" or token.replace(",", "").isdigit()):
+            return await self._give_items(ctx, member, amount)
         guild_data = load_guild_data(ctx.guild.id)
 
         if not _is_houses_category(ctx, guild_data=guild_data):
@@ -1214,8 +1406,27 @@ class Economy(commands.Cog):
         @discord.ui.button(label="✅ Accept", style=discord.ButtonStyle.green)
         async def accept_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
             if interaction.user.id == self.recipient.id:
-                new_qty = add_inventory_item_channel(self.ctx.guild.id, self.target_rc.id, self.item["id"], self.quantity)
+                held = next(
+                    (i for i in get_inventory_channel(self.ctx.guild.id, self.sender_rc.id) if i["item_id"] == self.item["id"]),
+                    None,
+                )
+                if not held or held["quantity"] < self.quantity:
+                    await interaction.response.edit_message(
+                        content="❌ The sender no longer has enough of this item. Transfer cancelled.",
+                        embed=None, view=None,
+                    )
+                    return self.stop()
+                # No await between the check and the debit, so nothing else can spend the items in between.
                 add_inventory_item_channel(self.ctx.guild.id, self.sender_rc.id, self.item["id"], -self.quantity)
+                new_qty = add_inventory_item_channel(self.ctx.guild.id, self.target_rc.id, self.item["id"], self.quantity)
+                if new_qty < self.quantity:
+                    # The item was removed from the shop meanwhile; give the items back.
+                    add_inventory_item_channel(self.ctx.guild.id, self.sender_rc.id, self.item["id"], self.quantity)
+                    await interaction.response.edit_message(
+                        content="❌ That item is no longer available. Transfer cancelled.",
+                        embed=None, view=None,
+                    )
+                    return self.stop()
                 await _log_economy(
                     self.ctx.guild,
                     load_guild_data(self.ctx.guild.id) or {},
@@ -1229,7 +1440,7 @@ class Economy(commands.Cog):
                     embed=None, view=None,
                 )
             else:
-                await interaction.response.send_message("Only the recipient can accept.", ephemeral=True)
+                return await interaction.response.send_message("Only the recipient can accept.", ephemeral=True)
             self.stop()
 
         @discord.ui.button(label="❌ Decline", style=discord.ButtonStyle.red)
@@ -1250,6 +1461,75 @@ class Economy(commands.Cog):
                 await self.message.edit(content="⏰ Transfer request timed out.", embed=None, view=None)
             except Exception:
                 pass
+
+    async def _give_items(self, ctx: commands.Context, member: discord.Member, text: str):
+        """Give items to a player in this house, straight away."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not _is_houses_category(ctx, guild_data=guild_data):
+            return await ctx.send("Use `.give` in a house channel, with the player you are giving to in the same house.")
+        if member.bot:
+            return await ctx.send("You can't give items to a bot.")
+        if member == ctx.author:
+            return await ctx.send("You can't give items to yourself.")
+
+        ch = ctx.channel
+        if not (ch.permissions_for(ctx.author).read_messages and ch.permissions_for(ctx.author).send_messages):
+            return await ctx.send("You need read and send permission in this house.")
+        if not (ch.permissions_for(member).read_messages and ch.permissions_for(member).send_messages):
+            return await ctx.send(f"{member.display_name} isn't in this house.")
+
+        rc_cats = [discord.utils.get(ctx.guild.categories, name=guild_data.get(k)) for k in (
+            "rc_category_name", "alt_category_name", "dead_rc_category_name")]
+
+        def _find_rc(who: discord.Member):
+            for cat in rc_cats:
+                if not cat:
+                    continue
+                for c in cat.text_channels:
+                    if c.permissions_for(who).send_messages:
+                        return c
+            return None
+
+        sender_rc = _find_rc(ctx.author)
+        target_rc = _find_rc(member)
+        if not sender_rc:
+            return await ctx.send("Could not find your rolechat.")
+        if not target_rc:
+            return await ctx.send(f"Could not find a rolechat for {member.display_name}.")
+        if sender_rc == target_rc:
+            return await ctx.send("You can't give items to someone in the same rolechat.")
+
+        words = text.strip().split()
+        give_all = len(words) > 1 and words[-1].lower() == "all"
+        if give_all:
+            query, quantity = " ".join(words[:-1]), None
+        else:
+            query, quantity = _split_trailing_qty(text)
+            if quantity <= 0:
+                return await ctx.send("Quantity must be greater than 0.")
+        if not query:
+            return await ctx.send("Usage: `.give @player <item> [quantity]` or `.give @player <item> all`.")
+
+        item = await self._resolve_shop_item(ctx, query)
+        if item is None:
+            return
+
+        if give_all:
+            held = next((i for i in get_inventory_channel(ctx.guild.id, sender_rc.id) if i["item_id"] == item["id"]), None)
+            quantity = held["quantity"] if held else 0
+            if quantity <= 0:
+                return await ctx.send(f"You don't have any **{item['name']}** here.")
+        ok, message = move_items_between_rcs(ctx.guild.id, sender_rc.id, target_rc.id, item, quantity)
+        if not ok:
+            return await ctx.send(message)
+        await ctx.send(f"🎁 {ctx.author.mention} gave **{quantity}× {item['name']}** to {member.mention}.")
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Item Gift",
+            actor=ctx.author,
+            details=f"{ctx.author.mention} gave **{quantity}× {item['name']}** to {member.mention} in {ctx.channel.mention}.",
+        )
 
     @commands.command(name="trade")
     async def giveitem_player(self, ctx: commands.Context, member: discord.Member, *, text: str):
@@ -1393,7 +1673,7 @@ class Economy(commands.Cog):
         if item is None:
             return
 
-        ok = update_shop_item_by_name(ctx.guild.id, item["name"], stock=stock)
+        ok = update_shop_item_by_name(ctx.guild.id, item["name"], stock=stock, item_id=item["id"])
         if not ok:
             return await ctx.send("Could not update that item's stock.")
         if stock == 0:
@@ -1421,10 +1701,10 @@ class Economy(commands.Cog):
             return
 
         if field == "price":
-            ok = update_shop_item_by_name(ctx.guild.id, item["name"], price=val)
+            ok = update_shop_item_by_name(ctx.guild.id, item["name"], price=val, item_id=item["id"])
             label = f"price → **{val:,}**"
         elif field == "stock":
-            ok = update_shop_item_by_name(ctx.guild.id, item["name"], stock=val)
+            ok = update_shop_item_by_name(ctx.guild.id, item["name"], stock=val, item_id=item["id"])
             label = f"stock → **{val}** (0 = unlimited)" if val == 0 else f"stock → **{val}**"
         elif field == "name":
             new_name = new_value.strip()
@@ -1432,11 +1712,11 @@ class Economy(commands.Cog):
                 return await ctx.send("Item name cannot be empty.")
             if not _ITEM_EMOJI_RE.match(new_name):
                 return await ctx.send("New item name must start with an emoji.")
-            if update_shop_item_by_name(ctx.guild.id, item["name"], name=new_name):
+            if update_shop_item_by_name(ctx.guild.id, item["name"], name=new_name, item_id=item["id"]):
                 return await ctx.send(f"Updated **{item['name']}** — new name: **{new_name}**.")
             return await ctx.send("An item with that name already exists.")
         else:
-            ok = update_shop_item_by_name(ctx.guild.id, item["name"], description=new_value.strip())
+            ok = update_shop_item_by_name(ctx.guild.id, item["name"], description=new_value.strip(), item_id=item["id"])
             label = f"description updated for **{item['name']}**"
 
         if not ok:
@@ -1450,10 +1730,41 @@ class Economy(commands.Cog):
         item = await self._resolve_shop_item(ctx, item_name)
         if item is None:
             return
-        ok = remove_shop_item_by_name(ctx.guild.id, item["name"])
-        if not ok:
-            return await ctx.send("Item not found. Use a part of the name.")
-        await ctx.send(f"Item removed from the shop: **{item['name']}**.")
+
+        class DelItemView(discord.ui.View):
+            def __init__(self, cog_instance, context, item_data):
+                super().__init__(timeout=60)
+                self.cog = cog_instance
+                self.ctx = context
+                self.item = item_data
+                self.value = None
+
+            @discord.ui.button(label="Delete Everywhere", style=discord.ButtonStyle.danger)
+            async def delete_everywhere(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.ctx.author.id:
+                    await interaction.response.send_message("This is not for you.", ephemeral=True)
+                    return
+                ok = remove_shop_item_by_name(self.ctx.guild.id, self.item["name"], delete_from_inventory=True, item_id=self.item["id"])
+                if not ok:
+                    await interaction.response.edit_message(content="Item not found. Use a part of the name.", view=None)
+                    return
+                await interaction.response.edit_message(content=f"Item removed from the shop and all inventories: **{self.item['name']}**.", view=None)
+                self.stop()
+
+            @discord.ui.button(label="Delete from Shop Only", style=discord.ButtonStyle.secondary)
+            async def delete_shop_only(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.ctx.author.id:
+                    await interaction.response.send_message("This is not for you.", ephemeral=True)
+                    return
+                ok = remove_shop_item_by_name(self.ctx.guild.id, self.item["name"], delete_from_inventory=False, item_id=self.item["id"])
+                if not ok:
+                    await interaction.response.edit_message(content="Item not found. Use a part of the name.", view=None)
+                    return
+                await interaction.response.edit_message(content=f"Item removed from the shop only (kept in existing player inventories): **{self.item['name']}**.", view=None)
+                self.stop()
+
+        view = DelItemView(self, ctx, item)
+        await ctx.send(f"How should **{item['name']}** be deleted?", view=view)
 
     @commands.command(name="reseteconomy", aliases=["re"])
     @commands.has_permissions(administrator=True)
@@ -1673,6 +1984,8 @@ class Economy(commands.Cog):
     @commands.command(name="sell-item", aliases=["sell_item", "sell"])
     async def sell_item(self, ctx: commands.Context, *, item_name: str):
         """Sell an item from your rolechat's inventory back to the shop (50% refund)."""
+        if not selling_enabled(ctx.guild.id):
+            return await ctx.send(SELL_DISABLED_MESSAGE)
         guild_data = load_guild_data(ctx.guild.id)
         if not _is_rolechat_category(ctx, guild_data=guild_data):
             return await ctx.send("Sell items only in a RoleChat channel. Usage: `.sell <item_name>`.")
@@ -1681,7 +1994,7 @@ class Economy(commands.Cog):
         if owned is None:
             return
 
-        shop_item = get_shop_item_by_name(ctx.guild.id, owned["name"])
+        shop_item = get_shop_item_by_id(ctx.guild.id, owned["item_id"])
         if not shop_item:
             return await ctx.send("That item is no longer in the shop, so it can't be sold back.")
 
@@ -1727,6 +2040,49 @@ class Economy(commands.Cog):
             action="Add Money Role",
             actor=ctx.author,
             details=f"Added **{amount:,}** to **{count}** rolechat(s) of members with {role.mention}.",
+        )
+
+    @commands.command(name="remove-money-role", aliases=["remove_money_role", "rmmrole"])
+    @commands.has_permissions(administrator=True)
+    async def remove_money_role(self, ctx: commands.Context, role: discord.Role, amount: int):
+        """Remove money from rolechats of all members with a specific role."""
+        if amount <= 0:
+            return await ctx.send("Amount must be greater than 0. Usage: `.rmmrole @role <amount>`.")
+        if amount > 10_000:
+            return await ctx.send("Amount cannot exceed **10,000** per user.")
+
+        guild_data = load_guild_data(ctx.guild.id)
+
+        # Count members per rolechat so a shared rolechat is only charged once
+        # per member, and never below zero.
+        member_counts: dict[int, int] = {}
+        rolechats: dict[int, discord.TextChannel] = {}
+        for member in role.members:
+            if member.bot:
+                continue
+            rc = _find_player_rolechat(ctx.guild, member, guild_data)
+            if rc:
+                member_counts[rc.id] = member_counts.get(rc.id, 0) + 1
+                rolechats[rc.id] = rc
+
+        total_removed = 0
+        for rc_id, member_count in member_counts.items():
+            bal = get_economy_channel_balance(ctx.guild.id, rc_id)
+            to_remove = min(amount * member_count, bal)
+            if to_remove <= 0:
+                continue
+            total_removed += to_remove
+            update_economy_channel_balance(ctx.guild.id, rc_id, -to_remove)
+
+        await ctx.send(
+            f"Removed **{total_removed:,}** from **{len(rolechats)}** rolechats of members with {role.mention}."
+        )
+        await _log_economy(
+            ctx.guild,
+            guild_data,
+            action="Remove Money Role",
+            actor=ctx.author,
+            details=f"Removed **{total_removed:,}** from **{len(rolechats)}** rolechat(s) of members with {role.mention}.",
         )
 
     @commands.command(name="leaderboard", aliases=["lb", "top"])
@@ -1776,46 +2132,49 @@ class Economy(commands.Cog):
 
     @commands.command(name="use")
     async def use_item(self, ctx: commands.Context, *, item_name: str):
-        """Use an item from your channel's inventory."""
+        """Use an item from your inventory: most items in a RoleChat, Broom and Peep Hole in a House."""
         guild_data = load_guild_data(ctx.guild.id)
-        is_broom = "broom" in item_name.lower()
-        is_peep = "peep" in item_name.lower()
-        if is_broom or is_peep:
-            if not _is_houses_category(ctx, guild_data=guild_data):
-                return await ctx.send(f"{'🧹 Broom' if is_broom else '🔭 Peep Hole'} can only be used in a House channel.")
-        else:
-            if not _is_rolechat_category(ctx, guild_data=guild_data):
-                return await ctx.send("Use items only in a RoleChat channel. Usage: `.use <item_name>`.")
+        in_rolechat = _is_rolechat_category(ctx, guild_data=guild_data)
+        in_house = _is_houses_category(ctx, guild_data=guild_data)
+        if not (in_rolechat or in_house):
+            return await ctx.send("Use items in a RoleChat or House channel. Usage: `.use <item_name>`.")
 
-        # Determine which channel's inventory to check and deduct from.
-        # Broom/Peep Hole in houses: look up the user's rolechat instead of the house channel.
-        inv_channel_id = ctx.channel.id
-        if is_broom or is_peep:
-            alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
-            sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
-            if not (alive_role in ctx.author.roles or sponsor_role in ctx.author.roles):
-                label = "Peep Hole" if is_peep else "broom"
-                return await ctx.send(f"You need the Alive or Sponsor role to use the {label}.")
-            rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
-            found = next(
-                (c for c in rc_cat.text_channels if ctx.author in c.members and c.permissions_for(ctx.author).send_messages),
-                None,
-            ) if rc_cat else None
-            if not found:
-                return await ctx.send("Could not find your rolechat to check inventory.")
+        if in_rolechat:
+            inv_channel_id = ctx.channel.id
+        else:
+            # Items are stored per rolechat, so a house lookup uses the author's rolechat.
+            found = _players_rolechat(ctx, guild_data)
+            if isinstance(found, str):
+                return await ctx.send(found)
             inv_channel_id = found.id
 
         owned = await self._resolve_inventory_item(ctx, inv_channel_id, item_name)
         if owned is None:
             return
 
+        # Routing uses the item that was matched, not the text typed, so partial names behave the same.
         name_lower = owned["name"].lower()
+        is_broom = "broom" in name_lower
+        is_peep = "peep" in name_lower
+        if is_broom or is_peep:
+            label, keyword = ("🧹 Broom", "broom") if is_broom else ("🔭 Peep Hole", "peep")
+            if not in_house:
+                return await ctx.send(f"{label} can only be used in a House channel. Use `.use {keyword}` there.")
+            alive_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+            sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
+            if not (alive_role in ctx.author.roles or sponsor_role in ctx.author.roles):
+                return await ctx.send(f"You need the Alive or Sponsor role to use the {'Peep Hole' if is_peep else 'broom'}.")
+        elif not in_rolechat:
+            return await ctx.send(f"**{owned['name']}** can only be used in a RoleChat channel.")
+
         ok = False
 
         if "firework" in name_lower:
             ok = await self._trigger_fireworks(ctx)
         elif "whisper" in name_lower:
             ok = await self._trigger_whisper(ctx)
+        elif "private pc" in name_lower:
+            ok = await self._trigger_private_pc(ctx)
         elif "broom" in name_lower:
             ok = await self._trigger_broom(ctx)
         elif "shoe" in name_lower:
@@ -1864,7 +2223,7 @@ class Economy(commands.Cog):
             await ctx.send(err)
             return False
         await ann_ch.send(
-            f"{alive_role.mention}{sponsor_role.mention}\n{user.mention} is in {house.name}"
+            f"{role_pings(alive_role, sponsor_role)}\n{user.mention} is in {house.name}"
         )
         await ann_ch.send(gif)
         await ctx.send("🎆 Fireworks launched!")
@@ -1934,12 +2293,12 @@ class Economy(commands.Cog):
                         await ctx.send("Whisper cancelled (timeout).")
                         return
 
-                    rc_cat = discord.utils.get(ctx.guild.categories, name=guild_data.get("rc_category_name"))
-                    if not rc_cat:
+                    rolechats = _player_rolechat_channels(ctx.guild, guild_data)
+                    if not rolechats:
                         await ctx.send("RoleChats category not configured.")
                         return
                     log_ch = discord.utils.get(ctx.guild.channels, name=guild_data.get("whisper_logs_channel_name"))
-                    for ch in rc_cat.text_channels:
+                    for ch in rolechats:
                         if target in ch.members:
                             embed = info_embed()
                             content = reply.content[:1021] + "..." if len(reply.content) > 1024 else reply.content
@@ -1955,6 +2314,8 @@ class Economy(commands.Cog):
                                 await log_ch.send(embed=log_embed)
                             delivered = True
                             break
+                    if not delivered:
+                        await ctx.send(f"✉ Whisper not sent: {target.display_name} isn't in a RoleChat right now.")
                     if delivered:
                         await ctx.send("✉ Whisper sent.")
                 finally:
@@ -1971,6 +2332,31 @@ class Economy(commands.Cog):
         except asyncio.TimeoutError:
             pass
         return delivered
+
+    async def _trigger_private_pc(self, ctx: commands.Context) -> bool:
+        """Open a private PC with a chosen alive player, plus all sponsors."""
+        guild_data = load_guild_data(ctx.guild.id)
+        targets = private_pc_targets(ctx.guild, guild_data, ctx.author)
+        if isinstance(targets, str):
+            await ctx.send(targets)
+            return False
+
+        result, done = {"ok": False}, asyncio.Event()
+
+        async def on_pick(target):
+            return await open_private_pc_with(ctx.guild, guild_data, ctx.author, target)
+
+        view = private_pc_menu(ctx.author, targets, on_pick, result, done)
+        await ctx.send(
+            embed=plain_embed(title="🔒 Private PC", description="Choose the player to open a private channel with. Every sponsor is added automatically."),
+            view=view,
+        )
+        try:
+            await asyncio.wait_for(done.wait(), timeout=300)
+        except asyncio.TimeoutError:
+            await ctx.send("Private PC cancelled (timeout).")
+            return False
+        return result["ok"]
 
     async def _trigger_broom(self, ctx: commands.Context) -> bool:
         """Clears messages after a user-specified anchor message. Delegates to Utility.broom_delete."""
@@ -1996,12 +2382,16 @@ class Economy(commands.Cog):
 
             reply = await ctx.bot.wait_for("message", check=reply_check, timeout=120)
             anchor = reply.reference.resolved
-            if not anchor:
-                await ctx.send("Could not resolve the target message.")
-                return False
+            if not isinstance(anchor, discord.Message):
+                try:
+                    anchor = await ctx.channel.fetch_message(reply.reference.message_id)
+                except (discord.NotFound, discord.HTTPException):
+                    await ctx.send("Could not resolve the target message.")
+                    return False
 
-            to_delete = []
-            async for msg in ctx.channel.history(after=anchor):
+            # The replied-to message is part of the sweep, unless it is pinned.
+            to_delete = [] if anchor.pinned else [anchor]
+            async for msg in ctx.channel.history(after=anchor, limit=None, oldest_first=True):
                 if not msg.pinned:
                     to_delete.append(msg)
 
@@ -2013,7 +2403,7 @@ class Economy(commands.Cog):
             if not utility:
                 await ctx.send("Utility cog is not loaded. Cannot broom.")
                 return False
-            await utility.broom_delete(ctx, to_delete)
+            await utility.broom_delete(ctx, to_delete, individual_limit=None)
             return True
         except asyncio.TimeoutError:
             await ctx.send("Broom cancelled (timeout).")

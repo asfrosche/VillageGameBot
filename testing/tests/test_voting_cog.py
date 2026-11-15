@@ -17,8 +17,8 @@ class TestVoting:
     def test_vote_has_help(self):
         """Verify vote command has help text."""
         method = getattr(voting_cog.Voting, 'vote')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_abstain_exists(self):
         """Verify abstain command exists on the cog."""
@@ -27,8 +27,8 @@ class TestVoting:
     def test_abstain_has_help(self):
         """Verify abstain command has help text."""
         method = getattr(voting_cog.Voting, 'abstain')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_manipulate_exists(self):
         """Verify manipulate command exists on the cog."""
@@ -37,8 +37,8 @@ class TestVoting:
     def test_manipulate_has_help(self):
         """Verify manipulate command has help text."""
         method = getattr(voting_cog.Voting, 'manipulate')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removevote_exists(self):
         """Verify removevote command exists on the cog."""
@@ -47,8 +47,8 @@ class TestVoting:
     def test_removevote_has_help(self):
         """Verify removevote command has help text."""
         method = getattr(voting_cog.Voting, 'removevote')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_voteinrc_exists(self):
         """Verify voteinrc command exists on the cog."""
@@ -57,8 +57,8 @@ class TestVoting:
     def test_voteinrc_has_help(self):
         """Verify voteinrc command has help text."""
         method = getattr(voting_cog.Voting, 'voteinrc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_votelist_exists(self):
         """Verify votelist command exists on the cog."""
@@ -67,8 +67,8 @@ class TestVoting:
     def test_votelist_has_help(self):
         """Verify votelist command has help text."""
         method = getattr(voting_cog.Voting, 'votelist')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_resetvotes_exists(self):
         """Verify resetvotes command exists on the cog."""
@@ -77,8 +77,8 @@ class TestVoting:
     def test_resetvotes_has_help(self):
         """Verify resetvotes command has help text."""
         method = getattr(voting_cog.Voting, 'resetvotes')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_votehistory_exists(self):
         """Verify votehistory command exists on the cog."""
@@ -87,5 +87,5 @@ class TestVoting:
     def test_votehistory_has_help(self):
         """Verify votehistory command has help text."""
         method = getattr(voting_cog.Voting, 'votehistory')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

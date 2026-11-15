@@ -17,8 +17,8 @@ class TestPresets:
     def test_preset_has_help(self):
         """Verify preset command has help text."""
         method = getattr(presets_cog.Presets, 'preset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ospreset_exists(self):
         """Verify ospreset command exists on the cog."""
@@ -27,8 +27,8 @@ class TestPresets:
     def test_ospreset_has_help(self):
         """Verify ospreset command has help text."""
         method = getattr(presets_cog.Presets, 'ospreset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ospresetsort_exists(self):
         """Verify ospresetsort command exists on the cog."""
@@ -37,8 +37,8 @@ class TestPresets:
     def test_ospresetsort_has_help(self):
         """Verify ospresetsort command has help text."""
         method = getattr(presets_cog.Presets, 'ospresetsort')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ospresetcategories_exists(self):
         """Verify ospresetcategories command exists on the cog."""
@@ -47,8 +47,8 @@ class TestPresets:
     def test_ospresetcategories_has_help(self):
         """Verify ospresetcategories command has help text."""
         method = getattr(presets_cog.Presets, 'ospresetcategories')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_resolve_category_display_with_none(self):
         """Verify resolve_category_display handles None correctly."""

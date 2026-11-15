@@ -323,6 +323,7 @@ class Meetup(commands.Cog):
     @commands.command(name="setphase")
     @commands.has_permissions(administrator=True)
     async def setphase(self, ctx, phase: str):
+        """Manually set the meetup phase to day or night."""
         if phase.lower() not in ["day", "night"]:
             await ctx.send("Use: day or night")
             return
@@ -333,6 +334,7 @@ class Meetup(commands.Cog):
     @commands.command(name="forcemeet")
     @commands.has_permissions(administrator=True)
     async def forcemeet(self, ctx, member1: discord.Member, member2: discord.Member):
+        """Force a meeting between two players (admin)."""
         if ctx.guild.id not in self.enabled_guilds:
             await ctx.send("Meetup Matrix is not enabled on this server.")
             return
@@ -350,6 +352,7 @@ class Meetup(commands.Cog):
     @commands.command(name="allmeets")
     @commands.has_permissions(administrator=True)
     async def allmeets(self, ctx, member: discord.Member = None):
+        """Show every meeting a player has had (admin)."""
         if ctx.guild.id not in self.enabled_guilds:
             await ctx.send("Meetup Matrix is not enabled on this server.")
             return
@@ -417,6 +420,7 @@ class Meetup(commands.Cog):
     @commands.command(name="meetupmatrix")
     @commands.has_permissions(administrator=True)
     async def meetupmatrix(self, ctx):
+        """Show the meetup matrix for the current phase (admin)."""
         if ctx.guild.id not in self.enabled_guilds:
             await ctx.send("Meetup Matrix is not enabled on this server.")
             return

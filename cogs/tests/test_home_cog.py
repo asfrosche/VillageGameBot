@@ -17,8 +17,8 @@ class TestHome:
     def test_home_has_help(self):
         """Verify home command has help text."""
         method = getattr(home_cog.Home, 'home')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_rolechat_exists(self):
         """Verify rolechat command exists on the cog."""
@@ -27,8 +27,8 @@ class TestHome:
     def test_rolechat_has_help(self):
         """Verify rolechat command has help text."""
         method = getattr(home_cog.Home, 'rolechat')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_owner_exists(self):
         """Verify owner command exists on the cog."""
@@ -37,5 +37,245 @@ class TestHome:
     def test_owner_has_help(self):
         """Verify owner command has help text."""
         method = getattr(home_cog.Home, 'owner')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+
+class TestRolechatDispatch:
+    """`.rolechat` must route initialize/check/list and reject anything else."""
+
+    @staticmethod
+    def _ctx(is_admin=True):
+        ctx = MagicMock()
+        ctx.author.guild_permissions.administrator = is_admin
+        ctx.send = AsyncMock()
+        return ctx
+
+    @staticmethod
+    async def _run(ctx, arg):
+        cog = home_cog.Home(MagicMock())
+        cog.rc_initialize = AsyncMock()
+        cog.rc_list = AsyncMock()
+        await home_cog.Home.rolechat.callback(cog, ctx, arg)
+        return cog
+
+    @pytest.mark.asyncio
+    async def test_check_routes_to_list(self):
+        """`.rolechat check` must call rc_list (this was the reported bug)."""
+        ctx = self._ctx()
+        cog = await self._run(ctx, "check")
+        cog.rc_list.assert_awaited_once()
+        cog.rc_initialize.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_routes_to_list(self):
+        """`.rolechat list` keeps working too."""
+        ctx = self._ctx()
+        cog = await self._run(ctx, "list")
+        cog.rc_list.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_initialize_routes_to_initialize(self):
+        """`.rolechat initialize` calls rc_initialize."""
+        ctx = self._ctx()
+        cog = await self._run(ctx, "initialize")
+        cog.rc_initialize.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_case_insensitive(self):
+        """Argument casing must not matter."""
+        ctx = self._ctx()
+        cog = await self._run(ctx, "CHECK")
+        cog.rc_list.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_argument_does_not_crash(self):
+        """A bare `.rolechat` previously raised AttributeError on None.lower()."""
+        ctx = self._ctx()
+        cog = await self._run(ctx, None)
+        cog.rc_list.assert_not_called()
+        cog.rc_initialize.assert_not_called()
+        ctx.send.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_invalid_argument_rejected(self):
+        """Unknown argument gets a helpful message."""
+        ctx = self._ctx()
+        cog = await self._run(ctx, "banana")
+        cog.rc_list.assert_not_called()
+        cog.rc_initialize.assert_not_called()
+        ctx.send.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_admin_blocked(self):
+        """Non-admins are refused before any work happens."""
+        ctx = self._ctx(is_admin=False)
+        cog = await self._run(ctx, "check")
+        cog.rc_list.assert_not_called()
+        ctx.send.assert_awaited()
+
+
+class TestRcInitializeReset:
+    """`.rolechat initialize` rebuilds RCs, clearing stale member overwrites."""
+
+    @staticmethod
+    def _member(uid, name):
+        member = MagicMock(spec=discord.Member)
+        member.id = uid
+        member.display_name = name
+        return member
+
+    @pytest.mark.asyncio
+    @patch("cogs.home_cog.save_guild_data")
+    @patch("cogs.home_cog.load_guild_data")
+    async def test_clears_member_overwrites_then_assigns(self, mock_load, mock_save):
+        stale = self._member(1, "Stale")
+        alive = self._member(2, "Alice")
+
+        alive_role = MagicMock()
+        # Membership is tested with `alive_role in member.roles`.
+        alive.roles = [alive_role]
+        stale.roles = []
+        role_overwrite_target = MagicMock(spec=discord.Role)
+
+        rc_channel = MagicMock()
+        rc_channel.name = "1"
+        rc_channel.overwrites = {stale: MagicMock(), role_overwrite_target: MagicMock()}
+        rc_channel.set_permissions = AsyncMock()
+        rc_channel.members = []
+
+        role_category = MagicMock()
+        role_category.text_channels = [rc_channel]
+        role_category.channels = [rc_channel]
+
+        guild = MagicMock()
+        guild.members = [alive]
+        guild.roles = [alive_role]
+        guild.categories = []
+        guild.get_channel = MagicMock(return_value=None)
+
+        mock_load.return_value = {
+            "rc_category_name": "ROLES",
+            "alt_category_name": "ALTS",
+            "alive_role_name": "Alive",
+        }
+
+        ctx = MagicMock()
+        ctx.guild = guild
+        ctx.author.guild_permissions.administrator = True
+        status = MagicMock()
+        status.edit = AsyncMock()
+        ctx.send = AsyncMock(return_value=status)
+
+        rc_for = AsyncMock(return_value=rc_channel)
+        with patch("cogs.home_cog.discord.utils.get") as mock_get, \
+             patch.object(home_cog.Home, "_rc_channel_for", new=rc_for):
+            def fake_get(iterable, **kwargs):
+                if kwargs.get("name") == "ROLES":
+                    return role_category
+                if kwargs.get("name") == "Alive":
+                    return alive_role
+                return None
+
+            mock_get.side_effect = fake_get
+            cog = home_cog.Home(MagicMock())
+            await cog.rc_initialize(ctx)
+        # The stale member overwrite must be cleared...
+        cleared = [
+            call for call in rc_channel.set_permissions.await_args_list
+            if call.kwargs.get("overwrite", "MISSING") is None
+        ]
+        assert cleared, "stale member overwrite was not cleared"
+        cleared_targets = [call.args[0] for call in cleared]
+        assert stale in cleared_targets
+        # ...but role-level overwrites are left untouched.
+        assert role_overwrite_target not in cleared_targets
+
+        # The alive player gets read + send.
+        granted = [
+            call for call in rc_channel.set_permissions.await_args_list
+            if call.kwargs.get("read_messages") is True
+        ]
+        assert granted and granted[0].args[0] is alive
+
+        # One RC per alive player.
+        assert rc_for.await_count == 1
+
+
+
+class TestRcListIncludesSponsors:
+    """`.rolechat lynch` / `.rolechat list` shows sponsors as well as players."""
+
+    @staticmethod
+    def _member(uid, name, roles):
+        member = MagicMock(spec=discord.Member)
+        member.id = uid
+        member.display_name = name
+        member.mention = f"<@{uid}>"
+        member.roles = roles
+        return member
+
+    @pytest.mark.asyncio
+    @patch("cogs.home_cog.load_guild_data")
+    @patch("cogs.home_cog.discord.utils.get")
+    async def test_lists_alive_players_and_sponsors(self, mock_get, mock_load):
+        alive_role = MagicMock()
+        alive_role.name = "Alive"
+        sponsor_role = MagicMock()
+        sponsor_role.name = "Sponsor"
+
+        alice = self._member(1, "Alice", [alive_role])
+        sam = self._member(2, "Sam", [sponsor_role])
+        channel = MagicMock()
+        channel.name = "1"
+        channel.mention = "#1"
+        channel.members = [sam, alice]  # unsorted on purpose
+
+        category = MagicMock()
+        category.text_channels = [channel]
+
+        guild = MagicMock()
+        guild.categories = []
+        guild.roles = [alive_role, sponsor_role]
+
+        def fake_get(iterable, **kwargs):
+            return {
+                "ROLES": category,
+                "ALTS": None,
+                "Alive": alive_role,
+                "Sponsor": sponsor_role,
+            }.get(kwargs.get("name"))
+
+        mock_get.side_effect = fake_get
+        mock_load.return_value = {
+            "rc_category_name": "ROLES",
+            "alt_category_name": "ALTS",
+            "alive_role_name": "Alive",
+            "sponsor_role_name": "Sponsor",
+        }
+
+        ctx = MagicMock()
+        ctx.guild = guild
+        ctx.author.guild_permissions.administrator = True
+        ctx.send = AsyncMock()
+
+        await home_cog.Home.rc_list(home_cog.Home(MagicMock()), ctx)
+
+        embed = ctx.send.await_args.kwargs["embed"]
+        assert "Alice" in embed.description
+        assert "Sam" in embed.description
+        assert "💰" in embed.description
+        # Alive first alphabetically, sponsor also listed (not dropped).
+        assert embed.description.index("Alice") < embed.description.index("Sam")
+
+    @pytest.mark.asyncio
+    async def test_lynch_alias_routes_to_list(self):
+        ctx = MagicMock()
+        ctx.author.guild_permissions.administrator = True
+        ctx.send = AsyncMock()
+        cog = home_cog.Home(MagicMock())
+        cog.rc_initialize = AsyncMock()
+        cog.rc_list = AsyncMock()
+        await home_cog.Home.rolechat.callback(cog, ctx, "lynch")
+        cog.rc_list.assert_awaited_once()
+        cog.rc_initialize.assert_not_called()

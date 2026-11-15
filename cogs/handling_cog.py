@@ -1,4 +1,5 @@
 import random
+from utils.discord_safe import add_text_fields, category_family, next_family_name
 import discord
 import datetime
 from datetime import datetime, timedelta, timezone
@@ -6,6 +7,84 @@ from discord.ext import commands
 from cogs.data_utils import load_guild_data, save_guild_data
 
 PUBLIC_CHANNEL_EMOJI = " \U0001f513"
+
+# Discord allows at most 50 channels per category; moving into a full one fails with code 50035.
+DISCORD_CATEGORY_LIMIT = 50
+CATEGORY_FULL_CODE = 50035
+
+
+async def move_channel_or_warn(channel, category):
+    """Move *channel* into *category*. Returns a warning string if the category has no room, else None."""
+    if category is None or channel.category is category:
+        return None
+    if len(category.channels) >= DISCORD_CATEGORY_LIMIT:
+        return f"⚠️ **{category.name}** is full ({DISCORD_CATEGORY_LIMIT} channels), so {channel.mention} was not moved."
+    try:
+        await channel.edit(category=category)
+    except discord.HTTPException as e:
+        if getattr(e, "code", None) == CATEGORY_FULL_CODE:
+            return f"⚠️ **{category.name}** is full, so {channel.mention} was not moved."
+        raise
+    return None
+
+
+async def get_pc_category(guild, guild_data, pc_type="private"):
+    """Return a PC category with room: the main one, an existing overflow, or a new overflow.
+
+    Returns the last full category if creating an overflow fails, so callers can report it.
+    """
+    pc_type = (pc_type or "").lower()
+    if pc_type in ["public", "publ"]:
+        base_name = guild_data.get("publc_category_name") or "PUBLIC CHANNELS"
+    else:
+        base_name = guild_data.get("privc_category_name") or "PRIVATE CHANNELS"
+    family = category_family(guild.categories, base_name)
+    for cat in family:
+        if len(cat.channels) < DISCORD_CATEGORY_LIMIT:
+            return cat
+    if not family:
+        return None
+    try:
+        new_cat = await guild.create_category(next_family_name(guild.categories, base_name))
+        await new_cat.set_permissions(guild.default_role, read_messages=False, mention_everyone=False, create_public_threads=False, create_private_threads=False, send_messages_in_threads=False, use_application_commands=False, use_embedded_activities=False)
+        return new_cat
+    except Exception:
+        return family[-1]
+
+
+def role_pings(*roles):
+    """Mention string for roles that exist; roles missing from the server are skipped."""
+    return " ".join(role.mention for role in roles if role is not None)
+
+
+async def announce_homeless(guild, house, member_id):
+    """Post that a former resident no longer lives in *house*. Skipped if they have left the server."""
+    try:
+        member_obj = await guild.fetch_member(int(member_id))
+    except discord.NotFound:
+        return
+    message = await house.send(f"{member_obj.mention} doesn't live here anymore")
+    await message.pin()
+
+
+async def get_old_pcs_category(guild, guild_data):
+    """Return an OLD PCS category with room, creating an overflow category if every one is full."""
+    base_name = guild_data.get("old_pcs_category_name") or "OLD PCS"
+    family = category_family(guild.categories, base_name)
+    for cat in family:
+        if len(cat.channels) < DISCORD_CATEGORY_LIMIT:
+            return cat
+    if not family:
+        return None
+    try:
+        new_cat = await guild.create_category(next_family_name(guild.categories, base_name))
+        spec = discord.utils.get(guild.roles, name=guild_data.get("spectator_role_name", "Spectator"))
+        if spec:
+            await new_cat.set_permissions(spec, read_messages=True, send_messages=False, create_public_threads=False, create_private_threads=False, send_messages_in_threads=False)
+        await new_cat.set_permissions(guild.default_role, read_messages=False)
+        return new_cat
+    except Exception:
+        return family[-1]
 
 
 def _ensure_public_emoji(name: str) -> str:
@@ -55,12 +134,11 @@ class Handling(commands.Cog):
             if members_to_delete:
                 for m_id in members_to_delete:
                     del guild_data["member_homes"][m_id]
-                    member_obj = await ctx.guild.fetch_member(int(m_id))
-                    message = await house.send(f"{member_obj.mention} doesn't live here anymore")
-                    await message.pin()
+                    await announce_homeless(ctx.guild, house, m_id)
             if inaccessible_houses_category:
-                if house.category is not inaccessible_houses_category:
-                    await house.edit(category=inaccessible_houses_category)
+                warning = await move_channel_or_warn(house, inaccessible_houses_category)
+                if warning:
+                    await ctx.send(warning)
             if map_channel:    
                 await map_channel.send(f"{house.name} is inaccessible")
             if ctx.channel is not house:
@@ -106,17 +184,16 @@ class Handling(commands.Cog):
             if members_to_delete:
                 for m_id in members_to_delete:
                     del guild_data["member_homes"][m_id]
-                    member_obj = await ctx.guild.fetch_member(int(m_id))
-                    message = await house.send(f"{member_obj.mention} doesn't live here anymore")
-                    await message.pin()
+                    await announce_homeless(ctx.guild, house, m_id)
             if inaccessible_houses_category:
-                if house.category is not inaccessible_houses_category:
-                    await house.edit(category=inaccessible_houses_category)
+                warning = await move_channel_or_warn(house, inaccessible_houses_category)
+                if warning:
+                    await ctx.send(warning)
             if announcements_channel:
                 embed = discord.Embed(title=f"{house.name} gets destroyed", color=0xff3fb9, timestamp=datetime.now())
                 embed.set_image(url=random_explosion_gif)
                 embed.set_footer(text="Village Game")
-                await announcements_channel.send(f"{alive_role.mention} {sponsor_role.mention}", embed=embed)
+                await announcements_channel.send(role_pings(alive_role, sponsor_role) or None, embed=embed)
             if map_channel:
                     await map_channel.send(f"{house.name} is inaccessible")
             if ctx.channel is not house:
@@ -149,7 +226,7 @@ class Handling(commands.Cog):
             embed = discord.Embed(title=f"{house.name} gets destroyed", color=0xff3fb9, timestamp=datetime.now())
             embed.set_image(url=random_explosion_gif)
             embed.set_footer(text="Village Game")
-            await announcements_channel.send(f"{alive_role.mention} {sponsor_role.mention}", embed=embed)
+            await announcements_channel.send(role_pings(alive_role, sponsor_role) or None, embed=embed)
         if map_channel:
             await map_channel.send(f"{house.name} is inaccessible")
         if house.name in guild_data["houselist"]:
@@ -183,7 +260,7 @@ class Handling(commands.Cog):
                 embed = discord.Embed(title=f"{house.name} gets rebuilt", color=0xff3fb9, timestamp=datetime.now())
                 embed.set_image(url=random_rebuild_gif)
                 embed.set_footer(text="Village Game")
-                await announcements_channel.send(f"{alive_role.mention} {sponsor_role.mention}", embed=embed)
+                await announcements_channel.send(role_pings(alive_role, sponsor_role) or None, embed=embed)
             if map_channel:
                 await map_channel.send(f"{house.name} is accessible")
             if ctx.channel is not house:
@@ -220,15 +297,21 @@ class Handling(commands.Cog):
             return
         new_channel = None
         if pc_type.lower() in ["public", "publ"]:
-            publc_category = discord.utils.get(ctx.guild.categories, name=guild_data["publc_category_name"])
+            publc_category = await get_pc_category(ctx.guild, guild_data, "public")
             if not publc_category:
                 await ctx.send("Public category not found.")
                 return
+            if len(publc_category.channels) >= DISCORD_CATEGORY_LIMIT:
+                await ctx.send(f"❌ **{publc_category.name}** is full ({DISCORD_CATEGORY_LIMIT} channels). Make room or add another public category.")
+                return
             new_channel = await publc_category.create_text_channel(name=name)
         elif pc_type.lower() in ["private", "priv"]:
-            privc_category = discord.utils.get(ctx.guild.categories, name=guild_data["privc_category_name"])
+            privc_category = await get_pc_category(ctx.guild, guild_data, "private")
             if not privc_category:
                 await ctx.send("Private category not found.")
+                return
+            if len(privc_category.channels) >= DISCORD_CATEGORY_LIMIT:
+                await ctx.send(f"❌ **{privc_category.name}** is full ({DISCORD_CATEGORY_LIMIT} channels). Make room or add another private category.")
                 return
             new_channel = await privc_category.create_text_channel(name=name)
         else:
@@ -263,7 +346,7 @@ class Handling(commands.Cog):
             guild_data = load_guild_data(ctx.guild.id)
             if not guild_data:
                 return await ctx.send("Guild data not loaded")
-            old_pcs_category = discord.utils.get(ctx.guild.categories, name=guild_data["old_pcs_category_name"])
+            old_pcs_category = await get_old_pcs_category(ctx.guild, guild_data)
             alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
             sponsor_role = discord.utils.get(ctx.guild.roles, name=guild_data["sponsor_role_name"])
             alt_role = discord.utils.get(ctx.guild.roles, name=guild_data["alt_role_name"])
@@ -287,11 +370,22 @@ class Handling(commands.Cog):
                 if permissions.read_messages:
                     await chat.set_permissions(role, overwrite=None)
             await chat.set_permissions(ctx.guild.default_role, read_messages=False)
-            await chat.set_permissions(spect_role, read_messages=True, send_messages=False)
+            if spect_role:
+                await chat.set_permissions(spect_role, read_messages=True, send_messages=False)
             save_guild_data(ctx.guild.id, guild_data)
             if old_pcs_category:
                 if chat.category is not old_pcs_category:
-                    await chat.edit(category=old_pcs_category)
+                    try:
+                        await chat.edit(category=old_pcs_category)
+                    except discord.HTTPException as e:
+                        if getattr(e, "code", None) == CATEGORY_FULL_CODE:
+                            await ctx.send(f"⚠️ **{old_pcs_category.name}** is full, so {chat.mention} was closed but not moved.")
+                        else:
+                            pass
+                    except Exception:
+                        pass
+            else:
+                await ctx.send(f"⚠️ No OLD PCS category has room ({DISCORD_CATEGORY_LIMIT} channels each), so {chat.mention} was closed but not moved.")
             await ctx.send('Done')
             estate_cog = self.bot.get_cog('Estate')
             if estate_cog:
@@ -331,7 +425,7 @@ class Handling(commands.Cog):
                     embed=discord.Embed(title=f"{channel.name} is now public", color=0xff3fb9, timestamp=datetime.now())
                     embed.set_image(url=random_public_gif)
                     embed.set_footer(text="Village Game")
-                    await announcements_channel.send(f"{alive_role.mention} {sponsor_role.mention}", embed=embed) 
+                    await announcements_channel.send(role_pings(alive_role, sponsor_role) or None, embed=embed) 
                 await ctx.send('Done')
             else:
                 await ctx.send('Guild data not loaded')
@@ -560,8 +654,10 @@ class Handling(commands.Cog):
                     await msg.pin()
                 except discord.NotFound:
                     pass
-            if inaccessible_category and house.category is not inaccessible_category:
-                await house.edit(category=inaccessible_category)
+            if inaccessible_category:
+                warning = await move_channel_or_warn(house, inaccessible_category)
+                if warning:
+                    await ctx.send(warning)
             if map_channel:
                 await map_channel.send(f"{house.name} is inaccessible")
             if house.name in guild_data["houselist"]:

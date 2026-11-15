@@ -19,8 +19,8 @@ class TestAnalyticsCog:
     def test_analytics_has_help(self):
         """Verify analytics command has help text."""
         method = getattr(analytics_cog.AnalyticsCog, 'analytics')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_analytics_aliases(self):
         """Verify analytics command has astats alias."""
@@ -35,12 +35,9 @@ class TestAnalyticsCog:
     def test_failures_has_help(self):
         """Verify failures command has help text."""
         method = getattr(analytics_cog.AnalyticsCog, 'failures')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_analyticsview_instantiates(self):
-        """Verify AnalyticsView can be instantiated."""
-        pass
 
     def test_analyticsview_build_summary(self):
         """Verify AnalyticsView._build_summary exists."""

@@ -1,4 +1,5 @@
 import asyncio
+from utils.discord_safe import category_family
 import discord
 from discord.ext import commands
 import os
@@ -129,14 +130,14 @@ class ChannelMap(commands.Cog):
     # ── Channel data gathering ───────────────────────────────────────────────
 
     async def _gather_channels(self, guild, category_name, alive_role=None, alt_role=None, dead_role=None):
-        category = discord.utils.get(guild.categories, name=category_name)
-        if not category:
+        categories = category_family(guild.categories, category_name)
+        if not categories:
             return []
 
         # Use guild.members (authoritative) instead of ch.members (cache-dependent)
         # This matches .who's approach but applied server-wide
         channels_raw = []
-        for ch in category.text_channels:
+        for ch in [channel for category in categories for channel in category.text_channels]:
             if ch.name == "duplicate-this":
                 continue
             member_ids = []
@@ -683,6 +684,15 @@ class ChannelMap(commands.Cog):
         await ctx.send("⏳ Generating private channel map...")
         await self._build_and_send(ctx, "private")
 
+    @commands.command(name="channelstats")
+    async def cmd_channelstats(self, ctx):
+        """[ADMIN] List all categories with their channel count (button expands the channel names)."""
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("❌ You don't have permission to use this command.")
+            return
+        view = ChannelStatsView(ctx.guild, ctx.author.id)
+        view.message = await ctx.send(embed=view.get_embed(), view=view)
+
     # ── Auto-update listeners ────────────────────────────────────────────────
 
     @commands.Cog.listener()
@@ -708,6 +718,70 @@ class ChannelMap(commands.Cog):
         ]
         if channel.category and channel.category.name in cat_names:
             pass
+
+
+class ChannelStatsView(discord.ui.View):
+    """Collapsed list of categories + channel counts, expanded to channel names on demand."""
+
+    def __init__(self, guild, author_id: int):
+        super().__init__(timeout=180)
+        self.author_id = author_id
+        self.message = None
+        self.expanded = False
+        self.rows = self._collect(guild)
+
+    @staticmethod
+    def _collect(guild):
+        rows = []
+        for category in sorted(guild.categories, key=lambda c: c.position):
+            rows.append((category.name, sorted(category.channels, key=lambda c: c.position)))
+        loose = sorted((c for c in guild.channels if c.category_id is None),
+                       key=lambda c: c.position or 0)
+        if loose:
+            rows.append(("Uncategorised", loose))
+        return rows
+
+    def get_embed(self) -> discord.Embed:
+        total = sum(len(channels) for _, channels in self.rows)
+        embed = discord.Embed(
+            title="\U0001f4ca Channel Stats — Channel Names" if self.expanded else "\U0001f4ca Channel Stats",
+            color=0xff3fb9,
+        )
+        lines = []
+        for name, channels in self.rows:
+            if self.expanded:
+                listed = ", ".join(f"`#{ch.name}`" for ch in channels) or "*empty*"
+                lines.append(f"**{name}** ({len(channels)})\n{listed}")
+            else:
+                lines.append(f"**{name}** — {len(channels)} channel{'s' if len(channels) != 1 else ''}")
+        description = "\n".join(lines) or "*No channels found in this server.*"
+        if len(description) > 4000:
+            description = description[:3997] + "..."
+        embed.description = description
+        embed.set_footer(text=f"Village Game • {len(self.rows)} categories • {total} channels")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("This is not your session.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="\U0001f4cb Show all channels", style=discord.ButtonStyle.primary)
+    async def toggle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.expanded = not self.expanded
+        button.label = "\U0001f519 Hide channel names" if self.expanded else "\U0001f4cb Show all channels"
+        button.style = discord.ButtonStyle.secondary if self.expanded else discord.ButtonStyle.primary
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
 
 
 async def setup(bot):

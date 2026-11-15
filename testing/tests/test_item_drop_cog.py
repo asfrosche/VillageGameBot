@@ -17,10 +17,6 @@ class TestItemDrop:
     def test_dropitem_has_help(self):
         """Verify dropitem command has help text."""
         method = getattr(item_drop_cog.ItemDrop, 'dropitem')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_itemdropview_instantiates(self):
-        """Verify ItemDropView view can be instantiated."""
-        # ItemDropView — requires cog/bot context to instantiate
-        pass

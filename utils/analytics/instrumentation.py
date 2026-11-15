@@ -61,7 +61,8 @@ def register_analytics_hooks(bot: commands.Bot, service) -> None:
                 timestamp=datetime.utcnow(),
                 duration_ms=round(duration * 1000, 2),
                 success=False,
-                error_type=type(error).__name__,
+                # discord.py wraps command failures in CommandInvokeError; record the real cause.
+                error_type=type(getattr(error, "original", None) or error).__name__,
                 error_traceback=tb,
                 user_id=str(ctx.author.id) if ctx.author else None,
                 guild_id=str(ctx.guild.id) if ctx.guild else None,

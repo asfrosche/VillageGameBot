@@ -17,8 +17,8 @@ class TestOverseer:
     def test_setboard_has_help(self):
         """Verify setboard command has help text."""
         method = getattr(os_info_cog.Overseer, 'setboard')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setinfophase_exists(self):
         """Verify setinfophase command exists on the cog."""
@@ -27,8 +27,8 @@ class TestOverseer:
     def test_setinfophase_has_help(self):
         """Verify setinfophase command has help text."""
         method = getattr(os_info_cog.Overseer, 'setinfophase')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addcard_exists(self):
         """Verify addcard command exists on the cog."""
@@ -37,8 +37,8 @@ class TestOverseer:
     def test_addcard_has_help(self):
         """Verify addcard command has help text."""
         method = getattr(os_info_cog.Overseer, 'addcard')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_refreshcards_exists(self):
         """Verify refreshcards command exists on the cog."""
@@ -47,5 +47,5 @@ class TestOverseer:
     def test_refreshcards_has_help(self):
         """Verify refreshcards command has help text."""
         method = getattr(os_info_cog.Overseer, 'refreshcards')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

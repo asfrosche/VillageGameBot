@@ -409,21 +409,24 @@ def get_inventory_channel(guild_id: int, channel_id: int) -> list[dict]:
             """
             SELECT i.item_id, i.quantity, s.name, s.description
             FROM economy_channel_inventory i
-            JOIN economy_shop_items s ON s.id = i.item_id
+            LEFT JOIN economy_shop_items s ON s.id = i.item_id
             WHERE i.guild_id = ? AND i.channel_id = ? AND i.quantity > 0
-            ORDER BY s.name ASC
+            ORDER BY COALESCE(s.name, i.item_id) ASC
             """,
             (guild_id, channel_id),
         ).fetchall()
-        return [
-            {
-                "item_id": int(r["item_id"]),
-                "name": r["name"],
-                "description": r["description"] or "",
-                "quantity": int(r["quantity"]),
-            }
-            for r in rows
-        ]
+        result = []
+        for r in rows:
+            name = r["name"] if r["name"] is not None else f"Item {r['item_id']}"
+            result.append(
+                {
+                    "item_id": int(r["item_id"]),
+                    "name": name,
+                    "description": r["description"] or "",
+                    "quantity": int(r["quantity"]),
+                }
+            )
+        return result
 
 
 def add_inventory_item_channel(guild_id: int, channel_id: int, item_id: int, delta_qty: int) -> int:
@@ -557,6 +560,12 @@ def _normalize_name_for_match(name: str) -> str:
     return re.sub(r"\s+", "", re.sub(r"[^\w\s]", "", name)).lower()
 
 
+def get_shop_item_by_id(guild_id: int, item_id: int) -> dict | None:
+    """Exact lookup by id. Use this whenever the item is already known."""
+    _ensure_ready()
+    return next((it for it in get_shop_items(guild_id) if it["id"] == int(item_id)), None)
+
+
 def get_shop_item_by_name(guild_id: int, name_substring: str) -> dict | None:
     """Return first shop item whose name contains name_substring (case-insensitive, emoji stripped)."""
     _ensure_ready()
@@ -626,9 +635,10 @@ def search_inventory_items(guild_id: int, channel_id: int, query: str, limit: in
     return scored[:limit]
 
 
-def update_shop_item_by_name(guild_id: int, item_name: str, *, price: int | None = None, name: str | None = None, description: str | None = None, stock: int | None = None) -> bool:
+def update_shop_item_by_name(guild_id: int, item_name: str, *, price: int | None = None, name: str | None = None, description: str | None = None, stock: int | None = None, item_id: int | None = None) -> bool:
     _ensure_ready()
-    item = get_shop_item_by_name(guild_id, item_name)
+    # item_id, when known, is authoritative; the name is only a fallback for raw user input.
+    item = get_shop_item_by_id(guild_id, item_id) if item_id is not None else get_shop_item_by_name(guild_id, item_name)
     if not item:
         return False
     if name is not None and not name.strip():
@@ -671,11 +681,27 @@ def update_shop_item_by_name(guild_id: int, item_name: str, *, price: int | None
         return ok
 
 
-def remove_shop_item_by_name(guild_id: int, item_name: str) -> bool:
-    item = get_shop_item_by_name(guild_id, item_name)
+def remove_shop_item_by_name(guild_id: int, item_name: str, delete_from_inventory: bool = True, item_id: int | None = None) -> bool:
+    item = get_shop_item_by_id(guild_id, item_id) if item_id is not None else get_shop_item_by_name(guild_id, item_name)
     if not item:
         return False
-    deleted = remove_shop_item(guild_id, item["id"])
+    if not delete_from_inventory:
+        _ensure_ready()
+        with _connect() as conn:
+            cur = conn.cursor()
+            # Drop FK constraints temporarily to delete shop item without cascade
+            cur.execute("PRAGMA foreign_keys = OFF")
+            try:
+                cur.execute(
+                    "DELETE FROM economy_shop_items WHERE guild_id = ? AND id = ?",
+                    (guild_id, item["id"]),
+                )
+                deleted = cur.rowcount > 0
+                conn.commit()
+            finally:
+                cur.execute("PRAGMA foreign_keys = ON")
+    else:
+        deleted = remove_shop_item(guild_id, item["id"])
     if deleted and item.get("is_default"):
         _record_removed_default_item(guild_id, item["name"])
     return deleted

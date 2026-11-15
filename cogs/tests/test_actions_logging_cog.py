@@ -10,12 +10,4 @@ from cogs import actions_logging_cog
 class TestActionsLogging:
     """Validate all commands exist and have required metadata."""
 
-    def test_actionbuttons_instantiates(self):
-        """Verify ActionButtons view can be instantiated."""
-        # ActionButtons — requires cog/bot context to instantiate
-        pass
 
-    def test_cancelonlyview_instantiates(self):
-        """Verify CancelOnlyView view can be instantiated."""
-        # CancelOnlyView — requires cog/bot context to instantiate
-        pass

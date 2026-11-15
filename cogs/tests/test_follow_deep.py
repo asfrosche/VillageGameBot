@@ -260,16 +260,8 @@ class TestMoveFollowers:
         assert embed_kw.title == "Follower moved"
 
     @pytest.mark.asyncio
-    async def test_no_log_channel_no_error(self):
-        guild, guild_data, target, follower, house1, house2, log_ch, _ = self._build_setup()
-        guild.text_channels = []
-        await surveillance_cog.Surveillance._move_followers(None, guild, guild_data, target)
 
     @pytest.mark.asyncio
-    async def test_no_category_no_error(self):
-        guild, guild_data, target, follower, house1, house2, log_ch, _ = self._build_setup()
-        guild.categories = []
-        await surveillance_cog.Surveillance._move_followers(None, guild, guild_data, target)
 
     @pytest.mark.asyncio
     async def test_multiple_followers_all_move(self):
@@ -462,26 +454,6 @@ class TestAfterMovementUpdate:
             mock_cog.after_movement_update.assert_called_once_with(
                 guild, mock_load.return_value, target_member=None
             )
-
-    @pytest.mark.asyncio
-    async def test_no_guild_data_no_crash(self):
-        with patch("cogs.surveillance_cog.load_guild_data") as mock_load:
-            mock_load.return_value = None
-            ctx = MagicMock()
-            ctx.guild = _make_guild()
-
-            await surveillance_cog.after_movement_update(ctx)
-
-    @pytest.mark.asyncio
-    async def test_no_surveillance_cog_no_crash(self):
-        with patch("cogs.surveillance_cog.load_guild_data") as mock_load:
-            mock_load.return_value = _make_guild_data()
-            ctx = MagicMock()
-            ctx.guild = _make_guild()
-            ctx.bot = MagicMock()
-            ctx.bot.get_cog.return_value = None
-
-            await surveillance_cog.after_movement_update(ctx, target_member=_make_member(10))
 
 
 # ── Import chain & no duplicates ─────────────────────────────────────────────

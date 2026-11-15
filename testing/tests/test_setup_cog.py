@@ -17,8 +17,8 @@ class TestSetup:
     def test_setup_has_help(self):
         """Verify setup command has help text."""
         method = getattr(setup_cog.Setup, 'setup')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_roleset_exists(self):
         """Verify roleset command exists on the cog."""
@@ -27,8 +27,8 @@ class TestSetup:
     def test_roleset_has_help(self):
         """Verify roleset command has help text."""
         method = getattr(setup_cog.Setup, 'roleset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_channelset_exists(self):
         """Verify channelset command exists on the cog."""
@@ -37,8 +37,8 @@ class TestSetup:
     def test_channelset_has_help(self):
         """Verify channelset command has help text."""
         method = getattr(setup_cog.Setup, 'channelset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_categoryset_exists(self):
         """Verify categoryset command exists on the cog."""
@@ -47,8 +47,8 @@ class TestSetup:
     def test_categoryset_has_help(self):
         """Verify categoryset command has help text."""
         method = getattr(setup_cog.Setup, 'categoryset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_houseprefix_exists(self):
         """Verify houseprefix command exists on the cog."""
@@ -57,8 +57,8 @@ class TestSetup:
     def test_houseprefix_has_help(self):
         """Verify houseprefix command has help text."""
         method = getattr(setup_cog.Setup, 'houseprefix')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_knockduration_exists(self):
         """Verify knockduration command exists on the cog."""
@@ -67,8 +67,8 @@ class TestSetup:
     def test_knockduration_has_help(self):
         """Verify knockduration command has help text."""
         method = getattr(setup_cog.Setup, 'knockduration')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_showwhispersender_exists(self):
         """Verify showwhispersender command exists on the cog."""
@@ -77,8 +77,8 @@ class TestSetup:
     def test_showwhispersender_has_help(self):
         """Verify showwhispersender command has help text."""
         method = getattr(setup_cog.Setup, 'showwhispersender')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ajifempty_exists(self):
         """Verify ajifempty command exists on the cog."""
@@ -87,8 +87,8 @@ class TestSetup:
     def test_ajifempty_has_help(self):
         """Verify ajifempty command has help text."""
         method = getattr(setup_cog.Setup, 'ajifempty')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_ajknockexpire_exists(self):
         """Verify ajknockexpire command exists on the cog."""
@@ -97,8 +97,8 @@ class TestSetup:
     def test_ajknockexpire_has_help(self):
         """Verify ajknockexpire command has help text."""
         method = getattr(setup_cog.Setup, 'ajknockexpire')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_maxpinh_exists(self):
         """Verify maxpinh command exists on the cog."""
@@ -107,8 +107,8 @@ class TestSetup:
     def test_maxpinh_has_help(self):
         """Verify maxpinh command has help text."""
         method = getattr(setup_cog.Setup, 'maxpinh')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_refuseresponse_exists(self):
         """Verify refuseresponse command exists on the cog."""
@@ -117,8 +117,8 @@ class TestSetup:
     def test_refuseresponse_has_help(self):
         """Verify refuseresponse command has help text."""
         method = getattr(setup_cog.Setup, 'refuseresponse')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deadcount_exists(self):
         """Verify deadcount command exists on the cog."""
@@ -127,8 +127,8 @@ class TestSetup:
     def test_deadcount_has_help(self):
         """Verify deadcount command has help text."""
         method = getattr(setup_cog.Setup, 'deadcount')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_altcount_exists(self):
         """Verify altcount command exists on the cog."""
@@ -137,8 +137,8 @@ class TestSetup:
     def test_altcount_has_help(self):
         """Verify altcount command has help text."""
         method = getattr(setup_cog.Setup, 'altcount')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_showdeadsonrefuse_exists(self):
         """Verify showdeadsonrefuse command exists on the cog."""
@@ -147,8 +147,8 @@ class TestSetup:
     def test_showdeadsonrefuse_has_help(self):
         """Verify showdeadsonrefuse command has help text."""
         method = getattr(setup_cog.Setup, 'showdeadsonrefuse')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_showaltsonrefuse_exists(self):
         """Verify showaltsonrefuse command exists on the cog."""
@@ -157,8 +157,8 @@ class TestSetup:
     def test_showaltsonrefuse_has_help(self):
         """Verify showaltsonrefuse command has help text."""
         method = getattr(setup_cog.Setup, 'showaltsonrefuse')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_candeadsinteract_exists(self):
         """Verify candeadsinteract command exists on the cog."""
@@ -167,8 +167,8 @@ class TestSetup:
     def test_candeadsinteract_has_help(self):
         """Verify candeadsinteract command has help text."""
         method = getattr(setup_cog.Setup, 'candeadsinteract')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_canaltsinteract_exists(self):
         """Verify canaltsinteract command exists on the cog."""
@@ -177,8 +177,8 @@ class TestSetup:
     def test_canaltsinteract_has_help(self):
         """Verify canaltsinteract command has help text."""
         method = getattr(setup_cog.Setup, 'canaltsinteract')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_settings_exists(self):
         """Verify settings command exists on the cog."""
@@ -187,8 +187,8 @@ class TestSetup:
     def test_settings_has_help(self):
         """Verify settings command has help text."""
         method = getattr(setup_cog.Setup, 'settings')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_resetdb_exists(self):
         """Verify resetdb command exists on the cog."""
@@ -197,8 +197,8 @@ class TestSetup:
     def test_resetdb_has_help(self):
         """Verify resetdb command has help text."""
         method = getattr(setup_cog.Setup, 'resetdb')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_stealemoji_exists(self):
         """Verify stealemoji command exists on the cog."""
@@ -207,8 +207,8 @@ class TestSetup:
     def test_stealemoji_has_help(self):
         """Verify stealemoji command has help text."""
         method = getattr(setup_cog.Setup, 'stealemoji')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_stealemoji_parses_static_custom_emoji(self):
         assert setup_cog._parse_custom_emoji("<:pepe:123456789>") == ("pepe", 123456789, False)

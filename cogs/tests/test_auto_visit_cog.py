@@ -17,8 +17,8 @@ class TestAutoVisit:
     def test_autovisits_has_help(self):
         """Verify autovisits command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'autovisits')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_autorcset_exists(self):
         """Verify autorcset command exists on the cog."""
@@ -27,8 +27,8 @@ class TestAutoVisit:
     def test_autorcset_has_help(self):
         """Verify autorcset command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'autorcset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_autorcadd_exists(self):
         """Verify autorcadd command exists on the cog."""
@@ -37,8 +37,8 @@ class TestAutoVisit:
     def test_autorcadd_has_help(self):
         """Verify autorcadd command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'autorcadd')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_autorcreset_exists(self):
         """Verify autorcreset command exists on the cog."""
@@ -47,8 +47,8 @@ class TestAutoVisit:
     def test_autorcreset_has_help(self):
         """Verify autorcreset command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'autorcreset')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_autoknock_exists(self):
         """Verify autoknock command exists on the cog."""
@@ -57,8 +57,8 @@ class TestAutoVisit:
     def test_autoknock_has_help(self):
         """Verify autoknock command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'autoknock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_automove_exists(self):
         """Verify automove command exists on the cog."""
@@ -67,8 +67,8 @@ class TestAutoVisit:
     def test_automove_has_help(self):
         """Verify automove command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'automove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_autostealth_exists(self):
         """Verify autostealth command exists on the cog."""
@@ -77,51 +77,5 @@ class TestAutoVisit:
     def test_autostealth_has_help(self):
         """Verify autostealth command has help text."""
         method = getattr(auto_visit_cog.AutoVisit, 'autostealth')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
-
-    def test_pportal_exists(self):
-        """Verify pportal command exists on the cog."""
-        assert hasattr(auto_visit_cog.AutoVisit, 'pportal')
-
-    def test_pportal_has_help(self):
-        """Verify pportal command has help text."""
-        method = getattr(auto_visit_cog.AutoVisit, 'pportal')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
-
-    def test_portal_move_method_exists(self):
-        """Verify _portal_move helper exists on the cog."""
-        assert hasattr(auto_visit_cog.AutoVisit, '_portal_move')
-
-
-class TestPortalView:
-    """Validate the PortalView can be built and carries the portal button."""
-
-    @staticmethod
-    def _make_view():
-        from unittest.mock import MagicMock
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        try:
-            source = MagicMock(spec=discord.TextChannel)
-            dest = MagicMock(spec=discord.TextChannel)
-
-            async def build():
-                return auto_visit_cog.PortalView(MagicMock(), source, dest)
-
-            return loop.run_until_complete(build())
-        finally:
-            loop.close()
-
-    def test_portal_view_instantiates(self):
-        """Verify PortalView instantiates with two house channels."""
-        view = self._make_view()
-        assert view.source
-
-    def test_portal_view_has_button(self):
-        """Verify PortalView exposes a Portal button."""
-        view = self._make_view()
-        labels = [child.label for child in view.children if getattr(child, 'label', None)]
-        assert "Portal" in labels
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

@@ -18,8 +18,8 @@ class TestMoving:
     def test_add_has_help(self):
         """Verify add command has help text."""
         method = getattr(moving_cog.Moving, 'add')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_pcadd_exists(self):
         """Verify pcadd command exists on the cog."""
@@ -28,8 +28,8 @@ class TestMoving:
     def test_pcadd_has_help(self):
         """Verify pcadd command has help text."""
         method = getattr(moving_cog.Moving, 'pcadd')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addhere_exists(self):
         """Verify addhere command exists on the cog."""
@@ -38,8 +38,8 @@ class TestMoving:
     def test_addhere_has_help(self):
         """Verify addhere command has help text."""
         method = getattr(moving_cog.Moving, 'addhere')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_remove_exists(self):
         """Verify remove command exists on the cog."""
@@ -48,8 +48,8 @@ class TestMoving:
     def test_remove_has_help(self):
         """Verify remove command has help text."""
         method = getattr(moving_cog.Moving, 'remove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_pcremove_exists(self):
         """Verify pcremove command exists on the cog."""
@@ -58,8 +58,8 @@ class TestMoving:
     def test_pcremove_has_help(self):
         """Verify pcremove command has help text."""
         method = getattr(moving_cog.Moving, 'pcremove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_move_exists(self):
         """Verify move command exists on the cog."""
@@ -68,8 +68,8 @@ class TestMoving:
     def test_move_has_help(self):
         """Verify move command has help text."""
         method = getattr(moving_cog.Moving, 'move')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_renmove_exists(self):
         """Verify renmove command exists on the cog."""
@@ -78,8 +78,8 @@ class TestMoving:
     def test_renmove_has_help(self):
         """Verify renmove command has help text."""
         method = getattr(moving_cog.Moving, 'renmove')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_knock_exists(self):
         """Verify knock command exists on the cog."""
@@ -88,8 +88,8 @@ class TestMoving:
     def test_knock_has_help(self):
         """Verify knock command has help text."""
         method = getattr(moving_cog.Moving, 'knock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_renknock_exists(self):
         """Verify renknock command exists on the cog."""
@@ -98,8 +98,8 @@ class TestMoving:
     def test_renknock_has_help(self):
         """Verify renknock command has help text."""
         method = getattr(moving_cog.Moving, 'renknock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_pendingknock_exists(self):
         """Verify pendingknock command exists on the cog."""
@@ -108,8 +108,8 @@ class TestMoving:
     def test_pendingknock_has_help(self):
         """Verify pendingknock command has help text."""
         method = getattr(moving_cog.Moving, 'pendingknock')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
 
 # ── Deep tests for recent changes ────────────────────────────────────────────
@@ -300,3 +300,107 @@ class TestUtilitySendWarning:
             _run(cog._send_warning(ctx, embed, view))
 
         ctx.send.assert_called_once_with(embed=embed, view=view)
+
+
+class TestPortalCommands:
+    """Portal feature moved from auto_visit_cog to moving_cog."""
+
+    def test_pportal_exists(self):
+        """Verify pportal command exists on the Moving cog."""
+        assert hasattr(moving_cog.Moving, 'pportal')
+
+    def test_pportal_has_help(self):
+        """Verify pportal command has help text."""
+        method = getattr(moving_cog.Moving, 'pportal')
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    def test_pportal_portal_alias(self):
+        """Verify the .portal alias is registered on pportal."""
+        assert 'portal' in moving_cog.Moving.pportal.aliases
+
+    def test_portal_move_method_exists(self):
+        """Verify _portal_move helper exists on the Moving cog."""
+        assert hasattr(moving_cog.Moving, '_portal_move')
+
+    def test_is_admin_or_overseer_exists(self):
+        """Verify the admin/overseer permission helper exists on Moving."""
+        assert hasattr(moving_cog.Moving, '_is_admin_or_overseer')
+
+    def test_pportal_removed_from_auto_visit(self):
+        """Verify the portal command no longer lives on AutoVisit."""
+        from cogs import auto_visit_cog
+        assert not hasattr(auto_visit_cog.AutoVisit, 'pportal')
+        assert not hasattr(auto_visit_cog.AutoVisit, '_portal_move')
+        assert not hasattr(auto_visit_cog, 'PortalView')
+
+
+class TestPortalView:
+    """Validate the PortalView can be built and carries the portal button."""
+
+    @staticmethod
+    def _make_view():
+        loop = asyncio.new_event_loop()
+        try:
+            source = MagicMock(spec=discord.TextChannel)
+            dest = MagicMock(spec=discord.TextChannel)
+
+            async def build():
+                return moving_cog.PortalView(MagicMock(), source, dest)
+
+            return loop.run_until_complete(build())
+        finally:
+            loop.close()
+
+    def test_portal_view_instantiates(self):
+        """Verify PortalView instantiates with two house channels."""
+        view = self._make_view()
+        assert view.source
+
+    def test_portal_view_has_button(self):
+        """Verify PortalView exposes a Portal button."""
+        view = self._make_view()
+        labels = [child.label for child in view.children if getattr(child, 'label', None)]
+        assert "Portal" in labels
+
+
+class TestPortalUsesLimit:
+    """Alive players may use a portal a limited number of times (per portal)."""
+
+    @staticmethod
+    def _make_view(max_uses):
+        loop = asyncio.new_event_loop()
+        try:
+            source = MagicMock(spec=discord.TextChannel)
+            dest = MagicMock(spec=discord.TextChannel)
+
+            async def build():
+                return moving_cog.PortalView(MagicMock(), source, dest, max_uses=max_uses)
+
+            return loop.run_until_complete(build())
+        finally:
+            loop.close()
+
+    def test_default_is_unlimited(self):
+        """Omitting the limit leaves the portal unlimited."""
+        view = self._make_view(None)
+        assert view.max_uses is None
+        assert view._uses_left(123) is None
+
+    def test_limit_reports_remaining(self):
+        """Remaining uses start at the configured limit."""
+        view = self._make_view(2)
+        assert view._uses_left(123) == 2
+
+    def test_uses_are_counted_per_member(self):
+        """One member's uses don't affect another member's allowance."""
+        view = self._make_view(1)
+        view.uses[111] = 1
+        assert view._uses_left(111) == 0
+        assert view._uses_left(222) == 1
+
+    def test_zero_limit_is_exhausted(self):
+        """A member at the limit has no uses left."""
+        view = self._make_view(1)
+        view.uses[42] = 1
+        assert view._uses_left(42) <= 0

@@ -33,6 +33,9 @@ MAX_FIELDS_PER_EMBED = 25
 MAX_EMBED_CHARS = 6000
 MAX_EMBED_DESC = 4096
 
+# Seconds before the messages `.role` produces are removed, so repeated lookups don't flood the channel.
+ROLE_REPLY_DELETE_AFTER = 60
+
 
 def _escape_md(value: str | None) -> str | None:
     """Escape Discord markdown (_, *, ~, `, |, \\) so raw names render as plain text."""
@@ -224,6 +227,7 @@ class RolePackageCog(commands.Cog):
         for category_name in (
             guild_data.get("rc_category_name"),
             guild_data.get("dead_rc_category_name"),
+            guild_data.get("alt_category_name"),
         ):
             if not category_name:
                 continue
@@ -463,17 +467,17 @@ class RolePackageCog(commands.Cog):
     async def _legacy_firstpin(self, ctx: commands.Context, channel: discord.TextChannel | None = None):
         guild_data = load_guild_data(ctx.guild.id)
         if not guild_data:
-            await ctx.send("Guild data not loaded")
+            await ctx.send("Guild data not loaded", delete_after=ROLE_REPLY_DELETE_AFTER)
             return
         channel = channel or ctx.channel
         spectator_role = discord.utils.get(ctx.guild.roles, name=guild_data.get("spectator_role_name"))
         if channel != ctx.channel and not ctx.author.guild_permissions.administrator:
             if not spectator_role or spectator_role not in ctx.author.roles:
-                await ctx.send("You do not have permission to use this command.")
+                await ctx.send("You do not have permission to use this command.", delete_after=ROLE_REPLY_DELETE_AFTER)
                 return
         pins = await channel.pins()
         if not pins:
-            await ctx.send("No pinned messages were found in that channel.")
+            await ctx.send("No pinned messages were found in that channel.", delete_after=ROLE_REPLY_DELETE_AFTER)
             return
         first_pin = pins[-1]
         embed = discord.Embed(
@@ -484,7 +488,7 @@ class RolePackageCog(commands.Cog):
         )
         embed.add_field(name=" ", value=f"[Jump to the message!]({first_pin.jump_url})", inline=False)
         embed.set_footer(text="Village Game")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=ROLE_REPLY_DELETE_AFTER)
 
     # ------------------------------------------------------------------
     # Stage 1
@@ -495,8 +499,12 @@ class RolePackageCog(commands.Cog):
         """Show the registered role package, or use the legacy first-pin view."""
         if ctx.command is not self.role:
             return
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
         if channel is not None and not ctx.author.guild_permissions.administrator:
-            await ctx.send("❌ Only administrators can specify another channel.")
+            await ctx.send("❌ Only administrators can specify another channel.", delete_after=ROLE_REPLY_DELETE_AFTER)
             return
         target = channel or ctx.channel
         guild_data = self._guild_data(ctx.guild)
@@ -504,7 +512,7 @@ class RolePackageCog(commands.Cog):
             await self._legacy_firstpin(ctx, target)
             return
         if not self._can_view_role_chat(ctx.author, target, guild_data):
-            await ctx.send("❌ You can only view your own Role Chat role.")
+            await ctx.send("❌ You can only view your own Role Chat role.", delete_after=ROLE_REPLY_DELETE_AFTER)
             return
         package = get_role_package(target.id)
         if not package or not package.get("package_ids"):
@@ -514,14 +522,15 @@ class RolePackageCog(commands.Cog):
         if missing:
             await ctx.send(
                 f"⚠️ Role Package `{target.name}` contains missing messages. "
-                "Please re-register this package."
+                "Please re-register this package.",
+                delete_after=ROLE_REPLY_DELETE_AFTER,
             )
         if messages:
             embeds = self._package_embeds(messages, target, exclude_message_id=package.get("card_id"))
             for start in range(0, len(embeds), 10):
-                await ctx.send(embeds=embeds[start:start + 10])
+                await ctx.send(embeds=embeds[start:start + 10], delete_after=ROLE_REPLY_DELETE_AFTER)
         else:
-            await ctx.send("❌ No registered Role Package messages could be retrieved.")
+            await ctx.send("❌ No registered Role Package messages could be retrieved.", delete_after=ROLE_REPLY_DELETE_AFTER)
 
     @role.command(name="register")
     async def role_register(self, ctx: commands.Context, count: int, *, role_name: str):
@@ -1452,74 +1461,24 @@ class RolePackageCog(commands.Cog):
                 await ctx.send("⚠️ Card message could not be retrieved.")
 
     @role.command(name="check")
-    async def role_check(self, ctx: commands.Context, channel: discord.TextChannel = None):
-        """Check the completeness of a role package. Use without arguments in your RC, or specify a channel (admin only)."""
+    async def role_check(self, ctx: commands.Context):
+        """Check the Role Package in this Role Chat. Players and sponsors check their own; Overseers can use it anywhere."""
         guild_data = self._guild_data(ctx.guild)
         if not guild_data:
             await ctx.send("❌ Guild data is not loaded.")
             return
 
-        target = channel or ctx.channel
+        if not self._is_moderator(ctx.author, guild_data):
+            alive = discord.utils.get(ctx.guild.roles, name=guild_data.get("alive_role_name"))
+            sponsor = discord.utils.get(ctx.guild.roles, name=guild_data.get("sponsor_role_name"))
+            is_player = any(role and role in ctx.author.roles for role in (alive, sponsor))
+            if not (is_player and self._is_role_chat(ctx.channel, guild_data)):
+                await ctx.send("❌ Only players and sponsors in their Role Chat, or Overseers, can use this command.")
+                return
 
-        if channel is None:
-            if not ctx.author.guild_permissions.administrator:
-                if not self._is_role_chat(ctx.channel, guild_data):
-                    await ctx.send("❌ This command must be used in a Role Chat channel.")
-                    return
-                await self._role_check_display(ctx, target, guild_data, get_role_package(target.id), guild_data.get("channel_slots", {}))
-                return
-            if not await self._require_overseer(ctx):
-                return
-            confirm_msg = await ctx.send(
-                f"⚠️ Are you sure you want to check **{target.name}**?\n"
-                "Reply **yes** to confirm, anything else to cancel."
-            )
-            def check(m):
-                return m.author == ctx.author and m.channel == ctx.channel
-            try:
-                response = await self.bot.wait_for("message", timeout=30, check=check)
-            except asyncio.TimeoutError:
-                await ctx.send("Timed out. Action cancelled.")
-                return
-            if response.content.lower() != "yes":
-                await ctx.send("Action cancelled.")
-                return
-            try:
-                await confirm_msg.delete()
-                await response.delete()
-            except discord.HTTPException:
-                pass
-            await self._role_check_display(ctx, target, guild_data, get_role_package(target.id), guild_data.get("channel_slots", {}))
-        else:
-            if not ctx.author.guild_permissions.administrator:
-                await ctx.send("❌ Only administrators can check another channel.")
-                return
-            if not await self._require_overseer(ctx):
-                return
-            try:
-                await ctx.message.delete()
-            except discord.HTTPException:
-                pass
-            confirm_msg = await ctx.send(
-                f"⚠️ Are you sure you want to check the Role Package for {target.mention}?\n"
-                "Reply **yes** to confirm, anything else to cancel."
-            )
-            def check(m):
-                return m.author == ctx.author and m.channel == ctx.channel
-            try:
-                response = await self.bot.wait_for("message", timeout=30, check=check)
-            except asyncio.TimeoutError:
-                await ctx.send("Timed out. Action cancelled.")
-                return
-            if response.content.lower() != "yes":
-                await ctx.send("Action cancelled.")
-                return
-            try:
-                await confirm_msg.delete()
-                await response.delete()
-            except discord.HTTPException:
-                pass
-            await self._role_check_display(ctx, target, guild_data, get_role_package(target.id), guild_data.get("channel_slots", {}))
+        await self._role_check_display(
+            ctx, ctx.channel, guild_data, get_role_package(ctx.channel.id), guild_data.get("channel_slots", {})
+        )
 
     @role.command(name="help")
     async def role_help(self, ctx: commands.Context):
@@ -1931,7 +1890,13 @@ class RolePackageCog(commands.Cog):
             await ctx.send(embed=error_embed(title=f"Publishing Blocked — {len(issues)} issue(s)", description="\n\n".join(issues)))
             return
         draft.approved = True
-        await self._publish_logging_archive(ctx, draft, guild_data)
+        try:
+            await self._publish_logging_archive(ctx, draft, guild_data)
+        except RuntimeError as error:
+            # Configuration problems (e.g. no logging server set) are raised as RuntimeError with a readable message.
+            draft.approved = False
+            await ctx.send(embed=error_embed(title="Publishing Failed", description=str(error)))
+            return
         await ctx.send(embed=success_embed(title="Publishing Complete", description=f"Game {draft.game_number or 'pending'} archive published."))
 
     @commands.command(name="setlogserver")

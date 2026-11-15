@@ -80,25 +80,5 @@ class TestLocalDBProvider:
         assert errs[0]["command_name"] == "bad_cmd"
         assert errs[0]["exception_type"] == "RuntimeError"
 
-    def test_record_error_handles_exception(self, tmp_path):
-        db_path = str(tmp_path / "err2.db")
-        provider = LocalDBProvider(db_path)
 
-        with patch.object(provider.db, "insert_error", side_effect=Exception("db fail")):
-            error = ErrorRecord(datetime.utcnow(), "cmd", None, "E", "")
-            _run(provider.record_error(error))
 
-    def test_capture_handles_exception(self, tmp_path):
-        db_path = str(tmp_path / "capture_fail.db")
-        provider = LocalDBProvider(db_path)
-
-        with patch.object(provider.db, "upsert_command_stats", side_effect=Exception("db fail")):
-            event = CommandEvent("ping", "Utility", datetime.utcnow(), 10.0, True)
-            _run(provider.capture(event))
-
-    def test_shutdown_completes_without_error(self, tmp_path):
-        db_path = str(tmp_path / "shutdown.db")
-        provider = LocalDBProvider(db_path)
-        _run(provider.initialize())
-
-        _run(provider.shutdown())

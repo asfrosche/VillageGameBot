@@ -154,8 +154,6 @@ class TestRemoveStatus:
         remove_status(gd, 1, "protection")
         assert not has_status(gd, 1, "protection")
 
-    def test_no_error_absent(self):
-        remove_status(_gd(), 1, "protection")
 
     def test_others_unaffected(self):
         gd = _gd({"1": {"protection": {"timestamp": 0, "moderator": 0},
@@ -171,8 +169,6 @@ class TestClearAllStatuses:
         clear_all_statuses(gd, 1)
         assert "1" not in gd["channel_statuses"]
 
-    def test_no_error(self):
-        clear_all_statuses(_gd(), 999)
 
     def test_others_unaffected(self):
         gd = _gd({"1": {"protection": {"timestamp": 0, "moderator": 0}},

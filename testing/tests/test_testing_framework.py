@@ -270,7 +270,10 @@ class TestFindTestFiles:
 class TestAnalyzeCoverage:
     def test_returns_all_cogs(self):
         result = analyze_coverage()
-        assert len(result) == 45
+        # Compared against the framework's own discovery rather than a hardcoded
+        # count: the old `== 45` went stale as cogs were added (it is 52 now).
+        assert result, "analyze_coverage() found no cogs"
+        assert set(result) == set(discover_all())
 
     def test_each_cog_has_coverage_info(self):
         result = analyze_coverage()
@@ -290,7 +293,8 @@ class TestAnalyzeCoverage:
 class TestProjectSummary:
     def test_keys_exist(self):
         s = get_project_summary()
-        assert s["cogs_total"] == 45
+        assert "cogs_total" in s
+        assert s["cogs_total"] == len(analyze_coverage())
         assert s["total_commands"] > 0
         assert s["tested_commands"] >= 0
         assert s["command_coverage"] >= 0

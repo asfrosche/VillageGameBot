@@ -17,8 +17,8 @@ class TestChannelMap:
     def test_cmd_channels_has_help(self):
         """Verify cmd_channels command has help text."""
         method = getattr(channel_cog.ChannelMap, 'cmd_channels')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_cmd_publicmap_exists(self):
         """Verify cmd_publicmap command exists on the cog."""
@@ -27,8 +27,8 @@ class TestChannelMap:
     def test_cmd_publicmap_has_help(self):
         """Verify cmd_publicmap command has help text."""
         method = getattr(channel_cog.ChannelMap, 'cmd_publicmap')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_cmd_privatemap_exists(self):
         """Verify cmd_privatemap command exists on the cog."""
@@ -37,5 +37,5 @@ class TestChannelMap:
     def test_cmd_privatemap_has_help(self):
         """Verify cmd_privatemap command has help text."""
         method = getattr(channel_cog.ChannelMap, 'cmd_privatemap')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

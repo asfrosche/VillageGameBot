@@ -17,8 +17,8 @@ class TestHandling:
     def test_decay_has_help(self):
         """Verify decay command has help text."""
         method = getattr(handling_cog.Handling, 'decay')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_destroy_exists(self):
         """Verify destroy command exists on the cog."""
@@ -27,8 +27,8 @@ class TestHandling:
     def test_destroy_has_help(self):
         """Verify destroy command has help text."""
         method = getattr(handling_cog.Handling, 'destroy')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_fdestroy_exists(self):
         """Verify fdestroy command exists on the cog."""
@@ -37,8 +37,8 @@ class TestHandling:
     def test_fdestroy_has_help(self):
         """Verify fdestroy command has help text."""
         method = getattr(handling_cog.Handling, 'fdestroy')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_rebuild_exists(self):
         """Verify rebuild command exists on the cog."""
@@ -47,8 +47,8 @@ class TestHandling:
     def test_rebuild_has_help(self):
         """Verify rebuild command has help text."""
         method = getattr(handling_cog.Handling, 'rebuild')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_newpc_exists(self):
         """Verify newpc command exists on the cog."""
@@ -57,8 +57,8 @@ class TestHandling:
     def test_newpc_has_help(self):
         """Verify newpc command has help text."""
         method = getattr(handling_cog.Handling, 'newpc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_close_exists(self):
         """Verify close command exists on the cog."""
@@ -67,8 +67,8 @@ class TestHandling:
     def test_close_has_help(self):
         """Verify close command has help text."""
         method = getattr(handling_cog.Handling, 'close')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_public_exists(self):
         """Verify public command exists on the cog."""
@@ -77,8 +77,8 @@ class TestHandling:
     def test_public_has_help(self):
         """Verify public command has help text."""
         method = getattr(handling_cog.Handling, 'public')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_private_exists(self):
         """Verify private command exists on the cog."""
@@ -87,8 +87,8 @@ class TestHandling:
     def test_private_has_help(self):
         """Verify private command has help text."""
         method = getattr(handling_cog.Handling, 'private')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_setowner_exists(self):
         """Verify setowner command exists on the cog."""
@@ -97,8 +97,8 @@ class TestHandling:
     def test_setowner_has_help(self):
         """Verify setowner command has help text."""
         method = getattr(handling_cog.Handling, 'setowner')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_end_exists(self):
         """Verify end command exists on the cog."""
@@ -107,8 +107,8 @@ class TestHandling:
     def test_end_has_help(self):
         """Verify end command has help text."""
         method = getattr(handling_cog.Handling, 'end')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_decayinactive_exists(self):
         """Verify decayinactive command exists on the cog."""
@@ -117,5 +117,5 @@ class TestHandling:
     def test_decayinactive_has_help(self):
         """Verify decayinactive command has help text."""
         method = getattr(handling_cog.Handling, 'decayinactive')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

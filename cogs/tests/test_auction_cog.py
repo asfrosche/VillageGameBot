@@ -94,43 +94,19 @@ class TestAuctionCommands:
         doc = getattr(method, "help", None) or getattr(method, "__doc__", None)
         assert doc is not None and len(doc.strip()) > 0
 
-    def test_auc_group_exists(self):
-        self._assert_exists("auc")
 
-    def test_auc_group_has_help(self):
-        self._assert_help("auc")
 
     def test_auc_subcommands(self):
         cmd = getattr(AuctionCog, "auc")
         subs = {c.name for c in cmd.commands}
         assert {"status", "start", "bid", "extend", "close", "cancel", "alias"} <= subs
 
-    def test_auc_bid_exists_and_help(self):
-        self._assert_exists("auc_bid")
-        self._assert_help("auc_bid")
 
-    def test_auc_start_exists_and_help(self):
-        self._assert_exists("auc_start")
-        self._assert_help("auc_start")
 
-    def test_auc_extend_exists_and_help(self):
-        self._assert_exists("auc_extend")
-        self._assert_help("auc_extend")
 
-    def test_auc_close_exists_and_help(self):
-        self._assert_exists("auc_close")
-        self._assert_help("auc_close")
 
-    def test_auc_cancel_exists_and_help(self):
-        self._assert_exists("auc_cancel")
-        self._assert_help("auc_cancel")
 
-    def test_auc_alias_exists_and_help(self):
-        self._assert_exists("auc_alias")
-        self._assert_help("auc_alias")
 
-    def test_aucset_group_exists(self):
-        self._assert_exists("aucset")
 
     def test_aucset_subcommands(self):
         cmd = getattr(AuctionCog, "aucset")

@@ -1,5 +1,4 @@
 import asyncio
-import io
 import json
 import os
 import random
@@ -43,6 +42,7 @@ from cogs.help_misc_cog import Other
 from cogs.role_package_cog import RolePackageCog
 from cogs.presets_cog import Presets
 from cogs.privatecommands_cog import Privatecommands
+from cogs.react_cog import ReactCog
 from cogs.send_role import SendRole
 from cogs.setup_cog import Setup
 from cogs.tracker_cog import MessageTracker
@@ -51,9 +51,13 @@ from cogs.vg_intro import VgIntro
 from cogs.status_cog import Status
 from cogs.status_panel_cog import StatusPanel
 from cogs.sticky_cog import StickyCog
+from cogs.pins_cog import PinsCog
 from cogs.voting_cog import Voting
 from config import PREFIX, TOKEN
 from utils.embeds import error_embed, info_embed, plain_embed
+from utils.discord_safe import install_embed_guard, user_facing_message
+
+install_embed_guard()
 from cogs.estate_cog import Estate
 from cogs.item_drop_cog import ItemDrop
 from cogs.channel_cog import ChannelMap
@@ -166,6 +170,10 @@ async def on_ready():
         await bot.load_extension('cogs.os_info_cog')
     except Exception as e:
         print(f"Errore caricamento Overseer cog: {e}")
+    try:
+        await bot.load_extension('cogs.os_questions_cog')
+    except Exception as e:
+        print(f"Errore caricamento OS Questions cog: {e}")
     
 
 # ── Event: on_guild_join ─────────────────────────────────────────────────────
@@ -291,8 +299,10 @@ async def on_command_error(ctx, error):
             await safe_reply(ctx, embed=embed, mention_author=False)
             await asyncio.sleep(retry_after)
     else:
+        # Discord failures (permissions, rate limits, outages) arrive wrapped in CommandInvokeError.
+        friendly = user_facing_message(error)
         embed = error_embed(
-            description="An unexpected error occurred. Please try again later.",
+            description=friendly or "An unexpected error occurred. Please try again later.",
         )
         await safe_reply(ctx, embed=embed, mention_author=False)
 
@@ -360,6 +370,40 @@ async def on_message(message):
     if message.content.startswith(bot.command_prefix):
         await bot.invoke(await bot.get_context(message))
 
+# ── Edit / delete logging ────────────────────────────────────────────────────
+_EDIT_DEL_EMBED_LIMIT = 4000
+
+
+def _split_log_text(text: str, limit: int = _EDIT_DEL_EMBED_LIMIT):
+    """Split log text into embed-description-sized chunks without dropping content."""
+    chunks = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n", 0, limit)
+        if cut < limit // 2:
+            cut = remaining.rfind(" ", 0, limit)
+        if cut < limit // 2:
+            cut = limit
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:].lstrip("\n")
+    chunks.append(remaining)
+    return chunks
+
+
+async def _send_log_embeds(channel, title: str, body: str, *, is_error: bool = False):
+    """Send a (possibly multi-embed) edit/delete log, never a .txt file."""
+    for index, chunk in enumerate(_split_log_text(body)):
+        embed_title = title if index == 0 else f"{title} (cont.)"
+        if is_error:
+            embed = error_embed(title=embed_title, description=chunk)
+        else:
+            embed = plain_embed(title=embed_title, description=chunk, color=0xFFFF00)
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+
 # ── Event: on_message_delete ─────────────────────────────────────────────────
 @bot.event
 async def on_message_delete(message):
@@ -375,23 +419,16 @@ async def on_message_delete(message):
             )
             if edit_del_channel:
                 header = (
-                    f"**User:** {message.author.mention} `{message.author.name}`\n"
+                    f"**User:** `{message.author.name}`\n"
                     f"**Channel:** {message.channel.mention} `[#{message.channel.name}]`"
                 )
-                if len(message.content) <= 4000:
-                    embed = error_embed(
-                        title="Message Deleted",
-                        description=f"{header}\n\n**Message:**\n{message.content}",
-                    )
-                    await edit_del_channel.send(embed=embed)
-                else:
-                    ts = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                    log_content = f"{ts} - {message.author.name}:\n{message.content}"
-                    log_file = io.BytesIO(log_content.encode("utf-8"))
-                    await edit_del_channel.send(
-                        f"**Message Deleted** — {message.author.mention} `{message.author.name}` in {message.channel.mention}:",
-                        file=discord.File(log_file, filename="deleted_message.txt"),
-                    )
+                body = f"{header}\n\n**Message:**\n{message.content}"
+                await _send_log_embeds(
+                    edit_del_channel,
+                    "Message Deleted",
+                    body,
+                    is_error=True,
+                )
 
 # ── Event: on_message_edit ───────────────────────────────────────────────────
 @bot.event
@@ -407,34 +444,16 @@ async def on_message_edit(message_before, message_after):
                 name=edit_del_channel_name,
             )
             if edit_del_channel:
-                before_len = len(message_before.content)
-                after_len = len(message_after.content)
                 header = (
-                    f"**User:** {message_before.author.mention} `{message_before.author.name}`\n"
+                    f"**User:** `{message_before.author.name}`\n"
                     f"**Channel:** {message_before.channel.mention} `[#{message_before.channel.name}]`"
                 )
-                if before_len <= 1900 and after_len <= 1900:
-                    embed = plain_embed(
-                        title="Message Edited",
-                        color=0xFFFF00,
-                    )
-                    embed.description = (
-                        f"{header}\n\n"
-                        f"**Message Before:**\n{message_before.content}\n\n"
-                        f"**Message After:**\n{message_after.content}"
-                    )
-                    await edit_del_channel.send(embed=embed)
-                else:
-                    log_content = (
-                        f"{message_before.author.name} edited a message\n\n"
-                        f"--- BEFORE ---\n{message_before.content}\n\n"
-                        f"--- AFTER ---\n{message_after.content}"
-                    )
-                    log_file = io.BytesIO(log_content.encode("utf-8"))
-                    await edit_del_channel.send(
-                        f"**Message Edited** — {message_before.author.mention} `{message_before.author.name}` in {message_before.channel.mention}:",
-                        file=discord.File(log_file, filename="edited_message.txt"),
-                    )
+                body = (
+                    f"{header}\n\n"
+                    f"**Message Before:**\n{message_before.content}\n\n"
+                    f"**Message After:**\n{message_after.content}"
+                )
+                await _send_log_embeds(edit_del_channel, "Message Edited", body)
 
 # ── Event: on_member_join (track inviter) ────────────────────────────────────
 @bot.event
@@ -636,20 +655,30 @@ async def send_first_embed(message, guild_data):
 
 async def whisper(message, guild_data, mentioned_user_id, user_response1, author):
     user = bot.get_user(mentioned_user_id)
-    rc_category = discord.utils.get(message.guild.categories, name=guild_data["rc_category_name"])
+    # Scan both ROLES and ALTS: RCs beyond player 50 overflow into ALTS, and
+    # the recipient must still receive whispers there.
+    rc_categories = [
+        cat
+        for cat in (
+            discord.utils.get(message.guild.categories, name=guild_data["rc_category_name"]),
+            discord.utils.get(message.guild.categories, name=guild_data["alt_category_name"]),
+        )
+        if cat
+    ]
     whisper_logs_channel = discord.utils.get(message.guild.channels, name=guild_data["whisper_logs_channel_name"])
-    for channel in rc_category.channels:
-        if user in channel.members:
-            embed = info_embed()
-            if guild_data["showwhispersender"]:
-                embed.add_field(name=f"{author.mention} `[{author.display_name}]` sent you a whisper:", value=f'{user_response1}', inline=False)
-            else:
-                embed.add_field(name="Someone sent you a whisper:", value=f'{user_response1}', inline=False)
-            await channel.send(f"{user.mention}")
-            await channel.send(embed=embed)
-            embedlog = info_embed()
-            embedlog.add_field(name=f"{author.mention} sent a whisper to {user.mention}:", value=f'{user_response1}\n\n{channel.mention}', inline=False)
-            await whisper_logs_channel.send(embed=embedlog)
+    for rc_category in rc_categories:
+        for channel in rc_category.channels:
+            if user in channel.members:
+                embed = info_embed()
+                if guild_data["showwhispersender"]:
+                    embed.add_field(name=f"{author.mention} `[{author.display_name}]` sent you a whisper:", value=f'{user_response1}', inline=False)
+                else:
+                    embed.add_field(name="Someone sent you a whisper:", value=f'{user_response1}', inline=False)
+                await channel.send(f"{user.mention}")
+                await channel.send(embed=embed)
+                embedlog = info_embed()
+                embedlog.add_field(name=f"{author.mention} sent a whisper to {user.mention}:", value=f'{user_response1}\n\n{channel.mention}', inline=False)
+                await whisper_logs_channel.send(embed=embedlog)
 
 fireworks_gifs = ['https://tenor.com/view/lanterns-flying-lantern-chinese-lantern-gif-9054613', 'https://tenor.com/view/lanterns-lights-peace-gif-15906930', 'https://tenor.com/view/lantern-lights-ceremony-lanterns-magic-giant-gif-14420747', 'https://tenor.com/view/lanterns-ceremony-lights-memorial-cp-vy0i2xp-uc-gif-14420759', 'https://tenor.com/view/maga-communist-chinese-lanterns-gif-26663664', 'https://tenor.com/view/tangled-tangled-movie-lanterns-tangled-lanterns-i-see-the-light-gif-12379369862241479266']
 
@@ -691,6 +720,7 @@ async def startcog():
     await bot.add_cog(Nominations(bot))
     await bot.add_cog(Utility(bot))
     await bot.add_cog(Other(bot))
+    await bot.add_cog(ReactCog(bot))
     await bot.add_cog(RolePackageCog(bot))
     await bot.add_cog(Privatecommands(bot))
     await bot.add_cog(MessageTracker(bot))
@@ -713,6 +743,7 @@ async def startcog():
     await bot.add_cog(Status(bot))
     await bot.add_cog(StatusPanel(bot))
     await bot.add_cog(StickyCog(bot))
+    await bot.add_cog(PinsCog(bot))
     await bot.add_cog(DraftCog(bot))
     await bot.add_cog(BracketCog(bot))
     await bot.add_cog(BOTCRoleCog(bot))
@@ -728,6 +759,21 @@ async def startcog():
 
     from cogs.library_admin_cog import GameLibraryAdmin
     await bot.add_cog(GameLibraryAdmin(bot))
+    try:
+        from cogs.rps_cog import RPSCog
+        await bot.add_cog(RPSCog(bot))
+    except Exception as e:
+        print(f"Failed to load RPSCog: {e}")
+    try:
+        from cogs.scout_cog import Scout
+        await bot.add_cog(Scout(bot))
+    except Exception as e:
+        print(f"Failed to load Scout: {e}")
+    try:
+        from cogs.rchome_cog import RcHome
+        await bot.add_cog(RcHome(bot))
+    except Exception as e:
+        print(f"Failed to load RcHome: {e}")
 
     try:
         await bot.tree.sync()

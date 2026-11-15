@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+from datetime import datetime, timezone, timedelta
 import discord
 
 from cogs import utility_cog
@@ -17,8 +18,8 @@ class TestUtility:
     def test_broom_has_help(self):
         """Verify broom command has help text."""
         method = getattr(utility_cog.Utility, 'broom')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_housecheck_exists(self):
         """Verify housecheck command exists on the cog."""
@@ -27,8 +28,8 @@ class TestUtility:
     def test_housecheck_has_help(self):
         """Verify housecheck command has help text."""
         method = getattr(utility_cog.Utility, 'housecheck')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_log_exists(self):
         """Verify log command exists on the cog."""
@@ -37,8 +38,8 @@ class TestUtility:
     def test_log_has_help(self):
         """Verify log command has help text."""
         method = getattr(utility_cog.Utility, 'log')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_day_exists(self):
         """Verify day command exists on the cog."""
@@ -47,8 +48,8 @@ class TestUtility:
     def test_day_has_help(self):
         """Verify day command has help text."""
         method = getattr(utility_cog.Utility, 'day')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_night_exists(self):
         """Verify night command exists on the cog."""
@@ -57,8 +58,29 @@ class TestUtility:
     def test_night_has_help(self):
         """Verify night command has help text."""
         method = getattr(utility_cog.Utility, 'night')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    @pytest.mark.parametrize("cmd", ["daywf", "nightwf", "daywp", "nightwp"])
+    def test_region_phase_commands_exist(self, cmd):
+        """Verify the region-specific day/night commands exist."""
+        assert hasattr(utility_cog.Utility, cmd)
+
+    @pytest.mark.parametrize("cmd", ["daywf", "nightwf", "daywp", "nightwp"])
+    def test_region_phase_commands_have_help(self, cmd):
+        """Verify each region command has help text."""
+        method = getattr(utility_cog.Utility, cmd)
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    def test_region_channels_mapping(self):
+        """Future uses sessions 1-3 + leader 1; Past uses sessions 4-6 + leader 2."""
+        future = utility_cog.Utility.REGION_CHANNELS["future"]
+        past = utility_cog.Utility.REGION_CHANNELS["past"]
+        assert future["voting_keys"] == ["lynch_channel_name1", "lynch_channel_name2", "lynch_channel_name3", "leader_channel_name"]
+        assert past["voting_keys"] == ["lynch_channel_name4", "lynch_channel_name5", "lynch_channel_name6", "leader_channel_name2"]
+        assert future["daydiscussion"] == "🌞│future-day-discussion"
+        assert past["daydiscussion"] == "🌞│past-day-discussion"
 
     def test_whisper_exists(self):
         """Verify whisper command exists on the cog."""
@@ -67,8 +89,8 @@ class TestUtility:
     def test_whisper_has_help(self):
         """Verify whisper command has help text."""
         method = getattr(utility_cog.Utility, 'whisper')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_switch_exists(self):
         """Verify switch command exists on the cog."""
@@ -77,8 +99,8 @@ class TestUtility:
     def test_switch_has_help(self):
         """Verify switch command has help text."""
         method = getattr(utility_cog.Utility, 'switch')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_dead_exists(self):
         """Verify dead command exists on the cog."""
@@ -87,8 +109,8 @@ class TestUtility:
     def test_dead_has_help(self):
         """Verify dead command has help text."""
         method = getattr(utility_cog.Utility, 'dead')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deadc_exists(self):
         """Verify deadc command exists on the cog."""
@@ -97,8 +119,8 @@ class TestUtility:
     def test_deadc_has_help(self):
         """Verify deadc command has help text."""
         method = getattr(utility_cog.Utility, 'deadc')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_deadrole_exists(self):
         """Verify deadrole command exists on the cog."""
@@ -107,8 +129,8 @@ class TestUtility:
     def test_deadrole_has_help(self):
         """Verify deadrole command has help text."""
         method = getattr(utility_cog.Utility, 'deadrole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addrole_exists(self):
         """Verify addrole command exists on the cog."""
@@ -117,8 +139,8 @@ class TestUtility:
     def test_addrole_has_help(self):
         """Verify addrole command has help text."""
         method = getattr(utility_cog.Utility, 'addrole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_removerole_exists(self):
         """Verify removerole command exists on the cog."""
@@ -127,8 +149,8 @@ class TestUtility:
     def test_removerole_has_help(self):
         """Verify removerole command has help text."""
         method = getattr(utility_cog.Utility, 'removerole')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addchannelperms_exists(self):
         """Verify addchannelperms command exists on the cog."""
@@ -137,8 +159,8 @@ class TestUtility:
     def test_addchannelperms_has_help(self):
         """Verify addchannelperms command has help text."""
         method = getattr(utility_cog.Utility, 'addchannelperms')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_addcategoryperms_exists(self):
         """Verify addcategoryperms command exists on the cog."""
@@ -147,8 +169,8 @@ class TestUtility:
     def test_addcategoryperms_has_help(self):
         """Verify addcategoryperms command has help text."""
         method = getattr(utility_cog.Utility, 'addcategoryperms')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_endgame_exists(self):
         """Verify endgame command exists on the cog."""
@@ -157,8 +179,8 @@ class TestUtility:
     def test_endgame_has_help(self):
         """Verify endgame command has help text."""
         method = getattr(utility_cog.Utility, 'endgame')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_skipnight_exists(self):
         """Verify skipnight command exists on the cog."""
@@ -167,10 +189,349 @@ class TestUtility:
     def test_skipnight_has_help(self):
         """Verify skipnight command has help text."""
         method = getattr(utility_cog.Utility, 'skipnight')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_skipnightview_instantiates(self):
-        """Verify SkipNightView view can be instantiated."""
-        # SkipNightView — requires cog/bot context to instantiate
-        pass
+
+
+class TestPick:
+    """Validate the anonymous multi-option vote feature."""
+
+    def test_pick_exists(self):
+        """Verify pick command exists on the cog."""
+        assert hasattr(utility_cog.Utility, 'pick')
+
+    def test_pick_has_help(self):
+        """Verify pick command has help text."""
+        method = getattr(utility_cog.Utility, 'pick')
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    def test_pickvoters_exists(self):
+        """Verify pickvoters command exists on the cog."""
+        assert hasattr(utility_cog.Utility, 'pickvoters')
+
+    def test_pickvoters_has_help(self):
+        """Verify pickvoters command has help text."""
+        method = getattr(utility_cog.Utility, 'pickvoters')
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
+
+    @pytest.mark.asyncio
+    async def test_pickview_instantiates(self):
+        """Verify PickView can be instantiated."""
+        session = {
+            "title": "🎮 Poll — Test",
+            "options": [
+                {"letter": "🇦", "name": "Apple", "voters": []},
+                {"letter": "🇧", "name": "Banana", "voters": []},
+            ],
+            "cap": None,
+            "expires_at": None,
+            "pinged": False,
+        }
+        view = utility_cog.PickView(session, guild_id=42, message_id=777)
+        assert len(view.children) == 3  # 2 option buttons + Unvote
+
+    def test_pick_markers_are_whole_emoji(self):
+        """Each marker must be a complete emoji, not a fragment of a joined string.
+
+        Regression: ``PICK_MARKERS`` used to be a single concatenated string, so
+        indexing it yielded lone keycap/variation-selector chars that Discord
+        rejected with 400 Invalid emoji.
+        """
+        markers = utility_cog.PICK_MARKERS
+        assert isinstance(markers, list)
+        assert len(markers) == utility_cog.MAX_PICK_OPTIONS
+        baddies = {"\ufe0f", "\u20e3", "\u200d", ""}
+        for marker in markers:
+            assert marker not in baddies, f"fragment leaked: {marker!r}"
+
+    @pytest.mark.asyncio
+    async def test_pickview_buttons_use_valid_emoji(self):
+        """Full option set produces complete emoji names in the component payload."""
+        session = {
+            "title": "Vote",
+            "options": [
+                {"letter": utility_cog.PICK_MARKERS[i], "name": str(i + 1), "voters": []}
+                for i in range(utility_cog.MAX_PICK_OPTIONS)
+            ],
+            "cap": None,
+            "expires_at": None,
+            "pinged": False,
+        }
+        view = utility_cog.PickView(session, guild_id=42, message_id=777)
+        payload = view.to_components()
+        names = [
+            component["emoji"]["name"]
+            for row in payload
+            for component in row["components"]
+            if component.get("emoji")
+        ]
+        assert names, "no emoji were rendered"
+        assert not [n for n in names if n in {"\ufe0f", "\u20e3", "\u200d", ""}]
+        # Every button stays within Discord's 5-row limit.
+        assert all(0 <= child.row <= 4 for child in view.children)
+
+    def test_parse_pick_args_basic(self):
+        """Parse simple title/options."""
+        result = utility_cog.parse_pick_args(["Goal", "A", "B", "C"])
+        assert result is not None
+        title, options, cap, duration = result
+        assert title == "Goal"
+        assert options == ["A", "B", "C"]
+        assert cap is None
+        assert duration is None
+
+    def test_parse_pick_args_flags(self):
+        """Parse cap/time flags anywhere in args."""
+        result = utility_cog.parse_pick_args(["cap=5", "time=3m", "Goal", "A", "B"])
+        assert result is not None
+        title, options, cap, duration = result
+        assert title == "Goal"
+        assert options == ["A", "B"]
+        assert cap == 5
+        assert duration == timedelta(minutes=3)
+
+    def test_parse_pick_args_multiline_options(self):
+        """Comma-separated options keep multi-word labels."""
+        result = utility_cog.parse_pick_args(
+            ["cap=5", "time=3m", "Best food?", ",", "ice", "cream", ",", "coconut", "water", ",", "gulab", "jamun"]
+        )
+        assert result is not None
+        title, options, cap, duration = result
+        assert title == "Best food?"
+        assert options == ["ice cream", "coconut water", "gulab jamun"]
+        assert cap == 5
+        assert duration == timedelta(minutes=3)
+
+    def test_parse_pick_args_flags_only(self):
+        """Flags alone yield no poll."""
+        assert utility_cog.parse_pick_args(["cap=5", "time=90s"]) is None
+
+    def test_parse_duration(self):
+        """Validate time flag parsing."""
+        assert utility_cog._parse_duration("90s") == timedelta(seconds=90)
+        assert utility_cog._parse_duration("5m") == timedelta(minutes=5)
+        assert utility_cog._parse_duration("2h") == timedelta(hours=2)
+        assert utility_cog._parse_duration("bogus") is None
+
+    def test_build_pick_embed(self):
+        """Embed shows anonymous counts, cap progress and alive count."""
+        session = {
+            "title": "🎮 Poll — Test",
+            "options": [
+                {"letter": "🇦", "name": "Apple", "voters": [1, 2]},
+                {"letter": "🇧", "name": "Banana", "voters": []},
+            ],
+            "cap": 5,
+            "expires_at": None,
+            "pinged": False,
+        }
+        embed = utility_cog.build_pick_embed(session, alive_count=4)
+        desc = embed.description
+        assert "**Apple** — 2" in desc
+        assert "**Banana** — 0" in desc
+        assert "**2/5** votes to reach" in desc
+        assert "4 alive players" in desc
+
+    def _make_view_and_mocks(self, cap=None):
+        guild_id = 42
+        alive_role = MagicMock()
+        alive_role.name = "Alive"
+        overseer_role = MagicMock()
+        overseer_role.name = "Overseer"
+        guild = MagicMock()
+        guild.id = guild_id
+        guild.roles = [alive_role, overseer_role]
+        guild.channels = []
+        members = []
+        for uid in (1, 2, 3):
+            member = MagicMock()
+            member.id = uid
+            member.roles = [alive_role]
+            member.guild = guild
+            members.append(member)
+        guild.members = members
+
+        interaction = MagicMock()
+        interaction.guild = guild
+        interaction.user = members[0]
+        interaction.response.send_message = AsyncMock()
+        interaction.message.edit = AsyncMock()
+        interaction.channel.send = AsyncMock()
+
+        session = {
+            "title": "🎮 Poll — Test",
+            "options": [
+                {"letter": "🇦", "name": "Apple", "voters": []},
+                {"letter": "🇧", "name": "Banana", "voters": []},
+            ],
+            "cap": cap,
+            "expires_at": None,
+            "pinged": False,
+        }
+        view = utility_cog.PickView(session, guild_id=guild_id, message_id=777)
+        guild_data = {
+            "alive_role_name": "Alive",
+            "overseer_role_name": "Overseer",
+        }
+        return view, interaction, members, guild_data
+
+    @pytest.mark.asyncio
+    @patch("cogs.utility_cog.save_guild_data")
+    @patch("cogs.utility_cog.load_guild_data")
+    async def test_pickview_vote_move_unvote(self, mock_load, mock_save):
+        """Voting, switching, and unvoting update the anonymous tallies."""
+        view, interaction, members, guild_data = self._make_view_and_mocks()
+        mock_load.return_value = guild_data
+
+        await view.vote(interaction, 0)
+        assert view.session["options"][0]["voters"] == [1]
+
+        await view.vote(interaction, 0)
+        assert view.session["options"][0]["voters"] == [1]  # no double vote
+
+        await view.vote(interaction, 1)  # switch
+        assert view.session["options"][0]["voters"] == []
+        assert view.session["options"][1]["voters"] == [1]
+
+        await view.unvote(interaction)
+        assert view.session["options"][1]["voters"] == []
+        assert mock_save.call_count >= 3
+
+    @pytest.mark.asyncio
+    @patch("cogs.utility_cog.save_guild_data")
+    @patch("cogs.utility_cog.load_guild_data")
+    async def test_pickview_cap_notifies(self, mock_load, mock_save):
+        """Reaching the cap pings the Overseer once."""
+        view, interaction, members, guild_data = self._make_view_and_mocks(cap=3)
+        mock_load.return_value = guild_data
+
+        for member in members:
+            interaction.user = member
+            await view.vote(interaction, 0)
+
+        assert view.session["pinged"] is True
+        interaction.channel.send.assert_awaited_once()
+
+        interaction.channel.send.reset_mock()
+        await view.unvote(interaction)  # vote below cap again
+        for member in members:
+            interaction.user = member
+            await view.vote(interaction, 0)
+        interaction.channel.send.assert_not_called()  # no repeat ping
+
+    @pytest.mark.asyncio
+    @patch("cogs.utility_cog.save_guild_data")
+    @patch("cogs.utility_cog.load_guild_data")
+    async def test_pickview_expired(self, mock_load, mock_save):
+        """Expired polls reject further votes."""
+        view, interaction, members, guild_data = self._make_view_and_mocks()
+        mock_load.return_value = guild_data
+        view.session["expires_at"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=10)
+        ).isoformat()
+
+        await view.vote(interaction, 0)
+        assert view.session["options"][0]["voters"] == []
+        interaction.response.send_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("cogs.utility_cog.save_guild_data")
+    @patch("cogs.utility_cog.load_guild_data")
+    async def test_pick_posts_in_invoking_channel(self, mock_load, mock_save):
+        """The poll is posted in the channel the command was typed in."""
+        overseer_role = MagicMock()
+        overseer_role.name = "Overseer"
+        alive_role = MagicMock()
+        alive_role.name = "Alive"
+        alive_role.mention = "@Alive"
+        guild = MagicMock()
+        guild.id = 42
+        guild.roles = [alive_role, overseer_role]
+        guild.members = []
+
+        mock_load.return_value = {
+            "overseer_role_name": "Overseer",
+            "alive_role_name": "Alive",
+            # Deliberately points somewhere the bot should NOT use any more.
+            "announcements_channel_name": "❗│announcements",
+        }
+
+        ctx = MagicMock()
+        ctx.guild = guild
+        ctx.author = MagicMock()
+        ctx.author.roles = [overseer_role]
+        ctx.author.guild_permissions.administrator = False
+        ctx.send = AsyncMock()
+
+        poll_channel = MagicMock()
+        poll_msg = MagicMock()
+        poll_msg.id = 999
+        poll_msg.edit = AsyncMock()
+        poll_channel.send = AsyncMock(return_value=poll_msg)
+        ctx.channel = poll_channel
+
+        cog = utility_cog.Utility(MagicMock())
+        await utility_cog.Utility.pick.callback(cog, ctx, "Title,", "A,", "B")
+
+        poll_channel.send.assert_awaited_once()
+        sent_kwargs = poll_channel.send.await_args.kwargs
+        assert "embed" in sent_kwargs
+        # No role ping — the poll is embed-only.
+        assert not sent_kwargs.get("content")
+        poll_msg.edit.assert_awaited_once()
+        assert mock_save.call_count >= 1
+
+
+class TestResolveMember:
+    """Tests for the shared member resolver used by .addrole/.removerole."""
+
+    @staticmethod
+    def _guild(members=(), get_member=None):
+        guild = MagicMock()
+        guild.members = list(members)
+        guild.get_member = MagicMock(side_effect=get_member or (lambda i: None))
+        return guild
+
+    def test_resolves_plain_mention(self):
+        """A <@id> mention resolves via the member cache by ID."""
+        member = MagicMock()
+        guild = self._guild(get_member=lambda i: member if i == 1234567890 else None)
+        assert utility_cog.Utility._resolve_member(guild, '<@1234567890>') is member
+        guild.get_member.assert_called_once_with(1234567890)
+
+    def test_resolves_nickname_mention(self):
+        """Discord sends <@!id> for nicknamed members — must resolve too."""
+        member = MagicMock()
+        guild = self._guild(get_member=lambda i: member if i == 9876543210 else None)
+        assert utility_cog.Utility._resolve_member(guild, '<@!9876543210>') is member
+        guild.get_member.assert_called_once_with(9876543210)
+
+    def test_resolves_raw_id(self):
+        """A raw user ID resolves via the member cache."""
+        member = MagicMock()
+        guild = self._guild(get_member=lambda i: member if i == 555 else None)
+        assert utility_cog.Utility._resolve_member(guild, '555') is member
+
+    def test_resolves_username(self):
+        """A plain username token matches against member names."""
+        member = MagicMock()
+        member.name = 'alice'
+        member.display_name = 'AliceNick'
+        guild = self._guild(members=[member])
+        assert utility_cog.Utility._resolve_member(guild, 'alice') is member
+
+    def test_resolves_nickname(self):
+        """A nickname/display-name token matches too."""
+        member = MagicMock()
+        member.name = 'alice'
+        member.display_name = 'AliceNick'
+        guild = self._guild(members=[member])
+        assert utility_cog.Utility._resolve_member(guild, 'AliceNick') is member
+
+    def test_unknown_token_returns_none(self):
+        """Unresolvable tokens return None instead of raising."""
+        guild = self._guild()
+        assert utility_cog.Utility._resolve_member(guild, 'nobody') is None
