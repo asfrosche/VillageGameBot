@@ -259,34 +259,53 @@ class TestParseSimulationArgs(unittest.TestCase):
         from fifa_data.services.draft_cog import DraftCog
         return DraftCog._parse_simulation_args(None, args)
 
-    def test_no_args_returns_v1_defaults(self):
-        model, presentation, debug = self.parse(None)
+    def test_no_args_returns_league_defaults(self):
+        model, presentation, debug, competition = self.parse(None)
         self.assertEqual(model, "v1")
         self.assertEqual(presentation, "fast")
         self.assertFalse(debug)
+        self.assertEqual(competition, "worldcup")
 
-        model, presentation, debug = self.parse("")
+        model, presentation, debug, competition = self.parse("")
         self.assertEqual(model, "v1")
+        self.assertEqual(competition, "worldcup")
 
-    def test_v4_model(self):
-        model, presentation, debug = self.parse("v4")
-        self.assertEqual(model, "v4")
+    def test_pl_sets_league_competition(self):
+        for alias in ("pl", "epl", "premier", "prem", "league"):
+            model, presentation, debug, competition = self.parse(alias)
+            self.assertEqual(competition, "premier-league", alias)
 
-    def test_animated_presentation(self):
-        model, presentation, debug = self.parse("animated")
+    def test_pl_with_model(self):
+        model, presentation, debug, competition = self.parse("pl v10")
+        self.assertIsNone(model)  # only v1..v6 are valid models
+        self.assertIn("Usage", presentation)
+
+    def test_pl_animated(self):
+        model, presentation, debug, competition = self.parse("pl animated")
+        self.assertEqual(competition, "premier-league")
         self.assertEqual(presentation, "animated")
 
+    def test_v4_model(self):
+        model, presentation, debug, competition = self.parse("v4")
+        self.assertEqual(model, "v4")
+        self.assertEqual(competition, "worldcup")
+
+    def test_animated_presentation(self):
+        model, presentation, debug, competition = self.parse("animated")
+        self.assertEqual(presentation, "animated")
+        self.assertEqual(competition, "worldcup")
+
     def test_debug_flag(self):
-        model, presentation, debug = self.parse("debug")
+        model, presentation, debug, competition = self.parse("debug")
         self.assertTrue(debug)
 
     def test_v4_animated(self):
-        model, presentation, debug = self.parse("v4 animated")
+        model, presentation, debug, competition = self.parse("v4 animated")
         self.assertEqual(model, "v4")
         self.assertEqual(presentation, "animated")
 
     def test_v4_debug(self):
-        model, presentation, debug = self.parse("v4 debug")
+        model, presentation, debug, competition = self.parse("v4 debug")
         self.assertEqual(model, "v4")
         self.assertTrue(debug)
 

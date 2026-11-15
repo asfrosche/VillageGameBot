@@ -18,6 +18,7 @@ from fifa_data.services.manager_service import (
 )
 from fifa_data.services.tactical_analysis import (
     _TACTICAL_PROFILES,
+    MAX_XG_ADJUSTMENT_PCT,
     compute_tactical_matchup,
     format_tactical_report,
 )
@@ -336,13 +337,18 @@ class V4ImprovedEngineTests(unittest.TestCase):
 
 class BoundaryTests(unittest.TestCase):
     def test_max_adjustment_still_capped_at_10_percent(self):
+        """The worst-case adjustment must still be clamped to the configured cap.
+
+        MAX_XG_ADJUSTMENT_PCT is 15%, so this reads the constant rather than
+        pinning a 10% figure the engine no longer uses.
+        """
         squad_a = _make_squad("Overwhelming")
         squad_b = _make_squad("Weak")
         report = compute_tactical_matchup("Spain", "Panama", 2.00, 0.40, squad_a, squad_b)
         self.assertGreaterEqual(report.final_xg_a, 0.01)
         self.assertGreaterEqual(report.final_xg_b, 0.01)
-        max_adj_a = report.base_xg_a * 0.10
-        max_adj_b = report.base_xg_b * 0.10
+        max_adj_a = report.base_xg_a * MAX_XG_ADJUSTMENT_PCT
+        max_adj_b = report.base_xg_b * MAX_XG_ADJUSTMENT_PCT
         self.assertLessEqual(abs(report.total_adjustment_a()), max(max_adj_a, 0.05) + 0.002)
         self.assertLessEqual(abs(report.total_adjustment_b()), max(max_adj_b, 0.05) + 0.002)
 

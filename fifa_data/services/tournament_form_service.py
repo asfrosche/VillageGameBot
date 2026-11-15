@@ -28,12 +28,14 @@ class TournamentFormService:
         cache_file: str | os.PathLike[str] | None = None,
         learning_rate: float = 0.05,
         form_cap: float = 4.0,
+        team_name_map: dict[str, str] | None = None,
     ) -> None:
         self._team_metrics = team_metrics
         self._matches_file = Path(matches_file) if matches_file else HERE / "data" / "matches.json"
         self._cache_file = Path(cache_file) if cache_file else HERE / "data" / "tournament_form_cache.json"
         self._learning_rate = learning_rate
         self._form_cap = form_cap
+        self._team_name_map = team_name_map if team_name_map is not None else MATCHES_TEAM_MAP
         self._form: dict[str, float] = {}
         self._debug: bool = False
         self._debug_log: list[str] = []
@@ -53,8 +55,8 @@ class TournamentFormService:
         self._debug_log.clear()
 
         for match in completed:
-            home_name = MATCHES_TEAM_MAP.get(match["home"]["name"], match["home"]["name"])
-            away_name = MATCHES_TEAM_MAP.get(match["away"]["name"], match["away"]["name"])
+            home_name = self._team_name_map.get(match["home"]["name"], match["home"]["name"])
+            away_name = self._team_name_map.get(match["away"]["name"], match["away"]["name"])
             if home_name not in self._form or away_name not in self._form:
                 continue
 

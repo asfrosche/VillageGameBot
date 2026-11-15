@@ -17,7 +17,7 @@ FIFA_DATA = os.path.join(MAY_DIR, "fifa_data")
 sys.path.insert(0, MAY_DIR)
 sys.path.insert(0, FIFA_DATA)
 
-from fifa_data.draft_cog import (
+from fifa_data.services.draft_cog import (
     DraftCog,
     COUNTRY_LIST,
     COUNTRY_TO_SIM,
@@ -123,7 +123,7 @@ class TestModuleData:
         assert sim_to_country("Brazil") == "Brazil"
 
     def test_squad_flags_include_extra_teams(self):
-        from fifa_data.draft_cog import SQUAD_FLAGS
+        from fifa_data.services.draft_cog import SQUAD_FLAGS
         for team in ["New Zealand", "Bosnia and Herzegovina", "Scotland"]:
             assert team in SQUAD_FLAGS, f"Missing flag for {team}"
 
@@ -149,7 +149,7 @@ class TestFlag:
         assert _flag("Atlantis") == ""
 
     def test_all_country_list_teams_have_flags(self):
-        from fifa_data.draft_cog import SQUAD_FLAGS
+        from fifa_data.services.draft_cog import SQUAD_FLAGS
         for name, _, _ in COUNTRY_LIST:
             assert name in SQUAD_FLAGS, f"COUNTRY_LIST entry {name} missing from SQUAD_FLAGS"
 
@@ -394,7 +394,7 @@ class TestGetCountryOptions:
             assert hasattr(opt, "value")
 
     def test_filters_by_continent(self):
-        from fifa_data.draft_cog import COUNTRY_CONTINENT
+        from fifa_data.services.draft_cog import COUNTRY_CONTINENT
         asian = [c for c, _ in COUNTRY_CONTINENT.items() if _ == "Asia"]
         asian_players = [{"name": "P", "country": c, "position": "FWD"} for c in asian[:2]]
         options = get_country_options(asian_players, continent="Europe")
@@ -497,43 +497,43 @@ class TestCountryNameMapping:
 
 class TestParseSimulationArgs:
     def test_no_args(self):
-        model, presentation, debug = DraftCog._parse_simulation_args(None, None)
+        model, presentation, debug, competition = DraftCog._parse_simulation_args(None, None)
         assert model == "v1"
         assert presentation == "fast"
         assert not debug
 
     def test_empty_string(self):
-        model, presentation, debug = DraftCog._parse_simulation_args(None, "")
+        model, presentation, debug, competition = DraftCog._parse_simulation_args(None, "")
         assert model == "v1"
 
     def test_v1(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v1")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v1")
         assert model == "v1"
 
     def test_v5(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v5")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v5")
         assert model == "v5"
 
     def test_animated(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "animated")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "animated")
         assert pres == "animated"
 
     def test_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "debug")
         assert debug
 
     def test_v4_animated(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v4 animated")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v4 animated")
         assert model == "v4"
         assert pres == "animated"
 
     def test_v5_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v5 debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v5 debug")
         assert model == "v5"
         assert debug
 
     def test_v4_animated_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v4 animated debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v4 animated debug")
         assert model == "v4"
         assert pres == "animated"
         assert debug
@@ -548,14 +548,37 @@ class TestParseSimulationArgs:
         assert result[0] is None
 
     def test_v2_fast(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v2 fast")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v2 fast")
         assert model == "v2"
         assert pres == "fast"
 
     def test_v3_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v3 debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v3 debug")
         assert model == "v3"
         assert debug
+
+    def test_competition_defaults_to_worldcup(self):
+        """The 4th return value selects the competition; default is the World Cup."""
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v4")
+        assert competition == "worldcup"
+
+    def test_pl_prefix_selects_premier_league(self):
+        """'pl' (and its aliases) switches competition, optionally before a model."""
+        for prefix in ("pl", "epl", "premier", "prem", "league"):
+            model, pres, debug, competition = DraftCog._parse_simulation_args(None, prefix)
+            assert competition == "premier-league", prefix
+            assert model == "v1"
+
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "pl v5 animated")
+        assert competition == "premier-league"
+        assert model == "v5"
+        assert pres == "animated"
+
+    def test_invalid_arg_keeps_competition(self):
+        """A usage error still reports the competition so the caller can label it."""
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "pl bogus")
+        assert model is None
+        assert competition == "premier-league"
 
 
 class TestBuildGoalEvents:
@@ -584,7 +607,7 @@ class TestDraftCogLoadSave:
     def test_load_missing_file(self, tmp_path):
         bot = MagicMock()
         dpath = tmp_path / "nonexistent" / "draft.json"
-        with patch("fifa_data.draft_cog.DATA_FILE", str(dpath)):
+        with patch("fifa_data.services.draft_cog.DATA_FILE", str(dpath)):
             cog = DraftCog(bot)
             assert cog.data == {}
 
@@ -592,7 +615,7 @@ class TestDraftCogLoadSave:
         dfile = tmp_path / "draft_bad.json"
         dfile.write_text("{invalid json", encoding="utf-8")
         bot = MagicMock()
-        with patch("fifa_data.draft_cog.DATA_FILE", str(dfile)):
+        with patch("fifa_data.services.draft_cog.DATA_FILE", str(dfile)):
             cog = DraftCog(bot)
             assert cog.data == {}
 
@@ -607,10 +630,10 @@ class TestDraftCogLoadSave:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestCommandRegistration:
-    """Verify all 24 commands are registered with correct names and aliases."""
+    """Verify all 27 commands are registered with correct names and aliases."""
 
     def test_all_commands_defined(self):
-        from fifa_data.draft_cog import DraftCog
+        from fifa_data.services.draft_cog import DraftCog
         cog = DraftCog(MagicMock())
         commands = cog.get_commands()
         cmd_names = {c.name for c in commands}
@@ -626,6 +649,7 @@ class TestCommandRegistration:
             "scoutingboard", "pause", "resume", "enddraft",
             "matches", "trending", "differentials", "refreshpoints",
             "simulate_help", "simulate", "montecarlo", "fsim_how",
+            "evaluate", "xsim", "xlineup",
         }
         missing = expected - cmd_names
         extra = cmd_names - expected

@@ -497,43 +497,43 @@ class TestCountryNameMapping:
 
 class TestParseSimulationArgs:
     def test_no_args(self):
-        model, presentation, debug = DraftCog._parse_simulation_args(None, None)
+        model, presentation, debug, competition = DraftCog._parse_simulation_args(None, None)
         assert model == "v1"
         assert presentation == "fast"
         assert not debug
 
     def test_empty_string(self):
-        model, presentation, debug = DraftCog._parse_simulation_args(None, "")
+        model, presentation, debug, competition = DraftCog._parse_simulation_args(None, "")
         assert model == "v1"
 
     def test_v1(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v1")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v1")
         assert model == "v1"
 
     def test_v5(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v5")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v5")
         assert model == "v5"
 
     def test_animated(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "animated")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "animated")
         assert pres == "animated"
 
     def test_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "debug")
         assert debug
 
     def test_v4_animated(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v4 animated")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v4 animated")
         assert model == "v4"
         assert pres == "animated"
 
     def test_v5_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v5 debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v5 debug")
         assert model == "v5"
         assert debug
 
     def test_v4_animated_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v4 animated debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v4 animated debug")
         assert model == "v4"
         assert pres == "animated"
         assert debug
@@ -548,12 +548,12 @@ class TestParseSimulationArgs:
         assert result[0] is None
 
     def test_v2_fast(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v2 fast")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v2 fast")
         assert model == "v2"
         assert pres == "fast"
 
     def test_v3_debug(self):
-        model, pres, debug = DraftCog._parse_simulation_args(None, "v3 debug")
+        model, pres, debug, competition = DraftCog._parse_simulation_args(None, "v3 debug")
         assert model == "v3"
         assert debug
 

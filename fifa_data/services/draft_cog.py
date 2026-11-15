@@ -2876,100 +2876,119 @@ class DraftCog(commands.Cog):
         if not ctx.author.guild_permissions.administrator:
             return await ctx.send("Admin only.")
 
-        model, presentation, debug = self._parse_simulation_args(args)
+        model, presentation, debug, competition = self._parse_simulation_args(args)
         if model is None:
             return await ctx.send(presentation)
 
-        status_msg = await ctx.send(f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n⏳ Fetching latest FIFA data...")
+        is_league = competition == "premier-league"
+        emoji = "🏟️" if is_league else "🌍"
+        comp_title = "Premier League 2026/27" if is_league else "FIFA World Cup 2026"
 
-        fifa_dir = os.path.dirname(os.path.dirname(__file__))
+        status_msg = await ctx.send(f"{emoji} **{comp_title} — {model.upper()} Simulation**\n⏳ Fetching latest data...")
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                params = {"idCompetition": "17", "idSeason": "285023", "count": 200}
-                async with session.get(
-                    "https://api.fifa.com/api/v3/calendar/matches",
-                    params=params, timeout=15,
-                ) as r:
-                    match_data = await r.json()
-                async with session.get(
-                    "https://play.fifa.com/json/fantasy/players.json",
-                    timeout=15,
-                ) as r:
-                    players = await r.json()
-                async with session.get(
-                    "https://play.fifa.com/json/fantasy/squads.json",
-                    timeout=15,
-                ) as r:
-                    squads_raw = await r.json()
-
-            results = match_data.get("Results", [])
-            completed = []
-            upcoming = []
-            for m in results:
-                status = m.get("MatchStatus")
-                home_data = m.get("Home") or {}
-                away_data = m.get("Away") or {}
-                home = (home_data.get("TeamName") or [{}])[0].get("Description", "?")
-                away = (away_data.get("TeamName") or [{}])[0].get("Description", "?")
-                hs = m.get("HomeTeamScore")
-                aas = m.get("AwayTeamScore")
-                entry = {
-                    "id": m.get("IdMatch"),
-                    "date": m.get("Date", "?"),
-                    "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
-                    "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
-                    "home": {
-                        "name": home, "score": hs, "id": home_data.get("IdTeam"),
-                        "players": home_data.get("Players", []),
-                    },
-                    "away": {
-                        "name": away, "score": aas, "id": away_data.get("IdTeam"),
-                        "players": away_data.get("Players", []),
-                    },
-                    "winner": m.get("Winner"),
-                    "status": status,
-                }
-                if status == 0:
-                    completed.append(entry)
-                else:
-                    upcoming.append(entry)
-
-            matches_out = {
-                "last_updated": datetime.utcnow().isoformat(),
-                "completed_count": len(completed),
-                "upcoming_count": len(upcoming),
-                "competition": "FIFA World Cup 2026",
-                "completed": completed,
-                "upcoming": upcoming,
-            }
-            os.makedirs(os.path.join(fifa_dir, "data"), exist_ok=True)
-            with open(os.path.join(fifa_dir, "data", "matches.json"), "w", encoding="utf-8") as f:
-                json.dump(matches_out, f, indent=2, ensure_ascii=False)
-            with open(os.path.join(fifa_dir, "data", "players.json"), "w", encoding="utf-8") as f:
-                json.dump(players, f, indent=2, ensure_ascii=False)
-            with open(os.path.join(fifa_dir, "data", "squads.json"), "w", encoding="utf-8") as f:
-                json.dump(squads_raw, f, indent=2, ensure_ascii=False)
-
-            self.fantasy._players = None
-            self.fantasy._cache_time = 0
-
-            await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n✅ Data fetched. Simulating...")
-        except Exception as e:
-            await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n⚠️ Using cached data ({e})")
+        if is_league:
+            await status_msg.edit(content=f"{emoji} **{comp_title} — {model.upper()} Simulation**\n🔄 Refreshing Premier League data...")
+            try:
+                from ..scripts import fetch_epl_data
+                await asyncio.get_event_loop().run_in_executor(None, fetch_epl_data.refresh)
+            except Exception as e:
+                await status_msg.edit(content=f"{emoji} **{comp_title} — {model.upper()} Simulation**\n⚠️ Using cached PL data ({e})")
+        else:
+            try:
+                await self._fetch_worldcup_comm_data()
+                await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n✅ Data fetched. Simulating...")
+            except Exception as e:
+                await status_msg.edit(content=f"🌍 **World Cup 2026 — {model.upper()} Simulation**\n⚠️ Using cached data ({e})")
 
         loop = asyncio.get_event_loop()
         try:
-            data = await loop.run_in_executor(None, run_simulation, model, debug)
+            data = await loop.run_in_executor(None, run_simulation, model, debug, competition)
         except Exception as e:
             import traceback
             traceback.print_exc()
             return await ctx.send(f"❌ Simulation error: {e}")
 
-        if presentation == "animated":
+        if presentation == "animated" and competition != "premier-league":
             await self._simulate_animated(ctx, status_msg, data, model=model)
         else:
             await self._simulate_fast(ctx, status_msg, data, model=model, debug=debug)
+
+    async def _fetch_worldcup_comm_data(self) -> None:
+        """Fetch the latest FIFA.com World Cup data into ``fifa_data/data/``.
+
+        Raises on any failure so callers can fall back to cached data.
+        """
+        import json as _json
+
+        fifa_dir = os.path.dirname(os.path.dirname(__file__))
+        async with aiohttp.ClientSession() as session:
+            params = {"idCompetition": "17", "idSeason": "285023", "count": 200}
+            async with session.get(
+                "https://api.fifa.com/api/v3/calendar/matches",
+                params=params, timeout=15,
+            ) as r:
+                match_data = await r.json()
+            async with session.get(
+                "https://play.fifa.com/json/fantasy/players.json",
+                timeout=15,
+            ) as r:
+                players = await r.json()
+            async with session.get(
+                "https://play.fifa.com/json/fantasy/squads.json",
+                timeout=15,
+            ) as r:
+                squads_raw = await r.json()
+
+        results = match_data.get("Results", [])
+        completed = []
+        upcoming = []
+        for m in results:
+            status = m.get("MatchStatus")
+            home_data = m.get("Home") or {}
+            away_data = m.get("Away") or {}
+            home = (home_data.get("TeamName") or [{}])[0].get("Description", "?")
+            away = (away_data.get("TeamName") or [{}])[0].get("Description", "?")
+            hs = m.get("HomeTeamScore")
+            aas = m.get("AwayTeamScore")
+            entry = {
+                "id": m.get("IdMatch"),
+                "date": m.get("Date", "?"),
+                "stage": (m.get("StageName") or [{}])[0].get("Description") if m.get("StageName") else None,
+                "group": (m.get("GroupName") or [{}])[0].get("Description") if m.get("GroupName") else None,
+                "home": {
+                    "name": home, "score": hs, "id": home_data.get("IdTeam"),
+                    "players": home_data.get("Players", []),
+                },
+                "away": {
+                    "name": away, "score": aas, "id": away_data.get("IdTeam"),
+                    "players": away_data.get("Players", []),
+                },
+                "winner": m.get("Winner"),
+                "status": status,
+            }
+            if status == 0:
+                completed.append(entry)
+            else:
+                upcoming.append(entry)
+
+        matches_out = {
+            "last_updated": datetime.utcnow().isoformat(),
+            "completed_count": len(completed),
+            "upcoming_count": len(upcoming),
+            "competition": "FIFA World Cup 2026",
+            "completed": completed,
+            "upcoming": upcoming,
+        }
+        os.makedirs(os.path.join(fifa_dir, "data"), exist_ok=True)
+        with open(os.path.join(fifa_dir, "data", "matches.json"), "w", encoding="utf-8") as f:
+            _json.dump(matches_out, f, indent=2, ensure_ascii=False)
+        with open(os.path.join(fifa_dir, "data", "players.json"), "w", encoding="utf-8") as f:
+            _json.dump(players, f, indent=2, ensure_ascii=False)
+        with open(os.path.join(fifa_dir, "data", "squads.json"), "w", encoding="utf-8") as f:
+            _json.dump(squads_raw, f, indent=2, ensure_ascii=False)
+
+        self.fantasy._players = None
+        self.fantasy._cache_time = 0
 
     @commands.command(aliases=["mc"])
     async def montecarlo(self, ctx, *, args: str = None):
@@ -4482,23 +4501,30 @@ class DraftCog(commands.Cog):
 
         return report
 
-    def _parse_simulation_args(self, args: str | None) -> tuple[str | None, str, bool]:
+    def _parse_simulation_args(self, args: str | None) -> tuple[str | None, str, bool, str]:
         tokens = args.split() if args and args.strip() else []
         model = "v1"
         presentation = "fast"
         debug = False
+        competition = "worldcup"
 
         if not tokens:
-            return model, presentation, debug
+            return model, presentation, debug, competition
 
         first = tokens[0].lower()
         if first in {"v1", "v2", "v3", "v4", "v5", "v6"}:
             model = first
             tokens = tokens[1:]
+        elif first in {"pl", "epl", "premier", "prem", "league"}:
+            competition = "premier-league"
+            tokens = tokens[1:]
+            if tokens and tokens[0].lower() in {"v1", "v2", "v3", "v4", "v5", "v6"}:
+                model = tokens[0].lower()
+                tokens = tokens[1:]
         elif first in {"animated", "fast", "debug"}:
             pass
         else:
-            return None, "Usage: `.simulate [v1|v2|v3|v4|v5|v6] [fast|animated] [debug]`", False
+            return None, "Usage: `.simulate [pl] [v1|v2|v3|v4|v5|v6] [fast|animated|detailed] [debug]`", False, competition
 
         for token in tokens:
             lowered = token.lower()
@@ -4509,9 +4535,9 @@ class DraftCog(commands.Cog):
             elif lowered == "debug":
                 debug = True
             else:
-                return None, "Usage: `.simulate [v1|v2|v3|v4|v5|v6] [fast|animated] [debug]`", False
+                return None, "Usage: `.simulate [pl] [v1|v2|v3|v4|v5|v6] [fast|animated|detailed] [debug]`", False, competition
 
-        return model, presentation, debug
+        return model, presentation, debug, competition
 
     # ─────────────────────────────────────────────────────────────────────────────
     # .xsim — Cross-version simulation (all 5 engines)
@@ -5366,6 +5392,9 @@ class DraftCog(commands.Cog):
 
     async def _simulate_fast(self, ctx, status_msg, data, model: str = "v1", debug: bool = False):
         """Fast simulation - show results without animations."""
+        if data.get("format") == "league" or data.get("competition") == "league":
+            return await self._show_league_fast(ctx, status_msg, data, model=model)
+
         if model == "v5" and not debug:
             return await self._show_comprehensive_v5(ctx, status_msg, data)
 
@@ -5416,6 +5445,34 @@ class DraftCog(commands.Cog):
                     await ctx.send(f"```{safe[:1800]}```")
         await ctx.send(f"🏆🏆🏆 **{champ.upper()}** ARE WORLD CUP 2026 CHAMPIONS! 🏆🏆🏆")
         await ctx.send(f"📊 Model: {model.upper()} | Matches: {data['stats']['real_count']} real + {data['stats']['total_group_matches'] - data['stats']['real_count']} simulated group + {data['stats']['knockout_matches'] + data['stats']['third_place']} KO = {data['stats']['total_group_matches'] + data['stats']['knockout_matches'] + data['stats']['third_place']} total")
+
+    async def _show_league_fast(self, ctx, status_msg, data, model: str = "v1", debug: bool = False):
+        season = data.get("competition", "Premier League")
+        await status_msg.edit(content=f"🏟️ **{season} — {model.upper()} Simulation Complete**")
+
+        lines = ["```"]
+        lines.append(" #  Club                     P  W  D  L  GF  GD  PTS   Form")
+        lines.append("-" * 62)
+        for position, (team, row) in enumerate(data["table"], 1):
+            medal = {1: "🏆", 2: "🥈", 3: "🥉", 4: "UCL", 5: "UCL", 6: "UEL"}.get(position, "")
+            lines.append(
+                f"{position:>2}  {team:<24s} {row['played']:>2} {row['won']:>1} {row['drawn']:>1} {row['lost']:>1} "
+                f"{row['gf']:>3} {row['gd']:>+3} {row['pts']:>3}  {row.get('form', ''):5s}"
+            )
+        lines.append("```")
+        await ctx.send("\n".join(lines))
+        await ctx.send(f"{data['stats']['real_results_used']} real result(s) merged into the simulated season.")
+        await ctx.send(f"🏆 **{data.get('champion', '?')}** win the Premier League! 🥇")
+        await ctx.send(f"🕵️ Champions League: {', '.join(data.get('top4', []))}")
+        await ctx.send(f"⬇️ Relegated: {', '.join(data.get('relegated', []))}")
+
+        if debug:
+            debug_items = data.get("debug", [])
+            if debug_items:
+                await ctx.send(f"🔎 **{model.upper()} Debug Preview** — first {min(3, len(debug_items))} simulated matches")
+                for item in debug_items[:3]:
+                    safe = item.replace("```", "` ` `")
+                    await ctx.send(f"```{safe[:1800]}```")
 
 
 class _ReportView(discord.ui.View):

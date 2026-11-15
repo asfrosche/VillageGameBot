@@ -32,7 +32,14 @@ def _load_config() -> dict[str, Any]:
     return {}
 
 
-def _load_national_modifiers() -> dict[str, float]:
+def _load_national_modifiers(national_data: bool = True) -> dict[str, float]:
+    """National strength modifiers are keyed by *country*.
+
+    A club competition must not consult them, so ``national_data=False``
+    returns an empty mapping (every lookup then yields a neutral 0.0).
+    """
+    if not national_data:
+        return {}
     path = HERE / "data" / "national_strength_modifiers.json"
     if path.exists():
         with path.open("r", encoding="utf-8") as f:
@@ -47,9 +54,13 @@ class V3DynamicEngine(MatchEngine):
         squads: dict[str, Squad] | None = None,
         team_metrics: dict[str, dict[str, float]] | None = None,
         tournament_form: dict[str, float] | None = None,
+        national_data: bool = True,
+        matches_file: str | Path | None = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir else None
         resolved = self.data_dir or HERE
+        self.national_data = national_data
+        self.matches_file = Path(matches_file) if matches_file else None
         self.squads = squads if squads is not None else load_v2_squads(resolved)
         self.team_metrics = team_metrics or {}
         self._tournament_form = tournament_form or {}
@@ -73,14 +84,14 @@ class V3DynamicEngine(MatchEngine):
         self.tiebreaker_delta_scale = cfg.get("tiebreaker_delta_scale", 0.0005)
         self.elo_dampening = cfg.get("elo_dampening", 0.60)
 
-        self.national_modifiers = _load_national_modifiers()
+        self.national_modifiers = _load_national_modifiers(national_data)
 
         self.chemistry_service = ChemistryService(resolved)
-        self.experience_service = ExperienceService(resolved)
+        self.experience_service = ExperienceService(resolved, national_data=national_data)
         self.form_service = FormService()
         self.momentum_service = MomentumService()
         self.continuity_service = ContinuityService()
-        self.leadership_service = LeadershipService(resolved)
+        self.leadership_service = LeadershipService(resolved, national_data=national_data)
 
         xg_deltas = self._compute_xg_deltas(resolved)
         self.form_service.set_xg_deltas(xg_deltas)
@@ -339,7 +350,13 @@ class V3DynamicEngine(MatchEngine):
         return build_team_strength(team, squad.current_starting_xi, squad.formation)
 
     def _compute_xg_deltas(self, data_dir: Path) -> dict[str, float]:
-        matches_path = data_dir / "data" / "matches.json"
+        # Use the competition's own completed-match file. Falling back to the
+        # World Cup "matches.json" would score this competition against
+        # national-team fixtures it does not play in.
+        matches_path = self.matches_file
+        if matches_path is None:
+            default_file = data_dir / "data" / "matches.json"
+            matches_path = default_file
         if not matches_path.exists():
             return {}
 

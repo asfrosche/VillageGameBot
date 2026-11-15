@@ -145,9 +145,14 @@ def _squad_with_attributes(country: str,
 
 @pytest.fixture(autouse=True)
 def restore_profiles():
-    saved = dict(_TACTICAL_PROFILES)
+    # Load the real profiles first and snapshot them. Restore by mutating the
+    # dict other modules imported by reference instead of swapping in a copy;
+    # otherwise they keep seeing a stale (empty) dict.
+    saved = dict(ta_module._tactical_profiles())
     yield
-    ta_module._TACTICAL_PROFILES = dict(saved)
+    _TACTICAL_PROFILES.clear()
+    _TACTICAL_PROFILES.update(saved)
+    ta_module._TACTICAL_PROFILES = _TACTICAL_PROFILES
 
 
 @pytest.fixture

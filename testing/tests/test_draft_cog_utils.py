@@ -8,7 +8,7 @@ FIFA_DATA = os.path.join(MAY_DIR, "fifa_data")
 sys.path.insert(0, MAY_DIR)
 sys.path.insert(0, FIFA_DATA)
 
-from fifa_data.draft_cog import (
+from fifa_data.services.draft_cog import (
     get_roster_counts, get_country_counts, get_remaining_slots,
     can_add_position, can_add_country, is_player_drafted,
     generate_snake_order, get_current_owner, get_next_owners,
@@ -256,37 +256,37 @@ class TestCountryNameMapping(unittest.TestCase):
 class TestParseSimulationArgs(unittest.TestCase):
     @staticmethod
     def parse(args):
-        from fifa_data.draft_cog import DraftCog
+        from fifa_data.services.draft_cog import DraftCog
         return DraftCog._parse_simulation_args(None, args)
 
     def test_no_args_returns_v1_defaults(self):
-        model, presentation, debug = self.parse(None)
+        model, presentation, debug, competition = self.parse(None)
         self.assertEqual(model, "v1")
         self.assertEqual(presentation, "fast")
         self.assertFalse(debug)
 
-        model, presentation, debug = self.parse("")
+        model, presentation, debug, competition = self.parse("")
         self.assertEqual(model, "v1")
 
     def test_v4_model(self):
-        model, presentation, debug = self.parse("v4")
+        model, presentation, debug, competition = self.parse("v4")
         self.assertEqual(model, "v4")
 
     def test_animated_presentation(self):
-        model, presentation, debug = self.parse("animated")
+        model, presentation, debug, competition = self.parse("animated")
         self.assertEqual(presentation, "animated")
 
     def test_debug_flag(self):
-        model, presentation, debug = self.parse("debug")
+        model, presentation, debug, competition = self.parse("debug")
         self.assertTrue(debug)
 
     def test_v4_animated(self):
-        model, presentation, debug = self.parse("v4 animated")
+        model, presentation, debug, competition = self.parse("v4 animated")
         self.assertEqual(model, "v4")
         self.assertEqual(presentation, "animated")
 
     def test_v4_debug(self):
-        model, presentation, debug = self.parse("v4 debug")
+        model, presentation, debug, competition = self.parse("v4 debug")
         self.assertEqual(model, "v4")
         self.assertTrue(debug)
 

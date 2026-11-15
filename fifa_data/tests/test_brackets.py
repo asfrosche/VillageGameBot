@@ -1,6 +1,13 @@
+"""Manual Playwright screenshot helper for the knockout bracket page.
+
+This is not a unit test: it launches a real browser and writes
+``brackets_test.png``. It lives here historically, but the entry point is only
+run explicitly via ``python -m fifa_data.tests.test_brackets`` so pytest does
+not try to collect and execute it.
+"""
 import asyncio
 
-async def test():
+async def main():
     from fifa_data.services.bracket import load_local_matches, build_bracket_data, INDEX_HTML
 
     local = load_local_matches()
@@ -40,4 +47,5 @@ async def test():
 
         await browser.close()
 
-asyncio.run(test())
+if __name__ == "__main__":
+    asyncio.run(main())

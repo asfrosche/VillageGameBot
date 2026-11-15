@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +18,53 @@ def _load_manager_profiles() -> dict[str, dict[str, Any]]:
     return {}
 
 
-_MANAGER_PROFILES = _load_manager_profiles()
+# Loaded lazily so a club competition never reads national-team manager data.
+_MANAGER_PROFILES: dict[str, dict[str, Any]] = {}
+_NATIONAL_DATA_ENABLED = True
+
+
+def _manager_profiles() -> dict[str, dict[str, Any]]:
+    """Return the manager profiles, loading them on first national use.
+
+    Only fills the dict while it is empty, so a reset/rebound profile dict is
+    refilled rather than leaving the engine with no managers at all.
+    """
+    if not _NATIONAL_DATA_ENABLED:
+        return {}
+    if not _MANAGER_PROFILES:
+        _MANAGER_PROFILES.update(_load_manager_profiles())
+    return _MANAGER_PROFILES
+
+
+def set_national_data_scope(enabled: bool) -> None:
+    """Disable country-keyed manager profiles for club competitions.
+
+    ``manager_profiles.json`` describes national-team managers. A club
+    competition calls this with ``False`` so ``get_manager`` returns ``None``
+    (neutral plan, no manager modifier) instead of World Cup data. Loaded data
+    is kept so switching back to a national competition reuses it.
+    """
+    global _NATIONAL_DATA_ENABLED
+    _NATIONAL_DATA_ENABLED = enabled
+
+
+@contextmanager
+def national_data_scope(enabled: bool):
+    """Apply country-keyed manager scope for the duration of a run.
+
+    The previous setting is restored on exit, so simulating a club competition
+    cannot leave national managers disabled for whatever runs next.
+    """
+    previous = _NATIONAL_DATA_ENABLED
+    set_national_data_scope(enabled)
+    try:
+        yield
+    finally:
+        set_national_data_scope(previous)
 
 
 def get_manager(team: str) -> ManagerProfile | None:
-    raw = _MANAGER_PROFILES.get(team)
+    raw = _manager_profiles().get(team)
     if raw is None:
         return None
     return ManagerProfile(

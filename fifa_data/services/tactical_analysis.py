@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,12 @@ HERE = Path(__file__).resolve().parents[1]
 
 
 def _load_tactical_profiles() -> dict[str, dict[str, Any]]:
+    """Load the country-keyed tactical profiles.
+
+    This file describes *national* teams. It is loaded lazily and only when a
+    national competition actually asks for it, so club competitions (e.g. the
+    Premier League) never read World Cup tactical data.
+    """
     path = HERE / "data" / "tactical_profiles.json"
     if path.exists():
         with path.open("r", encoding="utf-8") as f:
@@ -46,7 +53,54 @@ def _load_tactical_profiles() -> dict[str, dict[str, Any]]:
     return {}
 
 
-_TACTICAL_PROFILES = _load_tactical_profiles()
+# The country-keyed profiles are loaded lazily: this dict starts empty and is
+# only populated when a national competition actually asks for it, so club
+# competitions (e.g. the Premier League) never read World Cup tactical data.
+_TACTICAL_PROFILES: dict[str, dict[str, Any]] = {}
+_NATIONAL_DATA_ENABLED = True
+
+
+def _tactical_profiles() -> dict[str, dict[str, Any]]:
+    """Return the tactical profiles, loading them on first national use.
+
+    Loads into whichever dict is currently bound to ``_TACTICAL_PROFILES``, and
+    only while that dict is empty. That keeps loading lazy and idempotent, and
+    means an externally supplied (or reset-to-empty) profile dict is refilled
+    instead of silently leaving the engine with no profiles at all.
+    """
+    if not _NATIONAL_DATA_ENABLED:
+        return {}
+    if not _TACTICAL_PROFILES:
+        _TACTICAL_PROFILES.update(_load_tactical_profiles())
+    return _TACTICAL_PROFILES
+
+
+def set_national_data_scope(enabled: bool) -> None:
+    """Enable/disable country-keyed tactical profiles for this process.
+
+    A club competition calls this with ``False`` so every profile lookup
+    resolves to the neutral empty profile instead of World Cup data. The
+    already-loaded data is kept, so switching back to a national competition
+    reuses it instead of re-reading the file.
+    """
+    global _NATIONAL_DATA_ENABLED
+    _NATIONAL_DATA_ENABLED = enabled
+
+
+@contextmanager
+def national_data_scope(enabled: bool):
+    """Apply country-keyed profile scope for the duration of a run.
+
+    The previous setting is restored on exit, so simulating a club competition
+    cannot leave national profiles disabled for whatever runs next.
+    """
+    previous = _NATIONAL_DATA_ENABLED
+    set_national_data_scope(enabled)
+    try:
+        yield
+    finally:
+        set_national_data_scope(previous)
+
 
 # ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -118,8 +172,9 @@ def choose_game_plan(
     relative_strength: float,
     context: str = "group",
 ) -> str:
-    prof = _TACTICAL_PROFILES.get(team, {})
-    opp_prof = _TACTICAL_PROFILES.get(opponent, {})
+    profiles = _tactical_profiles()
+    prof = profiles.get(team, {})
+    opp_prof = profiles.get(opponent, {})
 
     if context == "knockout":
         if relative_strength > 1.10:
@@ -161,8 +216,9 @@ def compute_tactical_matchup(
     squad_b: Squad | None = None,
     context: str = "group",
 ) -> TacticalReport:
-    prof_a = _TACTICAL_PROFILES.get(team_a, {})
-    prof_b = _TACTICAL_PROFILES.get(team_b, {})
+    profiles = _tactical_profiles()
+    prof_a = profiles.get(team_a, {})
+    prof_b = profiles.get(team_b, {})
 
     relative_a_vs_b = base_xg_a / max(base_xg_b, 0.01)
     relative_b_vs_a = base_xg_b / max(base_xg_a, 0.01)

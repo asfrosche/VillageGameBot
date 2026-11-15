@@ -8,6 +8,7 @@ import os
 import re
 import unicodedata
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -113,21 +114,52 @@ def load_worldcup_data(worldcup_file: str | os.PathLike[str] | None = None) -> t
     return namespace.get("TEAM_METRICS", {}), namespace.get("GROUPS", {}), raw_rosters
 
 
-_KNOWN_LINEUPS: dict[str, Any] | None = None
+_KNOWN_LINEUPS: dict[str, Any] = {}
+# When False, the country-keyed known_lineups.json is never read (club mode).
+_KNOWN_LINEUPS_ENABLED = True
+
+
+def set_known_lineups_scope(enabled: bool) -> None:
+    """Enable/disable the country-keyed ``known_lineups.json`` source.
+
+    That file is keyed by national team, so a club competition disables it and
+    builds its starting XIs from the competition's own rosters instead. Loaded
+    data is kept so a later national run reuses it rather than staying empty.
+    """
+    global _KNOWN_LINEUPS_ENABLED
+    _KNOWN_LINEUPS_ENABLED = enabled
+
+
+@contextmanager
+def known_lineups_scope(enabled: bool):
+    """Apply country-keyed known-lineup scope for the duration of a run.
+
+    The previous setting is restored on exit, so a club competition cannot
+    leave national lineups disabled for whatever runs next.
+    """
+    previous = _KNOWN_LINEUPS_ENABLED
+    set_known_lineups_scope(enabled)
+    try:
+        yield
+    finally:
+        set_known_lineups_scope(previous)
 
 
 def _load_known_lineups() -> dict[str, Any]:
-    global _KNOWN_LINEUPS
-    if _KNOWN_LINEUPS is not None:
-        return _KNOWN_LINEUPS
-    path = HERE / "data" / "known_lineups.json"
-    if path.exists():
+    """Return the country-keyed known lineups, reading them on first use.
+
+    Only fills the dict while it is empty, so a cleared cache is refilled
+    rather than leaving national lineups permanently unavailable.
+    """
+    if not _KNOWN_LINEUPS_ENABLED:
+        return {}
+    if not _KNOWN_LINEUPS:
+        path = HERE / "data" / "known_lineups.json"
         try:
-            _KNOWN_LINEUPS = json.loads(path.read_text(encoding="utf-8"))
+            if path.exists():
+                _KNOWN_LINEUPS.update(json.loads(path.read_text(encoding="utf-8")))
         except Exception:
-            _KNOWN_LINEUPS = {}
-    else:
-        _KNOWN_LINEUPS = {}
+            pass
     return _KNOWN_LINEUPS
 
 
@@ -157,6 +189,10 @@ def load_v2_squads(
     matches_file: str | os.PathLike[str] | None = None,
     team_names: list[str] | None = None,
     lineup_overrides: dict[str, LineupResult] | None = None,
+    rosters: dict[str, dict[str, list[tuple[Any, ...]]]] | None = None,
+    rosters_file: str | os.PathLike[str] | None = None,
+    players_file: str | os.PathLike[str] | None = None,
+    squads_file: str | os.PathLike[str] | None = None,
 ) -> dict[str, Squad]:
 
     from .lineup_service import LineupResult
@@ -187,14 +223,38 @@ def load_v2_squads(
         )
     base_dir = Path(data_dir) if data_dir else HERE
     matches_path = Path(matches_file) if matches_file else base_dir / "data" / "matches.json"
-    players_raw = _load_json(base_dir / "data" / "players.json")
-    squads_raw = _load_json(base_dir / "data" / "squads.json")
-    raw_rosters = _load_raw_rosters(base_dir / "worldcupsimulator.py")
+    players_path = Path(players_file) if players_file else base_dir / "data" / "players.json"
+    squads_path = Path(squads_file) if squads_file else base_dir / "data" / "squads.json"
+    players_raw = _load_json(players_path) if players_path.exists() else []
+    squads_raw = _load_json(squads_path) if squads_path.exists() else []
+    if rosters is not None:
+        raw_rosters = rosters
+    elif rosters_file is not None:
+        roster_path = Path(rosters_file)
+        if not roster_path.exists():
+            raise FileNotFoundError(
+                f"roster file not found: {roster_path}. Run "
+                "`python -m fifa_data.scripts.fetch_epl_data` (or the matching "
+                "competition fetcher) to build it."
+            )
+        raw_rosters = _load_json(roster_path)
+    else:
+        raw_rosters = _load_raw_rosters(base_dir / "worldcupsimulator.py")
+    # Reserved metadata keys (e.g. the "_competition" season stamp) are not clubs.
+    raw_rosters = {
+        team: groups
+        for team, groups in raw_rosters.items()
+        if not (isinstance(team, str) and team.startswith("_"))
+    }
     matches_data = _load_json(matches_path) if matches_path.exists() else {"completed": []}
 
     if team_names is None:
-        team_metrics, _, _ = load_worldcup_data(base_dir / "worldcupsimulator.py")
-        team_names = list(team_metrics.keys())
+        roster_teams = [t for t in raw_rosters if not str(t).startswith("_")]
+        if roster_teams:
+            team_names = roster_teams
+        else:
+            team_metrics, _, _ = load_worldcup_data(base_dir / "worldcupsimulator.py")
+            team_names = list(team_metrics.keys())
 
     squad_by_id = {squad["id"]: squad for squad in squads_raw}
     team_to_squad_id = _build_team_to_squad_id(squads_raw)
@@ -433,11 +493,15 @@ def _synthetic_attributes(
     }
 
 
-def _parse_raw_record(record: tuple[Any, ...] | Any) -> tuple[str, str, float]:
-    if isinstance(record, tuple):
+def _parse_raw_record(record: tuple[Any, ...] | list[Any] | Any) -> tuple[str, str, float]:
+    # Accept lists as well as tuples: JSON-sourced rosters (e.g. the Premier
+    # League's pl_rosters.json) decode to lists, and failing to unpack those
+    # silently flattened every rating to the 75.0 default and used the whole
+    # record as the player's name.
+    if isinstance(record, (list, tuple)):
         name = str(record[0])
-        tier = str(record[1]) if len(record) >= 2 else "BASIS"
-        rating = float(record[2]) if len(record) >= 3 else 75.0
+        tier = str(record[1]) if len(record) >= 2 and record[1] else "BASIS"
+        rating = float(record[2]) if len(record) >= 3 and record[2] is not None else 75.0
         return name, tier, rating
     return str(record), "BASIS", 75.0
 

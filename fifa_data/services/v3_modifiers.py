@@ -199,21 +199,35 @@ class ContinuityService:
 
 
 class ExperienceService:
-    def __init__(self, data_dir: str | Path | None = None) -> None:
-        base = Path(data_dir) if data_dir else HERE
-        exp_path = base / "data" / "player_experience.json"
+    """Scores a squad on international experience.
+
+    ``player_experience.json`` describes *national* teams (international caps,
+    World Cup appearances, national-team captaincy). Those are meaningless for
+    a club competition, so ``national_data=False`` disables the source entirely
+    and the component returns a neutral score rather than a national-team bonus.
+    """
+
+    def __init__(self, data_dir: str | Path | None = None, national_data: bool = True) -> None:
+        self.national_data = national_data
         self.experience_data: dict[str, dict] = {}
         self.exp_norm: dict[str, dict] = {}
+        if not national_data:
+            return
+        base = Path(data_dir) if data_dir else HERE
+        exp_path = base / "data" / "player_experience.json"
         if exp_path.exists():
             with exp_path.open("r", encoding="utf-8") as f:
                 raw = json.load(f)
             for name, data in raw.items():
                 self.exp_norm[_normalize(name)] = data
 
+    def _disabled(self) -> ComponentScore:
+        return ComponentScore("experience", 0.0, "International experience not applicable", 1.0)
+
     def get_player_details(self, xi: list[Player]) -> list[dict[str, object]]:
         result = []
         for player in xi:
-            exp = self.exp_norm.get(_normalize(player.name), {})
+            exp = self.exp_norm.get(_normalize(player.name), {}) if self.national_data else {}
             result.append({
                 "name": player.name,
                 "caps": exp.get("international_caps", 0),
@@ -230,6 +244,9 @@ class ExperienceService:
         is_extra_time: bool = False,
         is_penalties: bool = False,
     ) -> ComponentScore:
+        if not self.national_data:
+            return self._disabled()
+
         xi = squad.current_starting_xi
         if not xi:
             return ComponentScore("experience", 0.0, "Empty starting XI", 1.0)
@@ -387,15 +404,29 @@ class FormService:
 
 
 class LeadershipService:
-    def __init__(self, data_dir: str | Path | None = None) -> None:
+    """Scores squad leadership.
+
+    Backed by ``player_experience.json`` (national captaincy, international
+    caps, World Cups) for national competitions. Club competitions pass
+    ``national_data=False`` and get a neutral score, so national-team
+    captaincy never leaks into club ratings.
+    """
+
+    def __init__(self, data_dir: str | Path | None = None, national_data: bool = True) -> None:
+        self.national_data = national_data
+        self.exp_norm: dict[str, dict] = {}
+        if not national_data:
+            return
         base = Path(data_dir) if data_dir else HERE
         exp_path = base / "data" / "player_experience.json"
-        self.exp_norm: dict[str, dict] = {}
         if exp_path.exists():
             with exp_path.open("r", encoding="utf-8") as f:
                 raw = json.load(f)
             for name, data in raw.items():
                 self.exp_norm[_normalize(name)] = data
+
+    def _disabled(self) -> ComponentScore:
+        return ComponentScore("leadership", 0.0, "National leadership not applicable", 1.0)
 
     def get_leadership_details(self, xi: list[Player]) -> dict[str, object]:
         captains = 0
@@ -403,7 +434,7 @@ class LeadershipService:
         wc_veterans = 0
         captain_names = []
         for player in xi:
-            exp = self.exp_norm.get(_normalize(player.name), {})
+            exp = self.exp_norm.get(_normalize(player.name), {}) if self.national_data else {}
             if exp.get("is_captain"):
                 captains += 1
                 captain_names.append(player.name)
@@ -426,6 +457,9 @@ class LeadershipService:
         is_extra_time: bool = False,
         is_penalties: bool = False,
     ) -> ComponentScore:
+        if not self.national_data:
+            return self._disabled()
+
         xi = squad.current_starting_xi
         if not xi:
             return ComponentScore("leadership", 0.0, "Empty starting XI", 1.0)

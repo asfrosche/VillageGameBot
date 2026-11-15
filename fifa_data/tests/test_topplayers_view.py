@@ -356,7 +356,7 @@ class TestTopPlayersView:
         selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
         defaults = [o for o in selects[1].options if o.default]
         assert len(defaults) == 1
-        assert defaults[0].value == ""
+        assert defaults[0].value == "all"
 
     def test_pagination_buttons_exist(self):
         view = self._view([])
@@ -516,13 +516,13 @@ class TestTopPlayersView:
         names = [r["name"] for r in view._rows]
         assert names == ["F1", "F3", "F2"]
 
-    def test_position_filter_empty_when_all(self):
+    def test_position_filter_all_when_unset(self):
         rows = [
             _make_player("F1", "FWD", 30),
             _make_player("M1", "MID", 20),
         ]
         view = self._view(rows)
-        assert view.position == ""
+        assert view.position == "all"
         names = [r["name"] for r in view._rows]
         assert len(names) == 2
 

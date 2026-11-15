@@ -38,11 +38,20 @@ class V5MatchStateEngine(MatchEngine):
         squads: dict[str, Squad] | None = None,
         team_metrics: dict[str, dict[str, float]] | None = None,
         tournament_form: dict[str, float] | None = None,
+        national_data: bool = True,
+        matches_file: str | Path | None = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir else None
         resolved = self.data_dir or Path(__file__).resolve().parents[1]
         self.squads = squads if squads is not None else load_v2_squads(resolved)
-        self._v4 = V4TacticalEngine(data_dir=resolved, squads=self.squads, team_metrics=team_metrics, tournament_form=tournament_form)
+        self._v4 = V4TacticalEngine(
+            data_dir=resolved,
+            squads=self.squads,
+            team_metrics=team_metrics,
+            tournament_form=tournament_form,
+            national_data=national_data,
+            matches_file=matches_file,
+        )
 
         self.minimum_lambda = self._v4.minimum_lambda
         self.max_xg = 4.0

@@ -9,7 +9,11 @@ import numpy as np
 from fifa_data.engines.v4_tactical_engine import V4TacticalEngine
 from fifa_data.models.player import Player
 from fifa_data.models.squad import Squad
-from fifa_data.services.tactical_analysis import compute_tactical_matchup, format_tactical_report
+from fifa_data.services.tactical_analysis import (
+    MAX_XG_ADJUSTMENT_PCT,
+    compute_tactical_matchup,
+    format_tactical_report,
+)
 from fifa_data.services.formation_service import get_formation_profile, formation_matchup_advantages
 from fifa_data.services.simulation_service import run_simulation
 
@@ -152,14 +156,18 @@ class TacticalMatchupTests(unittest.TestCase):
         self.assertGreater(len(poss_adj), 0)
 
     def test_adjustments_stay_within_10_percent(self):
-        """Tactical adjustments should respect ±10% xG cap."""
+        """Tactical adjustments must respect the ±MAX_XG_ADJUSTMENT_PCT xG cap.
+
+        The cap was raised from 10% to 15%, so this reads the constant instead
+        of hardcoding a percentage that would drift again.
+        """
         squad_a = _make_squad("TeamA")
         squad_b = _make_squad("TeamB")
         report = compute_tactical_matchup("France", "Panama", 2.00, 0.40, squad_a, squad_b)
         self.assertGreaterEqual(report.final_xg_a, 0.01)
         self.assertGreaterEqual(report.final_xg_b, 0.01)
-        max_adj_a = report.base_xg_a * 0.10
-        max_adj_b = report.base_xg_b * 0.10
+        max_adj_a = report.base_xg_a * MAX_XG_ADJUSTMENT_PCT
+        max_adj_b = report.base_xg_b * MAX_XG_ADJUSTMENT_PCT
         self.assertLessEqual(abs(report.total_adjustment_a()), max(max_adj_a, 0.05) + 0.001)
         self.assertLessEqual(abs(report.total_adjustment_b()), max(max_adj_b, 0.05) + 0.001)
 

@@ -27,18 +27,30 @@ MATCHES_TEAM_MAP: dict[str, str] = {
 def update_elo_from_matches(
     team_metrics: dict[str, dict[str, float]],
     matches_file: str | None = None,
+    team_name_map: dict[str, str] | None = None,
+    matches: dict[str, Any] | None = None,
 ) -> None:
-    """Update ELO/PELE ratings based on completed match results."""
-    if matches_file is None:
-        matches_file = str(HERE / "data" / "matches.json")
-    with open(matches_file, encoding="utf-8") as f:
-        data = json.load(f)
-    completed = data.get("completed", [])
+    """Update ELO/PELE ratings based on completed match results.
+
+    Pass ``matches`` directly (a dict with a ``completed`` list) to avoid
+    file I/O, e.g. for incremental live updates.
+    """
+    if matches is None:
+        if matches_file is None:
+            matches_file = str(HERE / "data" / "matches.json")
+        name_map = team_name_map if team_name_map is not None else MATCHES_TEAM_MAP
+        if not os.path.exists(matches_file):
+            return
+        with open(matches_file, encoding="utf-8") as f:
+            matches = json.load(f)
+    else:
+        name_map = team_name_map if team_name_map is not None else MATCHES_TEAM_MAP
+    completed = matches.get("completed", [])
     k_elo = 20
     k_pele = 20
     for match in completed:
-        home_name = MATCHES_TEAM_MAP.get(match["home"]["name"], match["home"]["name"])
-        away_name = MATCHES_TEAM_MAP.get(match["away"]["name"], match["away"]["name"])
+        home_name = name_map.get(match["home"]["name"], match["home"]["name"])
+        away_name = name_map.get(match["away"]["name"], match["away"]["name"])
         if home_name not in team_metrics or away_name not in team_metrics:
             continue
         home_goals = match["home"]["score"]

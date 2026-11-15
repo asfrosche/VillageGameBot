@@ -1396,6 +1396,9 @@ class V6AdaptiveEngine(MatchEngine):
         data_dir: str | Path | None = None,
         team_metrics: dict | None = None,
         tournament_form: dict[str, float] | None = None,
+        squads: dict | None = None,
+        national_data: bool = True,
+        matches_file: str | Path | None = None,
     ):
         from .v5_match_state_engine import V5MatchStateEngine
 
@@ -1408,6 +1411,9 @@ class V6AdaptiveEngine(MatchEngine):
             data_dir=resolved,
             team_metrics=self.team_metrics,
             tournament_form=self.tournament_form,
+            squads=squads,
+            national_data=national_data,
+            matches_file=matches_file,
         )
 
         self._corrections: dict[str, float] = {}
