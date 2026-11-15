@@ -578,6 +578,9 @@ class LeagueOrchestrator:
                 addition.append((matchday, home, away))
             seen.add((home, away))
         return pairs + addition
+
+    def _fixtures(self) -> list[tuple[int, str, str]]:
+        """Circle-method double round robin used to fill in missing fixtures."""
         n = len(self.teams)
         if n < 3:
             raise ValueError("League needs at least 3 teams to build fixtures")
