@@ -23,3 +23,6 @@ fifa_data/data/provider_cache/
 fifa_data/data/matches_raw.json
 fifa_data/data/match_stats.json
 RAM_OPTIMIZATION_PLAN.md
+
+# Local planning files for other tools
+.kilo/
