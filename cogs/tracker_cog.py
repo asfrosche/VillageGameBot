@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from datetime import datetime, timezone
-from discord import Embed
 
 from cogs.data_utils import load_guild_data, save_guild_data
 

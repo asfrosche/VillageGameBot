@@ -1,39 +1,21 @@
 import asyncio
+from utils.economy_db import get_shop_item_by_name  # kept: tests patch this name
 import random
 import re
 from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands
-from discord.ui import Modal, Select, View, Button
+from discord.ui import Modal, Select, View
 
 from cogs.data_utils import (
     load_guild_data,
     save_guild_data,
 )
-from utils.economy_db import (
-    add_inventory_item_channel,
-    add_shop_item,
-    buy_shop_item,
-    clear_channel_inventory,
-    get_economy_channel_balance,
-    get_inventory_channel,
-    get_removed_default_items,
-    get_shop_item_by_id,
-    get_shop_item_by_name,
-    get_shop_items,
-    get_top_economy_channels,
-    remove_shop_item_by_name,
-    search_inventory_items,
-    search_shop_items,
-    set_economy_channel_balance,
-    transfer_channel_balance,
-    update_economy_channel_balance,
-    update_shop_item_by_name,
-)
+from utils.economy_db import add_inventory_item_channel, add_shop_item, buy_shop_item, clear_channel_inventory, get_economy_channel_balance, get_inventory_channel, get_removed_default_items, get_shop_item_by_id, get_shop_items, get_top_economy_channels, remove_shop_item_by_name, search_inventory_items, search_shop_items, set_economy_channel_balance, transfer_channel_balance, update_economy_channel_balance, update_shop_item_by_name
 from utils.embeds import info_embed, success_embed, plain_embed
 from cogs.handling_cog import get_pc_category, role_pings
-from utils.private_pc import create_private_pc, sponsor_members
+from utils.private_pc import create_private_pc
 
 
 DEFAULT_SHOP_ITEMS = [
@@ -582,66 +564,6 @@ class InventoryView(View):
             return False
         return result["ok"]
 
-    async def _do_broom(self, interaction: discord.Interaction) -> bool:
-        guild_data = load_guild_data(interaction.guild_id)
-        houses_cat = discord.utils.get(interaction.guild.categories, name=guild_data.get("houses_category_name"))
-        if interaction.channel.category != houses_cat:
-            await interaction.response.send_message("🧹 Broom can only be used in a House channel.", ephemeral=True)
-            return False
-        try:
-            await interaction.response.defer(ephemeral=True)
-            prompt = await interaction.channel.send(
-                embed=plain_embed(
-                    title="🧹 Broom",
-                    description=(
-                        "**How to use:**\n"
-                        "1. Find the message you want to start brooming **from**\n"
-                        "2. **Right-click → Reply** to that message (not this one)\n"
-                        "3. Type anything and send\n\n"
-                        "I'll delete everything after that message (skipping pinned)."
-                    ),
-                ),
-            )
-
-            def reply_check(m):
-                return (m.author == interaction.user
-                        and m.channel == interaction.channel
-                        and m.reference
-                        and m.reference.message_id != prompt.id)
-
-            try:
-                reply = await interaction.client.wait_for("message", check=reply_check, timeout=120)
-            except asyncio.TimeoutError:
-                await interaction.channel.send("Broom cancelled (timeout).")
-                return False
-
-            anchor = reply.reference.resolved
-            if not isinstance(anchor, discord.Message):
-                try:
-                    anchor = await interaction.channel.fetch_message(reply.reference.message_id)
-                except (discord.NotFound, discord.HTTPException):
-                    await interaction.channel.send("Could not resolve the target message.")
-                    return False
-
-            # The replied-to message is part of the sweep, unless it is pinned.
-            to_delete = [] if anchor.pinned else [anchor]
-            async for msg in interaction.channel.history(after=anchor, limit=None, oldest_first=True):
-                if not msg.pinned:
-                    to_delete.append(msg)
-
-            if not to_delete:
-                await interaction.channel.send("No unpinned messages to delete.")
-                return False
-
-            utility = interaction.client.get_cog("Utility")
-            if not utility:
-                await interaction.channel.send("Utility cog is not loaded. Cannot broom.")
-                return False
-            await utility.broom_delete(interaction, to_delete, individual_limit=None)
-            return True
-        except discord.Forbidden:
-            await interaction.followup.send("I need Manage Messages permission to use the broom here.", ephemeral=True)
-            return False
 
     async def _announce_extra_visit(self, channel, display_name: str) -> bool:
         """Announce the extra visit in the rolechat where it was used, pinned.
@@ -704,25 +626,6 @@ class InventoryView(View):
         await interaction.channel.send(f"{overseer_role.mention} {reply.jump_url} — please pin this will.")
         return True
 
-    async def _do_peephole(self, interaction: discord.Interaction) -> bool:
-        guild_data = load_guild_data(interaction.guild_id)
-        if not _is_houses_category(interaction, guild_data=guild_data):
-            await interaction.response.send_message("🔭 Peep Hole can only be used in a House channel.", ephemeral=True)
-            return False
-
-        alive_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("alive_role_name"))
-        sponsor_role = discord.utils.get(interaction.guild.roles, name=guild_data.get("sponsor_role_name"))
-        if not (alive_role in interaction.user.roles or sponsor_role in interaction.user.roles):
-            await interaction.response.send_message("You need the Alive or Sponsor role to use the Peep Hole.", ephemeral=True)
-            return False
-
-        peep_holes = guild_data.get("peep_holes") or {}
-        peep_holes[str(interaction.channel.id)] = datetime.now(timezone.utc).timestamp() + 86400
-        guild_data["peep_holes"] = peep_holes
-        save_guild_data(interaction.guild_id, guild_data)
-
-        await interaction.response.send_message(f"🔭 Peep Hole activated in {interaction.channel.mention} for 24 hours.", ephemeral=True)
-        return True
 
 
 # ─────────────────────────────────────────────

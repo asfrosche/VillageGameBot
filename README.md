@@ -56,7 +56,7 @@ Persistence is **SQLite-first** through `utils/bot_db.py` (guild settings, invit
 | Cog file | Class | What it does |
 |---|---|---|
 | `surveillance_cog.py` | `Surveillance` | Follow/track/stalk relationships; hooks into movement for automated updates. |
-| `os_info_cog.py` | `Overseer` | The **Overseer Intelligence Board** (own `db/overseer.db`): per-player effect cards, `.setboard`, `.addcard`, `.refreshcards`. |
+| `os_info_cog.py` | `Overseer` | The **Overseer Intelligence Board** (own `runtime/db/overseer.db`): per-player effect cards, `.setboard`, `.addcard`, `.refreshcards`. |
 | `actions_logging_cog.py` | `ActionsLogging` | Central action log channel; intercepts role/bot mentions and tracks player actions with approval buttons. |
 | `tracker_cog.py` | `MessageTracker` | Message-count metrics (`.statss`, `.serverstats`, `.start_tracking`). |
 
@@ -78,7 +78,7 @@ Persistence is **SQLite-first** through `utils/bot_db.py` (guild settings, invit
 | `library_it_cog.py` | `GameLibraryIT` | Italian library (`libit` group) sharing the EN database & views. |
 | `library_admin_cog.py` | `GameLibraryAdmin` | Interactive admin browser for the library (`libadmin`). |
 | `role_package_cog.py` | `RolePackageCog` | Registers pinned-message role packages, role cards/teams, and the full publishing pipeline (`.publishroles`, `.reviewroles`, `.approvepublish`, `.libimport`). `/reveal` slash command. |
-| `send_role.py` | `SendRole` | Forwards replied messages to a configured target channel (`.settarget`, `.sendrole`/`.sr`), plus `.teamroll`. |
+| `misc_cog.py` (`SendRole`) | `SendRole` | Forwards replied messages to a configured target channel (`.settarget`, `.sendrole`/`.sr`), plus `.teamroll`. |
 
 ### F. Scheduling, misc & developer tools
 
@@ -88,7 +88,7 @@ Persistence is **SQLite-first** through `utils/bot_db.py` (guild settings, invit
 | `game_manager_en.py` / `game_manager_it.py` | `GameManagerEn` / `GameManagerIt` | **Heartside Calendar** (EN `.calendar`) and **Calendario** (IT `.calendario`) game-scheduling wizards, each with its own SQLite DB. |
 | `vg_intro.py` | `VgIntro` | Paginated intro to the Village Games (EN/IT) — `.vgintro`/`.vgintro_it`, `/vgi`. |
 | `bday.py` | `Birthday` | Birthday registry + background announcement loop (`.birthdays`, `.birthday add`). |
-| `infos_cog.py` | `Infos` | Free-text notes attached to channels (`.info`). |
+| `misc_cog.py` (`Infos`) | `Infos` | Free-text notes attached to channels (`.info`). |
 | `lists_cog.py` | `Lists` | `.playerlist`, `.sponsorlist`, `.houselist`, `.deadlist`, `.rollhouses`. |
 | `estate_cog.py` | `Estate` | Estate mapping & room-coordinate management for larger properties. |
 | `sticky_cog.py` | `StickyCog` | **Sticky messages** — silent, cooldown-based re-pinning (`.sticky set/remove/cooldown/list`). |
@@ -102,13 +102,6 @@ Persistence is **SQLite-first** through `utils/bot_db.py` (guild settings, invit
 
 ### Blood on the Clocktower (`BOTC/`)
 A complete BOTC implementation as its own cog namespace: role, jinx, fabled, night-order, scripts and help cogs plus a game engine. Uses `botc*`-aliased prefix commands and `/role`, `/help` etc. slash commands to avoid collisions.
-
-### FIFA World Cup simulator (`fifa_data/`)
-Community-draft + match simulation engine:
-- `DraftCog` (`.draftstart`, `.myteam`, `.draftpoints`, `.scoutingboard`, `.topplayers`)
-- `BracketCog` (`.bracket` renders the bracket as PNG)
-- Multi-generation match simulators (`.simulate` with V1–V5 tactical models), live standings, trends and heatmaps.
-- Data is ingested from online providers (`fifa_data/data/`) with a `provider_cache` for responsiveness.
 
 ### Analytics & web dashboard (`utils/analytics/`, `analytics_dashboard/`)
 Two faces of the same SQLite `AnalyticsDB`:
@@ -164,7 +157,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # 4. Configure environment (see table below)
-#    Copy the needed keys into a `.env` file next to config.py
+#    Copy the needed keys into a `.env` file in the project root
 
 # 5. Run
 python main.py
@@ -185,7 +178,7 @@ python main.py
 | `ANALYTICS_DB_PATH` | Override analytics DB location. |
 | `POSTHOG_API_KEY` | Optional PostHog analytics key. |
 
-> ⚠️ Never commit `analytics_secrets.py` or your `.env` — both are git-ignored.
+> ⚠️ Never commit `config/analytics_secrets.py`, `config/cookies.txt` or your `.env` — all are git-ignored.
 
 ---
 
@@ -194,19 +187,20 @@ python main.py
 ```
 .
 ├── main.py                 # Bootstrap: cogs, events, analytics, commands
-├── config.py               # Env-based configuration
+├── config/                 # Env-based configuration, secrets and cookies (git-ignored where private)
 ├── requirements.txt
 ├── cogs/                   # All game cogs (see reference above)
 ├── BOTC/                   # Blood on the Clocktower implementation
-├── fifa_data/              # World Cup draft/simulation engine
 ├── utils/
 │   ├── bot_db.py           # SQLite storage layer
 │   ├── embeds.py           # Embed factories
 │   └── analytics/          # Analytics service, providers, instrumentation
 ├── analytics_dashboard/    # FastAPI web dashboard
-├── data/                   # Runtime data (git-ignored)
-├── db/                     # SQLite databases (git-ignored)
-├── testing/                # Auto-generated test suite
+├── runtime/                # Runtime data and SQLite databases (git-ignored)
+│   ├── data/
+│   └── db/
+├── tests/                  # All tests, mirroring the packages (cogs, botc, testing, utils)
+├── devtools/               # Test tooling: auditor, coverage, generator
 └── assets/                 # Static images
 ```
 
@@ -214,7 +208,7 @@ python main.py
 
 ## 🧪 Tests
 
-Auto-generated command-metadata tests live in `cogs/tests/` and `testing/tests/` and run with `pytest` (`pip install pytest`, then `pytest` from the repo root).
+All tests live under `tests/` and run with `pytest` (`pip install pytest`, then `pytest tests` from the repo root).
 
 ---
 

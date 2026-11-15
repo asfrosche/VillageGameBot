@@ -9,7 +9,7 @@ Stats card — Pokémon Card × Arcade Game aesthetic.
 
 import os, aiohttp, tempfile
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 
 
 # ─────────────────────────────────────── helpers ──────────────────────────────

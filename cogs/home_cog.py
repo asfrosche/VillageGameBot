@@ -1,7 +1,6 @@
 import random
 from utils.discord_safe import add_text_fields, split_text
 import discord
-import asyncio
 import datetime
 from datetime import datetime
 from discord.ext import commands

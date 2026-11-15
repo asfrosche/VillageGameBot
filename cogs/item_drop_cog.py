@@ -8,8 +8,9 @@ import os
 
 # We assume cogs.data_utils is available based on existing codebase
 from cogs.data_utils import load_guild_data
+from utils.paths import DB_DIR
 
-DB_PATH = 'db/item_drops.db'
+DB_PATH = os.path.join(DB_DIR, "item_drops.db")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)

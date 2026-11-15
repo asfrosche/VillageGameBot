@@ -15,6 +15,7 @@ from discord import AllowedMentions
 from discord.ui import Select, View, Button
 from cogs.data_utils import load_guild_data, save_guild_data
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from utils.paths import DATA_DIR
 
 
 HELP_CATEGORIES = {
@@ -24,7 +25,7 @@ HELP_CATEGORIES = {
 }
 HELP2_CATEGORIES = {
     "location", "dashboard", "gamemanager", "library", "games", "auction",
-    "birthdays", "calendar", "draft", "sticky", "sendrole",
+    "birthdays", "calendar", "sticky", "sendrole",
 }
 
 
@@ -745,35 +746,10 @@ COMMAND_INDEX = [
     (".calendario", "Italian Village Games schedule", "Calendar", ["calendar", "schedule", "italian"]),
     (".vgintro /.vgi", "Village Games intro (EN)", "Calendar", ["intro", "village", "games", "english"]),
     (".vgintro_it /.vgii", "Village Games intro (IT)", "Calendar", ["intro", "village", "games", "italian"]),
-    (".draftstart @u1 @u2 ...", "Start a snake draft (admin)", "Draft", ["draft", "start", "snake", "admin"]),
-    (".prepick", "Pre-select players before the draft starts (max 2)", "Draft", ["draft", "prepick", "pick"]),
-    (".draftboard", "Show all teams", "Draft", ["draft", "board", "teams"]),
-    (".myteam", "Show your team", "Draft", ["draft", "team", "my"]),
-    (".team @user", "Show a user's team with fantasy points", "Draft", ["draft", "team", "fantasy"]),
-    (".forcepick <name>", "Force a pick for the current user (admin)", "Draft", ["draft", "force", "pick", "admin"]),
-    (".undo", "Undo the most recent pick (admin)", "Draft", ["draft", "undo", "admin"]),
-    (".pause", "Pause the draft (admin)", "Draft", ["draft", "pause", "admin"]),
-    (".resume", "Resume the draft (admin)", "Draft", ["draft", "resume", "admin"]),
-    (".enddraft", "End the draft (admin)", "Draft", ["draft", "end", "admin"]),
-    (".draftpoints", "Live fantasy points leaderboard", "Draft", ["draft", "points", "leaderboard"]),
-    (".standings", "Standings with avg & best points", "Draft", ["draft", "standings", "rankings"]),
-    (".player <name> / .pp", "Look up FIFA fantasy points", "Draft", ["player", "fantasy", "fifa", "points"]),
-    (".playerpoints <name>", "FIFA player detail", "Draft", ["player", "points", "detail", "fifa"]),
-    (".scoutingboard", "Scouting bonus leaderboard", "Draft", ["scouting", "ownership", "leaderboard"]),
-    (".topplayers [N]", "Top N drafted players by points", "Draft", ["top", "players", "rankings"]),
-    (".teamvalue @user", "Point breakdown per player on a team", "Draft", ["team", "value", "breakdown"]),
-    (".refreshpoints", "Fetch fresh FIFA data (admin)", "Draft", ["fifa", "refresh", "data", "admin"]),
-    (".matches [filter] / .matchinfo", "Group standings, tiebreakers & matches via dropdown, or filter by team name", "Draft", ["matches", "results", "fixtures", "standings", "groups"]),
-    (".trending [position] / .form", "Players with best form rating", "Draft", ["trending", "form", "players"]),
-    (".differentials [N] / .diff", "Best differential picks (high pts, low ownership)", "Draft", ["differential", "diff", "value"]),
-    (".simulate / .sim / .fsim", "Simulate tournament (ELO/players/dynamic/tactical/match state)", "Draft", ["simulate", "sim", "fsim", "tournament"]),
-    (".fsim detailed", "Head-to-head Monte Carlo analysis", "Draft", ["simulate", "detailed", "head", "head"]),
-    (".simhelp / .sim help", "Simulation model descriptions (V1-V5)", "Draft", ["simulate", "help", "models"]),
     (".analytics", "Interactive match analytics, trends and visualizations", "Analytics", ["analytics", "match", "trends", "stats", "fifa"]),
     (".analyticsreset", "Reset analytics data (admin)", "Analytics", ["analytics", "reset", "admin"]),
     (".analyticsexport", "Export analytics data to markdown file", "Analytics", ["analytics", "export", "download", "backup"]),
     (".failures [command]", "Show command error leaderboard", "Analytics", ["failures", "error", "leaderboard", "stats"]),
-    (".bracket", "Render the knockout bracket as a PNG", "World Cup", ["bracket", "knockout", "png", "render"]),
     (".searchhelp / .sh <kw>", "Search commands by keyword", "Other", ["search", "find", "keyword", "help"]),
     (".libit", "Browse the Italian game library", "Library & Stats", ["library", "italian", "browse", "libit"]),
     (".libit add", "Add a new game (IT)", "Library & Stats", ["library", "italian", "add", "admin"]),
@@ -2103,7 +2079,7 @@ class Other(commands.Cog):
         original_text = ctx.message.content[len(prefix) + len(ctx.invoked_with or ""):].strip()
 
         try:
-            log_dir = os.path.join("data", "narration_logs")
+            log_dir = os.path.join(DATA_DIR, "narration_logs")
             os.makedirs(log_dir, exist_ok=True)
             log_path = os.path.join(log_dir, f"{ctx.guild.id}.log")
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2767,7 +2743,6 @@ class Other(commands.Cog):
                 "auction": self.help_auction,
                 "birthdays": self.help_birthdays,
                 "calendar": self.help_calendar,
-                "draft": self.help_draft,
                 "sticky": self.help_sticky,
                 "sendrole": self.help_sendrole,
                 "download": self.help_download,
@@ -2790,7 +2765,6 @@ class Other(commands.Cog):
         embed.add_field(name="🎂 - Birthdays", value="6 Commands\n`.help2 birthdays`", inline=True)
         embed.add_field(name="📅 - Calendar & Intro", value="4 Commands\n`.help2 calendar`", inline=True)
         embed.add_field(name="📌 - Sticky", value="5 Commands\n`.help2 sticky`", inline=True)
-        embed.add_field(name="🏆 - Draft", value="24 Commands\n`.help2 draft`", inline=True)
         embed.add_field(name="↪ - Send Role", value="3 Commands\n`.help2 sendrole`", inline=True)
         embed.add_field(name="⬇️ - Downloads", value="4 Commands\n`.help2 download`", inline=True)
         embed.set_footer(text="Village Game • Use `.help2 {category}` for details • `.sh <kw>` to search commands")
@@ -2911,7 +2885,6 @@ class Other(commands.Cog):
                     discord.SelectOption(label="🎂 - Birthdays", value="birthdays", description="Get all 'Birthday' commands"),
                     discord.SelectOption(label="📅 - Calendar & Intro", value="calendar", description="Get all 'Calendar & Intro' commands"),
                     discord.SelectOption(label="📌 - Sticky", value="sticky", description="Get all 'Sticky' commands"),
-                    discord.SelectOption(label="🏆 - Draft", value="draft", description="Get all 'Draft' commands"),
                     discord.SelectOption(label="↪ - Send Role", value="sendrole", description="Get all 'Send Role' commands"),
                 ]
                 route_fn = lambda cat: self.help2(ctx, category=cat)
@@ -3671,68 +3644,6 @@ class Other(commands.Cog):
         ), inline=False)
         embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
         await self.send_help_page(ctx, embed, self.help_calendar)
-
-    async def help_draft(self, ctx):
-        embed = discord.Embed(title="🏆 Draft commands", description="24 commands", color=0xff3fb9)
-        embed.add_field(name="Draft Commands", value=(
-            "**.draftstart @u1 @u2 ...** ─ Start a snake draft (admin)\n"
-            "**.prepick** ─ Manage your prepicks (max 2)\n"
-            "**.draftboard** ─ Show all teams\n"
-            "**.myteam** ─ Show your team\n"
-            "**.team @user** ─ Show a user's team with fantasy points\n"
-            "**.forcepick <name>** ─ Force a pick for the current user (admin)\n"
-            "**.undo** ─ Undo the most recent pick (admin)\n"
-            "**.pause** ─ Pause the draft (admin)\n"
-            "**.resume** ─ Resume the draft (admin)\n"
-            "**.enddraft** ─ End the draft (admin)"
-        ), inline=False)
-        embed.add_field(name="Points Commands", value=(
-            "**.draftpoints** ─ Live fantasy points leaderboard for all teams\n"
-            "**.standings** ─ Standings with avg & best points\n"
-            "**.player <name>** / **.pp** ─ Look up a player's FIFA fantasy points\n"
-            "**.playerpoints <name>** ─ Same as .player with more detail\n"
-            "**.scoutingboard** ─ Scouting bonus leaderboard (ownership % at scoring time)\n"
-            "**.topplayers [N]** ─ Top N drafted players by points (default 10)\n"
-            "**.teamvalue @user** ─ Point breakdown per player on a team\n"
-            "**.refreshpoints** ─ Fetch fresh FIFA data & save to cache (admin)"
-        ), inline=False)
-        embed.add_field(name="Match Analytics", value=(
-            "**.matches [filter]** / **.matchinfo** ─ Group standings & tiebreakers via dropdown, or filter by team\n"
-            "**.trending [position]** / **.form** ─ Players with best form rating\n"
-            "**.differentials [N]** / **.diff** ─ Best differential picks (high pts, low ownership)"
-        ), inline=False)
-        embed.add_field(name="Simulation — Tournament", value=(
-            "**.simulate** / **.sim** / **.fsim** [version] [mode] [debug]\n"
-            "  Versions: **v1** (ELO), **v2** (players), **v3** (dynamic), **v4** (tactical), **v5** (match state)\n"
-            "  Modes: **fast** (default), **animated** (goal-by-goal)\n"
-            "  Flags: **debug** (V4/V5 tactical breakdown)\n"
-            "  `Ex: .fsim v5` — comprehensive output with V1-V5 insights\n"
-            "  `Ex: .fsim v5 animated`"
-        ), inline=False)
-        embed.add_field(name="Simulation — Cross-Version", value=(
-            "**.xsim** — Full tournament on all 5 engines (side-by-side)\n"
-            "**.xsim <A> <B>** — Head-to-head across all 5 engines\n"
-            "  `Ex: .xsim` — champion, groups, KO for V1-V5\n"
-            "  `Ex: .xsim France Spain ko 1000` — Monte Carlo all engines"
-        ), inline=False)
-        embed.add_field(name="Simulation — Head-to-Head", value=(
-            "**.fsim detailed** <version> <Team A> <Team B> [knockout] [N]\n"
-            "  Monte Carlo analysis between two specific teams.\n"
-            "  N = simulations (default 100).\n"
-            "  `Ex: .fsim detailed v4 France Spain`\n"
-            "  `Ex: .fsim detailed v4 France Spain knockout 10000`"
-        ), inline=False)
-        embed.add_field(name="Simulation — Help & Reference", value=(
-            "**.simhelp** / **.sim help** — Full V1-V5 model descriptions\n"
-            "**.xsim help** — Cross-version sim help\n"
-            "**.simulate v1** — Historical ELO/PELE ratings\n"
-            "**.simulate v2** — FC26 player attributes + formations\n"
-            "**.simulate v3** — Chemistry, form, momentum, leadership\n"
-            "**.simulate v4** — Tactics, managers, styles, contexts\n"
-            "**.simulate v5** — Comprehensive: V1 Elo + V2 squads + V3 dynamics + V4 tactics + V5 match state"
-        ), inline=False)
-        embed.set_footer(text="Village Game • All listed commands need the prefix `.` to work")
-        await self.send_help_page(ctx, embed, self.help_draft)
 
     async def help_botc(self, ctx):
         try:

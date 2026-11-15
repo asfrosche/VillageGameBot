@@ -1,5 +1,4 @@
 import re
-import uuid
 import types
 from utils.discord_safe import add_text_fields
 import discord
@@ -11,8 +10,7 @@ from utils.house_lookup import NO_MATCH, closest_house, house_match
 from cogs.data_utils import load_guild_data, save_guild_data
 from cogs.handling_cog import PUBLIC_CHANNEL_EMOJI
 from cogs.surveillance_cog import after_movement_update
-from utils.bot_db import get_role_dashboard
-from utils.embeds import info_embed, warning_embed, error_embed
+from utils.embeds import info_embed, warning_embed
 from cogs.status_cog import (
     check_move_warning,
     check_knock_warning,

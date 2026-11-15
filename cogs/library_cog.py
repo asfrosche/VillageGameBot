@@ -8,6 +8,7 @@ import re
 import asyncio
 from contextlib import contextmanager
 from difflib import SequenceMatcher
+from utils.paths import DB_DIR
 
 
 # ============================================================================
@@ -530,7 +531,7 @@ class GameSearchResultView(discord.ui.View):
 # ============================================================================
 
 class LibraryDatabase:
-    def __init__(self, db_path: str = "db/roles_library.db"):
+    def __init__(self, db_path: str = os.path.join(DB_DIR, "roles_library.db")):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.init_database()

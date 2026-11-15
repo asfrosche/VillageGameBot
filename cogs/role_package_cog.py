@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 import discord
 from discord import app_commands
@@ -19,11 +18,10 @@ from utils.bot_db import (
     get_role_packages,
     save_role_package,
 )
-from utils.embeds import error_embed, info_embed, success_embed, warning_embed
+from utils.embeds import error_embed, info_embed, success_embed
 
 
 TEAM_NAMES = dict(TEAMS)
-TEAM_IDS = {name.lower(): number for number, name in TEAM_NAMES.items()}
 
 CHANNEL_INCOMPLETE_SUFFIX = " xx"
 
@@ -105,28 +103,6 @@ class PackageConfirmView(discord.ui.View):
         self.stop()
 
 
-class SponsorSelectView(discord.ui.View):
-    def __init__(self, owner_id: int, options: list[tuple[str, int]], on_select):
-        super().__init__(timeout=120)
-        self.owner_id = owner_id
-        self.on_select = on_select
-        self.select = discord.ui.Select(
-            placeholder="Choose the Library Sponsor...",
-            options=[discord.SelectOption(label=name[:100], value=str(uid)) for name, uid in options[:25]],
-        )
-        self.select.callback = self._select_callback
-        self.add_item(self.select)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
-            return False
-        return True
-
-    async def _select_callback(self, interaction: discord.Interaction):
-        selected_id = int(self.select.values[0])
-        await self.on_select(interaction, selected_id)
-        self.stop()
 
 
 class RoleHelpView(discord.ui.View):
@@ -450,11 +426,6 @@ class RolePackageCog(commands.Cog):
             return candidates[0]
         return None
 
-    def _resolve_sponsors(self, channel: discord.TextChannel, guild_data: dict):
-        sponsor_role = discord.utils.get(channel.guild.roles, name=guild_data.get("sponsor_role_name"))
-        if not sponsor_role:
-            return []
-        return [(member.display_name, member.id) for member in channel.members if sponsor_role in member.roles]
 
     async def _notify_registration(self, ctx: commands.Context):
         guild_data = self._guild_data(ctx.guild) or {}
@@ -674,6 +645,11 @@ class RolePackageCog(commands.Cog):
             is_self = True
         else:
             is_self = False
+
+        # Writing a slot for another RoleChat is admin-only, whoever the player is.
+        if channel != ctx.channel and not is_admin:
+            await ctx.send("❌ Only administrators can register players in another channel.")
+            return
 
         package = get_role_package(channel.id)
         if not package or not package.get("package_ids"):

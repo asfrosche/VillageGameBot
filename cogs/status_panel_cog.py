@@ -60,6 +60,19 @@ def _toggle_label(name, status):
     return f"{name} · {STATUS_EMOJIS[status]} {STATUS_LABELS[status]}"
 
 
+def overseer_role_name(guild_data):
+    return (guild_data or {}).get("overseer_role_name") or "Overseer"
+
+
+def overseer_candidates(guild, guild_data):
+    """Members holding the overseer role who are not yet on the panel (bots included)."""
+    role = discord.utils.get(guild.roles, name=overseer_role_name(guild_data))
+    if role is None:
+        return []
+    on_panel = panel_state(guild_data)["members"]
+    return [m for m in role.members if str(m.id) not in on_panel]
+
+
 # ── View ─────────────────────────────────────────────────────────────────────
 
 class StatusPanelView(View):
@@ -289,6 +302,34 @@ class StatusPanelView(View):
             self.bot.add_view(view, message_id=message_id)
 
 
+class ConfirmOverseersView(View):
+    """Yes/Skip prompt shown before overseers are bulk-added to the panel."""
+
+    def __init__(self, author_id):
+        super().__init__(timeout=60)
+        self.author_id = author_id
+        self.confirmed = False
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the admin who ran the command can answer this.", ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Add them", emoji="➕", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction, button):
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Skip", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction, button):
+        self.stop()
+        await interaction.response.defer()
+
+
 # ── Cog ───────────────────────────────────────────────────────────────────────
 
 class StatusPanel(commands.Cog):
@@ -320,6 +361,39 @@ class StatusPanel(commands.Cog):
             except Exception:
                 pass
 
+    async def _offer_overseers(self, ctx, gd, panel):
+        """Ask before adding every overseer-role member to the panel."""
+        candidates = overseer_candidates(ctx.guild, gd)
+        if not candidates:
+            return
+        role_name = overseer_role_name(gd)
+        room = MAX_MEMBERS - len(panel["members"])
+        if room <= 0:
+            return await ctx.send(
+                f"ℹ️ {len(candidates)} member(s) with the **{role_name}** role were not added: "
+                f"the panel is full ({MAX_MEMBERS} members)."
+            )
+        to_add = candidates[:room]
+        skipped = len(candidates) - len(to_add)
+        lines = "\n".join(
+            f"• {m.display_name}{' 🤖' if m.bot else ''}" for m in to_add
+        )
+        text = (
+            f"Found **{len(candidates)}** member(s) with the **{role_name}** role who are not on the panel:\n"
+            f"{lines}\nAdd them to the panel as 🟢 Online?"
+        )
+        if skipped:
+            text += f"\n⚠️ Only {room} fit under the {MAX_MEMBERS}-member cap; {skipped} will be skipped."
+        view = ConfirmOverseersView(ctx.author.id)
+        prompt = await ctx.send(text, view=view)
+        await view.wait()
+        if not view.confirmed:
+            return await prompt.edit(content="Skipped adding overseers to the panel.", view=None)
+        for m in to_add:
+            panel["members"][str(m.id)] = ONLINE
+        save_guild_data(ctx.guild.id, gd)
+        await prompt.edit(content=f"✅ Added {len(to_add)} overseer(s) to the panel.", view=None)
+
     @commands.command(name="statuspanel", aliases=["sp"])
     @commands.has_permissions(administrator=True)
     async def statuspanel(self, ctx):
@@ -329,6 +403,7 @@ class StatusPanel(commands.Cog):
             return await ctx.send("Guild data not loaded.")
 
         panel = panel_state(gd)
+        await self._offer_overseers(ctx, gd, panel)
         existing_msg = None
         if panel.get("channel_id") and panel.get("message_id"):
             ch = ctx.guild.get_channel(panel["channel_id"])

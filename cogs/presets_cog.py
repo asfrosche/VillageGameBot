@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional
 import os
 
 from cogs.data_utils import load_guild_data, save_guild_data
+from utils.paths import DB_DIR
 
 # Configuration
 ITEMS_PER_PAGE = 10
@@ -16,7 +17,7 @@ MAX_PRESET_LENGTH = 1000
 MIN_PRESET_LENGTH = 1
 EMBED_COLOR = 0xff3fb9
 FOOTER_TEXT = "Village Game"
-DB_PATH = "db/presets.db"
+DB_PATH = os.path.join(DB_DIR, "presets.db")
 
 ABILITY_CATEGORIES = ["Lethal", "Curing", "Manipulation (Control, Redirect)", "Manipulation (Other)", "Blocking", "Transportation and Comms", "Information", "Other"]
 

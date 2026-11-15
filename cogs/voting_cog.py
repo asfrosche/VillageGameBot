@@ -3,7 +3,7 @@ import time
 import asyncio
 import discord
 import datetime
-from datetime import datetime, timedelta
+from datetime import datetime
 from discord.ext import commands
 from utils.discord_safe import EDIT_LIMIT_CODE, with_retries
 from cogs.data_utils import (

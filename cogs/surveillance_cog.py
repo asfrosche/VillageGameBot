@@ -3,7 +3,7 @@
 import asyncio
 import discord
 from discord.ext import commands
-from datetime import datetime, timezone
+from datetime import datetime
 from cogs.data_utils import load_guild_data, save_guild_data
 
 
@@ -546,28 +546,6 @@ class Surveillance(commands.Cog):
                     except (discord.Forbidden, discord.HTTPException):
                         pass
 
-    async def _cleanup_all_stalks(self, guild, guild_data):
-        stalks = guild_data.get("player_stalks", {})
-        if not stalks:
-            return
-        houses_category = discord.utils.get(
-            guild.categories, name=guild_data.get("houses_category_name", "HOUSES")
-        )
-        if not houses_category:
-            return
-        for stalker_id_str in list(stalks):
-            stalker = guild.get_member(int(stalker_id_str))
-            if not stalker:
-                continue
-            for ch in houses_category.channels:
-                if not isinstance(ch, discord.TextChannel):
-                    continue
-                ow = ch.overwrites_for(stalker)
-                if ow.read_messages is True and ow.send_messages is not True:
-                    try:
-                        await ch.set_permissions(stalker, overwrite=None)
-                    except (discord.Forbidden, discord.HTTPException):
-                        pass
 
     def _get_stalks(self, guild_id):
         guild_data = load_guild_data(guild_id)

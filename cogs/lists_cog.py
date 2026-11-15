@@ -204,7 +204,7 @@ class Lists(commands.Cog):
                 if house.name in guild_data["houselist"]:
                     guild_data["houselist"].remove(house.name)
                 else:
-                    await ctx.channel.send(f"{house.menion} not found in house list")
+                    await ctx.channel.send(f"{house.mention} not found in house list")
                 save_guild_data(ctx.guild.id, guild_data)
                 await ctx.channel.send(f"{house.mention} removed succesfully from house list")
             else:

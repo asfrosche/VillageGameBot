@@ -4,7 +4,8 @@ from discord.ext import commands
 from datetime import datetime
 from cogs.data_utils import load_guild_data
 import aiosqlite
-import re
+import os
+from utils.paths import DB_DIR
 
 def _digits(s: str) -> str:
     return "".join(ch for ch in s if ch.isdigit())
@@ -57,7 +58,7 @@ class Nominations(commands.Cog):
         await self.init_db()
 
     async def init_db(self):
-        self.conn = await aiosqlite.connect('db/nominations.db')
+        self.conn = await aiosqlite.connect(os.path.join(DB_DIR, "nominations.db"))
         await self.conn.execute('''
             CREATE TABLE IF NOT EXISTS votes (
                 channel_id INTEGER,
@@ -479,12 +480,15 @@ class Nominations(commands.Cog):
     @commands.command()
     async def clearvotes(self, ctx, guild_id: int = None):
         """Clear all nomination votes (admin only)."""
-        if not (ctx.author.guild_permissions.administrator or ctx.author.id == 450772749829537793):
-            return await ctx.send("You don't have permission to use this command.")
-
         guild = ctx.guild if guild_id is None else self.bot.get_guild(guild_id)
         if not guild:
             return await ctx.send("Guild not found.")
+
+        # Admin rights are checked in the guild being cleared, not the one the command was typed in.
+        target_member = guild.get_member(ctx.author.id)
+        is_target_admin = bool(target_member and target_member.guild_permissions.administrator)
+        if not (is_target_admin or ctx.author.id == 450772749829537793):
+            return await ctx.send("You don't have permission to use this command.")
 
         guild_data = load_guild_data(guild.id)
         if not guild_data:

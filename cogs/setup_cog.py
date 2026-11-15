@@ -831,6 +831,14 @@ class Setup(commands.Cog):
         view.add_item(minute_select)
         view.add_item(tz_select)
 
+        async def _only_admin_author(interaction):
+            if interaction.user.id == ctx.author.id and interaction.user.guild_permissions.administrator:
+                return True
+            await interaction.response.send_message("Only the admin who opened this menu can change it.", ephemeral=True)
+            return False
+
+        view.interaction_check = _only_admin_author
+
         embed = discord.Embed(
             title=f"Set {label} Time",
             description="Pick the hour, minute, and timezone for this daily event.",

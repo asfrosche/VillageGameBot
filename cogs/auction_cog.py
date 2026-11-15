@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -22,7 +21,7 @@ from utils.economy_db import (
     get_shop_item_by_name,
     update_economy_channel_balance,
 )
-from utils.embeds import error_embed, info_embed, success_embed, warning_embed
+from utils.embeds import info_embed, success_embed, warning_embed
 
 
 MAX_BID = 1_000_000_000
@@ -260,7 +259,9 @@ class AuctionCog(commands.Cog):
     def _is_alive(self, member: discord.Member, guild_data: dict | None) -> bool:
         role = discord.utils.get(member.guild.roles, name=(guild_data or {}).get("alive_role_name"))
         if role is None:
-            return True
+            # Fail closed: an unresolvable alive role must not let every member bid or open auctions.
+            print(f"[auction] alive role not found in guild {member.guild.id}; denying access")
+            return False
         return role in member.roles
 
     def _is_overseer_or_admin(self, member: discord.Member, guild_data: dict | None) -> bool:

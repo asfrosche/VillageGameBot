@@ -2,13 +2,14 @@
 Overseer Intelligence Board — overseer_cog.py
 A host-only tracking system for social deduction games.
 """
-import os, sqlite3, discord, asyncio
+import os, sqlite3, discord
 from datetime import datetime
 from discord.ext import commands
 from discord.ui import View, Button, Select, Modal, TextInput
+from utils.paths import DB_DIR
 
 # ── Constants ────────────────────────────────────────────────────
-DB_PATH  = "db/overseer.db"
+DB_PATH  = os.path.join(DB_DIR, "overseer.db")
 COLOR    = 0x7c3aed
 FOOTER   = "Overseer Intelligence Board"
 
@@ -60,7 +61,7 @@ def calc_expires(duration: str, cur_rank: int):
 # ── Database ─────────────────────────────────────────────────────
 class OverseerDB:
     def __init__(self):
-        os.makedirs("db", exist_ok=True)
+        os.makedirs(DB_DIR, exist_ok=True)
         with self._c() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS config(

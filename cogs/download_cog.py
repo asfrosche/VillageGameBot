@@ -98,22 +98,19 @@ DOWNLOAD_TIMEOUT_SECONDS = 600
 CONCURRENCY_LIMIT = 2
 MAX_CLIP_PARTS = 10
 
-# Directory holding main.py (the bot's project root). Used to find the
-# cookies.txt that is uploaded next to it, independent of the process cwd.
+# Project root (the folder holding main.py). The cookies live in config/.
 _BOT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _cookies_file() -> str | None:
-    """Absolute path to the uploaded ``cookies.txt``, or ``None`` if absent.
+    """Absolute path to the uploaded ``config/cookies.txt``, or ``None`` if absent.
 
-    The file lives next to ``main.py`` (the bot root). ``os.getcwd()`` and the
-    temp dir are also checked as fallbacks. Returns ``None`` when no non-empty
-    file exists so callers can fall back gracefully.
+    Only the config folder is searched: the working directory and the temp dir
+    are not trusted, since a file planted there would be used as cookies.
+    Returns ``None`` when no non-empty file exists so callers can fall back.
     """
     for cand in (
-        _BOT_ROOT / "cookies.txt",
-        Path(os.getcwd()) / "cookies.txt",
-        Path(tempfile.gettempdir()) / "cookies.txt",
+        _BOT_ROOT / "config" / "cookies.txt",
     ):
         try:
             if cand.is_file() and cand.stat().st_size > 0:
@@ -446,19 +443,19 @@ def map_download_error(exc: Exception) -> str:
     ):
         return (
             "No YouTube cookies are available on this host (Chrome isn't "
-            "installed here). Put a `cookies.txt` (Netscape format) next to "
-            "main.py and restart the bot."
+            "installed here). Put a `cookies.txt` (Netscape format) in the config folder "
+            "and restart the bot."
         )
     if "sign in to confirm" in message or "are not a bot" in message:
         return (
             "YouTube is asking to confirm you're not a bot (anti-bot challenge). "
-            "Put a valid `cookies.txt` (Netscape format) next to main.py and "
+            "Put a valid `cookies.txt` (Netscape format) in the config folder and "
             "restart the bot, then try again."
         )
     if "only images are available" in message:
         return (
             "YouTube returned only images for this video (age/region/bot check). "
-            "Put a valid `cookies.txt` (Netscape format) next to main.py and "
+            "Put a valid `cookies.txt` (Netscape format) in the config folder and "
             "restart the bot, or try a different link."
         )
     if "ffmpeg" in message or "ffprobe" in message:
@@ -1239,7 +1236,7 @@ class DownloadCog(commands.Cog):
         # impersonation if curl_cffi is unavailable.
         if _IMPERSONATE_TARGET is not None:
             opts["impersonate"] = _IMPERSONATE_TARGET
-        # Use the cookies.txt uploaded next to main.py for authentication
+        # Use the cookies.txt uploaded in the config folder for authentication
         # (YouTube bot checks and similar). yt-dlp's `cookiefile` is the
         # library equivalent of the CLI's `--cookies`.
         cookies = _cookies_file()

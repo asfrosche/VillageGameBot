@@ -2,7 +2,6 @@ import discord
 from discord import ui
 from discord.ext import commands, tasks
 from datetime import datetime, date
-from collections import defaultdict
 from cogs.data_utils import load_guild_data, save_guild_data
 
 # ========= CONFIG =========

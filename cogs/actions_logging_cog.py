@@ -1,10 +1,10 @@
 import discord
+from cogs.data_utils import save_guild_data  # kept: tests patch this name
 from discord.ext import commands
 from datetime import datetime, timezone
 from discord import Embed, ui
 import re
-import asyncio
-from cogs.data_utils import load_guild_data, save_guild_data
+from cogs.data_utils import load_guild_data
 from cogs.moving_cog import _find_house
 from cogs.status_cog import check_visitblock_warning, check_channel_warning
 

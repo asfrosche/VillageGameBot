@@ -10,15 +10,7 @@ from datetime import datetime, timezone, timedelta
 from discord.ext import commands
 from discord.ui import View, Button
 from utils.embeds import warning_embed
-from cogs.data_utils import (
-    LYNCH_SESSION_NAME_KEYS,
-    LYNCH_SESSION_VOTE_KEYS,
-    load_guild_data,
-    save_guild_data,
-    add_player,
-    get_lynch_channel,
-    resolve_lynch_channels,
-)
+from cogs.data_utils import LYNCH_SESSION_VOTE_KEYS, load_guild_data, save_guild_data, add_player, get_lynch_channel, resolve_lynch_channels
 from cogs.status_cog import (
     check_dead_warning,
     StatusWarningConfirmView,
@@ -930,9 +922,23 @@ class Utility(commands.Cog):
         else:
             await ctx.send("Log generated.")
 
+    async def _phase_command_allowed(self, ctx):
+        """Overseer or admin only. Checked before any phase side effects run."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            await ctx.send("Guild data not loaded.")
+            return False
+        os_role = discord.utils.get(ctx.guild.roles, name=guild_data["overseer_role_name"])
+        if os_role in ctx.author.roles or ctx.author.guild_permissions.administrator:
+            return True
+        await ctx.send("You don't have enough permissions to use this command.")
+        return False
+
     @commands.command()
     async def day(self, ctx):
         """Unlock all day-phase channels."""
+        if not await self._phase_command_allowed(ctx):
+            return
         self.bot.dispatch("phase_change", "day", ctx.guild)
         await self._manage_channels(ctx, True)
         guild_data = load_guild_data(ctx.guild.id)
@@ -943,6 +949,8 @@ class Utility(commands.Cog):
     @commands.command()
     async def night(self, ctx):
         """Lock all day-phase channels."""
+        if not await self._phase_command_allowed(ctx):
+            return
         self.bot.dispatch("phase_change", "night", ctx.guild)
         await self._manage_channels(ctx, False)
 
@@ -2175,10 +2183,11 @@ class Utility(commands.Cog):
             await ctx.send(f"❌ {channel.mention} is not a registered house.")
             return
         locked = guild_data.setdefault("locked_houses", {})
-        if channel.id in locked:
+        # Keys are strings: guild data round-trips through JSON, which turns int keys into strings.
+        if str(channel.id) in locked:
             await ctx.send(f"🔒 {channel.mention} is already locked.")
             return
-        locked[channel.id] = {"timestamp": int(datetime.now(timezone.utc).timestamp())}
+        locked[str(channel.id)] = {"timestamp": int(datetime.now(timezone.utc).timestamp())}
         save_guild_data(ctx.guild.id, guild_data)
         guild_data = load_guild_data(ctx.guild.id)
         color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c
@@ -2210,10 +2219,10 @@ class Utility(commands.Cog):
             await ctx.send(f"❌ {channel.mention} is not a registered house.")
             return
         locked = guild_data.get("locked_houses", {})
-        if channel.id not in locked:
+        if str(channel.id) not in locked:
             await ctx.send(f"🔓 {channel.mention} is not locked.")
             return
-        del guild_data["locked_houses"][channel.id]
+        del guild_data["locked_houses"][str(channel.id)]
         save_guild_data(ctx.guild.id, guild_data)
         guild_data = load_guild_data(ctx.guild.id)
         color = guild_data.get("narration_color", 0xdc143c) if guild_data else 0xdc143c

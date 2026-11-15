@@ -1,7 +1,5 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
-import asyncio
 from typing import List, Optional, Union
 import os
 from datetime import datetime, timedelta
@@ -16,6 +14,7 @@ from utils.bot_db import (
     remove_blocked_user,
     set_meeting_cooldown,
 )
+from utils.paths import DB_DIR
 
 class ConfirmView(discord.ui.View):
     def __init__(self, ctx):
@@ -61,7 +60,7 @@ class MeetingCog(commands.Cog):
         # Base path (root folder)
         self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         # Database folder path
-        self.db_path = os.path.join(self.base_path, 'db')
+        self.db_path = DB_DIR
         
         # Create db folder if it doesn't exist
         os.makedirs(self.db_path, exist_ok=True)

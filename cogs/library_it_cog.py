@@ -1,4 +1,5 @@
 import os
+from utils.paths import DB_DIR
 import discord
 from discord.ext import commands
 from typing import Optional, List, Tuple
@@ -6,25 +7,7 @@ import re
 import asyncio
 from difflib import SequenceMatcher
 
-from .library_cog import (
-    LIBRARIAN_IDS,
-    EMBED_COLOR,
-    EMBED_FOOTER_TEXT,
-    EMBED_FOOTER_ICON,
-    TEAMS,
-    LibraryDatabase,
-    GameSelectView,
-    TeamSelectView,
-    RoleDescriptionView,
-    RoleSelectionView,
-    InteractiveSearchView,
-    StatsView,
-    GameHistoryView,
-    LeaderboardView,
-    MissingIDPageView,
-    AssignIDModal,
-    RelationsView,
-)
+from .library_cog import LIBRARIAN_IDS, EMBED_COLOR, EMBED_FOOTER_TEXT, EMBED_FOOTER_ICON, TEAMS, LibraryDatabase, GameSelectView, TeamSelectView, RoleDescriptionView, RoleSelectionView, InteractiveSearchView, StatsView, MissingIDPageView, RelationsView
 
 
 class ItalianLibraryDatabase(LibraryDatabase):
@@ -36,7 +19,7 @@ class ItalianLibraryDatabase(LibraryDatabase):
     All DB logic is inherited from the refactored LibraryDatabase.
     """
 
-    def __init__(self, db_path: str = "db/roles_library_it.db"):
+    def __init__(self, db_path: str = os.path.join(DB_DIR, "roles_library_it.db")):
         super().__init__(db_path=db_path)
 
     def get_player_stats(self, player_id: int) -> dict:

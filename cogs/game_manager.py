@@ -4,11 +4,13 @@ from discord.ext import commands
 from discord.ui import View, Button, Select
 from discord.utils import get
 import sqlite3
+import os
+from utils.paths import DB_DIR
 
 # In‑memory store for active games
 games = {}
 
-games_db_path = 'db/games.db'
+games_db_path = os.path.join(DB_DIR, "games.db")
 
 def init_games_db():
     conn = sqlite3.connect(games_db_path, timeout=30.0)
@@ -275,6 +277,11 @@ class GameManager(commands.Cog):
     @commands.command(aliases=['sg'])
     async def startgame(self, ctx, max_slots: int, host: discord.Member, *, args):
         """Start a new game lobby with specified slots and host."""
+        # Lobbies can assign roles from user-supplied text, so starting one is admin-only.
+        if ctx.guild is None:
+            return await ctx.send("Lobbies can only be started in a server.")
+        if not ctx.author.guild_permissions.administrator:
+            return await ctx.send("You don't have enough permissions to use this command.")
         if not 2 <= max_slots <= 50:
             return await ctx.send("Slots must be between 2-50")
         args_list = args.split()

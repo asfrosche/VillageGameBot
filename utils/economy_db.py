@@ -13,7 +13,7 @@ import os
 import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_DIR = os.path.join(BASE_DIR, "db")
+DB_DIR = os.path.join(BASE_DIR, "runtime", "db")
 DB_PATH = os.path.join(DB_DIR, "economy.db")
 
 # Versioned marker used to record a successful bot.db -> economy.db migration.

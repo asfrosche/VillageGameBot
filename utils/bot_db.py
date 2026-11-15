@@ -7,7 +7,7 @@ from typing import Any
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_DIR = os.path.join(BASE_DIR, "db")
+DB_DIR = os.path.join(BASE_DIR, "runtime", "db")
 DB_PATH = os.path.join(DB_DIR, "bot.db")
 
 _DB_READY = False

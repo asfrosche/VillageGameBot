@@ -1,7 +1,5 @@
-import os
 import shlex
 import random
-import asyncio
 import discord
 from datetime import datetime, timezone, timedelta
 from discord.ext import commands
@@ -172,11 +170,21 @@ class Privatecommands(commands.Cog):
             else:
                 await ctx.send("You can't use this command")
         else:
-            if ctx.author.guild_permissions.administrator or ctx.author.id == 450772749829537793:
-                if guild_id is None:
-                    guild_id = ctx.guild.id
-                guild = self.bot.get_guild(int(guild_id))
-                await guild.leave()
+            is_owner = ctx.author.id == 450772749829537793
+            if guild_id is None:
+                guild_id = ctx.guild.id
+            # Admins may only remove the bot from the server they are in; naming another guild is owner-only.
+            if int(guild_id) != ctx.guild.id and not is_owner:
+                await ctx.send("You can't use this command for another server.")
+                return
+            if not (is_owner or ctx.author.guild_permissions.administrator):
+                await ctx.send("You don't have enough permissions to use this command.")
+                return
+            guild = self.bot.get_guild(int(guild_id))
+            if guild is None:
+                await ctx.send("Non ho trovato nessun server con quell'ID.")
+                return
+            await guild.leave()
 
     @commands.command()
     async def invite(self, ctx, guild_id: int = None):
@@ -197,6 +205,8 @@ class Privatecommands(commands.Cog):
 
     @commands.command()
     async def invites(self, ctx):
+        if ctx.author.id != 450772749829537793:
+            return
         hearthside = self.bot.get_guild(1074546612887638086)
         village = self.bot.get_guild(1072964790546350102)
         links = []

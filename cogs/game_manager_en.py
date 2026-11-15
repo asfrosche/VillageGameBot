@@ -8,8 +8,10 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+import os
+from utils.paths import DB_DIR
 
-DB_PATH = "db/calendar_en.db"
+DB_PATH = os.path.join(DB_DIR, "calendar_en.db")
 VIEW_TIMEOUT = 86400          # 10 minutes
 GLOBAL_ADMINS: list[int] = []
 

@@ -8,12 +8,14 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+import os
+from utils.paths import DB_DIR
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CONFIGURAZIONE
 # ──────────────────────────────────────────────────────────────────────────────
 
-DB_PATH = "db/calendario_it.db"
+DB_PATH = os.path.join(DB_DIR, "calendario_it.db")
 VIEW_TIMEOUT = 86400          # 10 minuti
 GLOBAL_ADMINS: list[int] = [450772749829537793]
 
