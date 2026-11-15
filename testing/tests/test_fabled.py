@@ -17,8 +17,8 @@ class TestFabledCog:
     def test_fabled_prefix_has_help(self):
         """Verify fabled_prefix command has help text."""
         method = getattr(fabled.FabledCog, 'fabled_prefix')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_fabled_exists(self):
         """Verify fabled command exists on the cog."""
@@ -27,5 +27,5 @@ class TestFabledCog:
     def test_fabled_has_help(self):
         """Verify fabled command has help text."""
         method = getattr(fabled.FabledCog, 'fabled')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

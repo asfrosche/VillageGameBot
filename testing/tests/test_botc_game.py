@@ -51,7 +51,7 @@ class TestPlayerState:
 
 class TestNomination:
     def test_defaults(self):
-        n = Nomination(nominator_id=1, nominee_id=2)
+        n = Nomination(id=1, nominator_id=1, nominee_id=2)
         assert n.nominator_id == 1
         assert n.nominee_id == 2
         assert n.accusation == "No accusation."
@@ -62,6 +62,7 @@ class TestNomination:
 
     def test_with_args(self):
         n = Nomination(
+            id=5,
             nominator_id=1, nominee_id=2,
             accusation="He did it",
             defense="Not me",

@@ -30,6 +30,7 @@ class JinxCog(commands.Cog):
 
     @commands.command(name="jinx", aliases=["botcjinx"])
     async def jinx_prefix(self, ctx: commands.Context, *, name: str):
+        """Show the jinxes for a role by name (prefix command)."""
         role = botc.get_role(name)
         if not role:
             await ctx.send(f"Could not find a role matching `{name}`.")

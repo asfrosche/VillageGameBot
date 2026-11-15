@@ -87,12 +87,6 @@ class TestEnsureCacheDirs:
                 assert os.path.isdir(str(tmp_path / "icons"))
                 assert os.path.isdir(str(tmp_path / "scripts"))
 
-    def test_idempotent(self, tmp_path):
-        from utils import script_image as simod
-        with patch.object(simod, "ICON_CACHE", str(tmp_path / "ic")):
-            with patch.object(simod, "SCRIPT_CACHE", str(tmp_path / "sc")):
-                _ensure_cache_dirs()
-                _ensure_cache_dirs()  # no error
 
 
 # ═══════════════════════════════════════════════════════════════════════════

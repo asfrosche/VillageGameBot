@@ -17,8 +17,8 @@ class TestRoleCog:
     def test_rr_has_help(self):
         """Verify rr command has help text."""
         method = getattr(role.RoleCog, 'rr')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_role_exists(self):
         """Verify role command exists on the cog."""
@@ -27,10 +27,6 @@ class TestRoleCog:
     def test_role_has_help(self):
         """Verify role command has help text."""
         method = getattr(role.RoleCog, 'role')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_roleview_instantiates(self):
-        """Verify RoleView view can be instantiated."""
-        # RoleView — requires cog/bot context to instantiate
-        pass

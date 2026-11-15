@@ -17,8 +17,8 @@ class TestJinxCog:
     def test_jinx_prefix_has_help(self):
         """Verify jinx_prefix command has help text."""
         method = getattr(jinx.JinxCog, 'jinx_prefix')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_jinx_exists(self):
         """Verify jinx command exists on the cog."""
@@ -27,5 +27,5 @@ class TestJinxCog:
     def test_jinx_has_help(self):
         """Verify jinx command has help text."""
         method = getattr(jinx.JinxCog, 'jinx')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'

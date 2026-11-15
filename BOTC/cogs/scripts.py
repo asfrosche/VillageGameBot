@@ -83,6 +83,7 @@ class ScriptsCog(commands.Cog):
 
     @commands.command(name="scripts", aliases=["botcscripts"])
     async def scripts_prefix(self, ctx: commands.Context, edition: str | None = None):
+        """Show the script for an edition: tb, bmr or snv (prefix command)."""
         if edition:
             edition = edition.lower()
             if edition not in EDITION_KEYS:

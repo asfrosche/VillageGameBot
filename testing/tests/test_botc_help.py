@@ -21,7 +21,7 @@ from cogs.help import (
     _load_refs,
     _save_refs,
     _resolve_target,
-    _build_help_embed,
+    PAGES,
     REFS_FILE,
 )
 
@@ -108,30 +108,38 @@ class TestResolveTarget:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestBuildHelpEmbed:
+    """The help is now split across three page builders in PAGES (was one _build_help_embed)."""
+
+    def test_three_pages(self):
+        assert len(PAGES) == 3
+
     def test_returns_embed(self):
-        embed = _build_help_embed()
-        assert isinstance(embed, discord.Embed)
+        for page in PAGES:
+            assert isinstance(page(), discord.Embed)
 
     def test_title(self):
-        embed = _build_help_embed()
-        assert "Blood on the Clocktower" in embed.title
+        for page in PAGES:
+            assert "Blood on the Clocktower" in (page().title or "")
 
     def test_contains_all_command_names(self):
-        embed = _build_help_embed()
-        all_text = (embed.description or "") + " ".join(
-            f.name + f.value for f in embed.fields
-        )
+        all_text = ""
+        for page in PAGES:
+            e = page()
+            all_text += (e.title or "") + (e.description or "") + " " + " ".join(
+                f.name + f.value for f in e.fields
+            )
         for cmd in [".rr", ".jinx", ".fabled", ".scripts", ".nightorder",
-                     ".setref", ".ref", ".bnominate", ".baccuse", ".bdefend",
-                     ".bnomtimeout", ".bclose", ".bnoms", ".bsetseating",
-                     ".bseating", ".bkill", ".brevive", ".bsponsor",
-                     ".bunsponsor", ".bdead"]:
-            assert cmd in all_text, f"Missing {cmd} from help embed"
+                    ".setref", ".ref", ".bnominate", ".baccuse", ".bdefend",
+                    ".bnomtimeout", ".bclose", ".bnoms", ".bsetseating",
+                    ".bseating", ".bkill", ".brevive", ".bsponsor",
+                    ".bunsponsor", ".bdead"]:
+            assert cmd in all_text, f"Missing {cmd} from help pages"
 
-    def test_footer(self):
-        embed = _build_help_embed()
-        assert ".botchelp" in embed.footer.text
+    def test_footer_shows_pagination(self):
+        for i, page in enumerate(PAGES, 1):
+            footer = page().footer.text or ""
+            assert f"Page {i}/{len(PAGES)}" in footer
 
     def test_color_is_teal(self):
-        embed = _build_help_embed()
-        assert embed.color == discord.Color.teal()
+        for page in PAGES:
+            assert page().color == discord.Color.teal()

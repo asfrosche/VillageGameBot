@@ -29,6 +29,7 @@ class FabledCog(commands.Cog):
 
     @commands.command(name="fabled", aliases=["botcfabled"])
     async def fabled_prefix(self, ctx: commands.Context, *, name: str):
+        """Show a Fabled card by name (prefix command)."""
         fabled = botc.get_fabled(name)
         if not fabled:
             await ctx.send(f"Could not find a fabled matching `{name}`.")

@@ -17,8 +17,8 @@ class TestScriptsCog:
     def test_scripts_prefix_has_help(self):
         """Verify scripts_prefix command has help text."""
         method = getattr(scripts.ScriptsCog, 'scripts_prefix')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
     def test_scripts_exists(self):
         """Verify scripts command exists on the cog."""
@@ -27,10 +27,6 @@ class TestScriptsCog:
     def test_scripts_has_help(self):
         """Verify scripts command has help text."""
         method = getattr(scripts.ScriptsCog, 'scripts')
-        doc = getattr(method, 'help', None) or getattr(method, '__doc__', None)
-        assert doc is not None and len(doc.strip()) > 0
+        help_text = getattr(method, 'help', None) or getattr(method, 'description', None)
+        assert help_text and help_text.strip(), 'command has no help text'
 
-    def test_scriptsview_instantiates(self):
-        """Verify ScriptsView view can be instantiated."""
-        # ScriptsView — requires cog/bot context to instantiate
-        pass

@@ -105,6 +105,7 @@ class RoleCog(commands.Cog):
 
     @commands.command(name="rr", aliases=["botcrole"])
     async def rr(self, ctx: commands.Context, *, name: str):
+        """Show a role card by name (prefix command)."""
         role = botc.get_role(name)
         if not role:
             await ctx.send(f"Could not find a role matching `{name}`.")
