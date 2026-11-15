@@ -1,3 +1,4 @@
+import asyncio
 import random
 from utils.discord_safe import add_text_fields, split_text
 import discord
@@ -19,6 +20,7 @@ from utils.embeds import warning_embed
 class Home(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._home_requests = {}  # message_id -> pending player `.home set` request
 
     async def _send_warning(self, ctx, embed, view):
         os_disc = discord.utils.get(ctx.guild.text_channels, name="overseer-discussion")
@@ -111,6 +113,8 @@ class Home(commands.Cog):
         elif type is None or type.lower() == 'stealth':
             # Players' `.home` / `.home stealth` go to the actions log for an Overseer to Confirm or Deny.
             await self._request_home(ctx, is_stealth=type is not None)
+        elif type.lower() == 'set' and user is None and new_channel is None:
+            await self._request_home_set(ctx)
         else:
             await ctx.send("You don't have enough perms to use this command")
 
@@ -138,6 +142,105 @@ class Home(commands.Cog):
         if actions is None:
             return await ctx.send("Actions logging is not loaded.")
         await actions.create_visit_request(ctx, "home", home, "", is_stealth=is_stealth)
+
+    async def _request_home_set(self, ctx):
+        """Players' `.home set`: an owner of the house in this channel must react ✅ before the home changes."""
+        guild_data = load_guild_data(ctx.guild.id)
+        if not guild_data:
+            return await ctx.send("Guild data not loaded.")
+        houses = discord.utils.get(ctx.guild.categories, name=guild_data.get("houses_category_name"))
+        if houses is None or ctx.channel.category != houses:
+            return await ctx.send("Use `.home set` inside the house you want to live in.")
+        player_roles = [discord.utils.get(ctx.guild.roles, name=guild_data.get(k)) for k in (
+            "alive_role_name", "sponsor_role_name", "alt_role_name", "dead_role_name")]
+        if not any(role and role in ctx.author.roles for role in player_roles):
+            return await ctx.send("Only players can use `.home set`.")
+        if not ctx.channel.permissions_for(ctx.author).send_messages:
+            return await ctx.send("You can only use `.home set` in a house you have speaking permission in.")
+        if (guild_data.get("member_homes") or {}).get(str(ctx.author.id)) == ctx.channel.id:
+            return await ctx.send("This is already your home.")
+        owners = self._house_owner_ids(ctx.guild, guild_data, ctx.channel.id)
+        if not owners:
+            return await ctx.send("This house has no owners to approve the move.")
+
+        msg = await ctx.channel.send(
+            f"{ctx.author.mention} wants to make this their home. "
+            "An owner of this house: react ✅ to allow it. (Expires in 10 minutes.)",
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
+        await msg.add_reaction("✅")
+        self._home_requests[msg.id] = {
+            "requester_id": ctx.author.id,
+            "channel_id": ctx.channel.id,
+            "guild_id": ctx.guild.id,
+        }
+        self.bot.loop.create_task(self._expire_home_request(msg, 600))
+
+    @staticmethod
+    def _house_owner_ids(guild, guild_data, channel_id):
+        """Alive players whose home is this house (the same owners `.owner` lists)."""
+        alive_role = discord.utils.get(guild.roles, name=guild_data.get("alive_role_name"))
+        owners = set()
+        for member_id, home_id in (guild_data.get("member_homes") or {}).items():
+            if home_id != channel_id:
+                continue
+            member = guild.get_member(int(member_id))
+            if member and alive_role and alive_role in member.roles:
+                owners.add(member.id)
+        return owners
+
+    async def _expire_home_request(self, msg, seconds):
+        await asyncio.sleep(seconds)
+        if self._home_requests.pop(msg.id, None) is not None:
+            try:
+                await msg.edit(content=f"{msg.content}\n⌛ Expired, no owner approved.")
+            except discord.HTTPException:
+                pass
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload):
+        request = self._home_requests.get(payload.message_id)
+        if request is None or payload.user_id == self.bot.user.id or str(payload.emoji) != "✅":
+            return
+        guild = self.bot.get_guild(request["guild_id"])
+        if guild is None:
+            return
+        guild_data = load_guild_data(guild.id)
+        if not guild_data:
+            return
+        if payload.user_id not in self._house_owner_ids(guild, guild_data, request["channel_id"]):
+            return  # only owners of this house can approve
+        self._home_requests.pop(payload.message_id, None)
+
+        channel = guild.get_channel(request["channel_id"])
+        requester = guild.get_member(request["requester_id"])
+        if channel is None or requester is None:
+            return
+        await self._set_home_for_player(guild, guild_data, requester, channel)
+        try:
+            msg = await channel.fetch_message(payload.message_id)
+            await msg.edit(content=f"{msg.content}\n✅ Approved.")
+        except discord.HTTPException:
+            pass
+
+    async def _set_home_for_player(self, guild, guild_data, user, channel):
+        """Same home change as admin `.home set @player #house`."""
+        alive_role = discord.utils.get(guild.roles, name=guild_data["alive_role_name"])
+        alt_role = discord.utils.get(guild.roles, name=guild_data["alt_role_name"])
+        old_channel_id = guild_data["member_homes"].get(str(user.id))
+        if old_channel_id and old_channel_id != channel.id:
+            old_channel = guild.get_channel(old_channel_id)
+            if old_channel:
+                old_msg = await old_channel.send(f"{user.mention} doesn't live here anymore")
+                await old_msg.pin()
+        guild_data["member_homes"][str(user.id)] = channel.id
+        if alive_role in user.roles or alt_role in user.roles:
+            new_msg = await channel.send(f"{user.mention} now lives here")
+            await new_msg.pin()
+        save_guild_data(guild.id, guild_data)
+        estate_cog = self.bot.get_cog("Estate")
+        if estate_cog:
+            await estate_cog.update_estate_map(guild)
 
     async def home_single(self, ctx, is_stealth=False):
         if ctx.author.guild_permissions.administrator:
