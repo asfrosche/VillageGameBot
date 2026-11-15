@@ -5,13 +5,13 @@ __pycache__/
 venv/
 .local/
 
-analytics_secrets.py
-cogs/analytics_secrets.py
+# Secrets and uploaded cookies (never committed)
+config/analytics_secrets.py
+config/cookies.txt
 .env
 
-# YouTube cookies for yt-dlp (uploaded to the host, never committed)
-cookies.txt
-
+# Runtime databases and generated data
+runtime/
 db/
 data/
 utils/analytics/*.db
