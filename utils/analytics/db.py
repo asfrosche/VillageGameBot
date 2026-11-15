@@ -10,6 +10,10 @@ from typing import Any
 
 logger = logging.getLogger("analytics.db")
 
+# Commands that wait on a timer or on players by design. Their run time is not a
+# performance problem, so they are left out of the slowest-command alerts.
+WAIT_BOUND_COMMANDS = frozenset({"timer", "knock", "renknock"})
+
 from .redact import redact_text
 from .models import (
     CommandEvent,
@@ -543,14 +547,17 @@ class AnalyticsDB:
 
     def get_slowest_commands(self, limit: int = 25) -> list[dict[str, Any]]:
         conn = self._get_conn()
+        excluded = sorted(WAIT_BOUND_COMMANDS)
+        placeholders = ",".join("?" for _ in excluded)
         rows = conn.execute(
-            """SELECT command_name, cog_name, total_execs,
+            f"""SELECT command_name, cog_name, total_execs,
                       total_duration / CAST(total_execs AS REAL) as avg_time
                FROM command_stats
                WHERE total_execs > 0
+                 AND command_name NOT IN ({placeholders})
                ORDER BY avg_time DESC
                LIMIT ?""",
-            (limit,),
+            (*excluded, limit),
         ).fetchall()
         return [
             {

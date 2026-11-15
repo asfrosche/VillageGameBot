@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from ..deps import get_db
+from utils.analytics.db import WAIT_BOUND_COMMANDS
 
 router = APIRouter(tags=["performance"])
 
@@ -20,7 +21,7 @@ async def performance_over_time(days: int = Query(30), db=Depends(get_db)):
 @router.get("/api/performance/summary")
 async def performance_summary(db=Depends(get_db)):
     cmds = db.get_commands(sort="total_execs", order="desc", per_page=1000)
-    items = cmds["items"]
+    items = [i for i in cmds["items"] if i["command_name"] not in WAIT_BOUND_COMMANDS]
     if not items:
         return {"items": []}
     sorted_by_avg = sorted(items, key=lambda x: x["avg_time_ms"], reverse=True)
