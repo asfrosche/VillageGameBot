@@ -355,7 +355,8 @@ async def _choose_interaction_gif(pool, is_valid=None):
 
 
 COMMAND_INDEX = [
-    (".setup <num>", "Setup roles, channels & categories (num houses)", "Setup", ["init", "configure", "server", "channel"]),
+    (".setup <houses> <rcs>", "Setup roles, channels & categories (houses and RoleChats, can differ)", "Setup", ["init", "configure", "server", "channel"]),
+    (".setupguide", "Two-page guide to setting up a game, with example commands", "Setup", ["guide", "tutorial", "steps", "how", "setup"]),
     (".roleset <key> @role", "Assign a role for the bot", "Setup", ["config", "permission"]),
     (".channelset <key> #ch", "Assign a channel (mention, ID or name)", "Setup", ["config", "channel"]),
     (".addch <text>", "Append text to the current channel name (admin)", "Setup", ["channel", "rename", "append", "add", "admin"]),
@@ -411,7 +412,8 @@ COMMAND_INDEX = [
     (".owner", "List house owners", "Home", ["owner", "house", "list"]),
     (".owned", "In a Role Chat: show the house(s) owned by the player(s) there", "Home", ["owned", "owner", "house", "myhouses"]),
     (".whorc [@player]", "Show the RoleChats you can send in, and who is in each (staff can check another player)", "Home", ["whorc", "rolechat", "who", "send"]),
-    (".home initialize", "Assign RC + house to alive players", "Home", ["home", "init", "assign", "admin"]),
+    (".home initialize", "Assign RC to each alive player; structured: each player gets their own house (extra players share from the start)", "Home", ["home", "init", "assign", "admin", "structured"]),
+    (".home initstagger", "Assign RC to each alive player; staggered: players dealt randomly across the existing houses", "Home", ["home", "init", "stagger", "random", "admin"]),
     (".home setup", "Move sponsors to their player's house", "Home", ["home", "sponsor", "admin"]),
     (".home set @player #house", "Set a player's home", "Home", ["home", "set", "admin"]),
     (".home mset", "Auto-set all current locations as home", "Home", ["home", "auto", "mass", "admin"]),
@@ -2950,7 +2952,7 @@ class Other(commands.Cog):
     async def help_setup(self, ctx):
         embeds = discord.Embed(title="🏗️ - Setup commands", description="23 Commands", color=0xff3fb9)
         embeds.add_field(name="Core Setup", value=(
-            "**`.setup <num>`** ─ Setup roles, channels & categories\n"
+            "**`.setup <houses> <rcs>`** ─ Setup roles, channels & categories\n"
             "**`.roleset <key> @role`** ─ Assign a role for the bot\n"
             "**`.channelset <key> #ch`** ─ Assign a channel (mention, ID or name)\n"
             "**`.addch <text>`** ─ Append text to the current channel name (admin)\n"
@@ -3049,7 +3051,8 @@ class Other(commands.Cog):
             "**`.whorc [@player]`** ─ Show the RoleChats you can send in, and who is in each (staff can check another player)\n"
         ), inline=False)
         embedh.add_field(name="Admin Commands", value=(
-            "**`.home initialize`** ─ Assign RC + house to alive players\n"
+            "**`.home initialize`** ─ Assign RC to alive players, houses structured (one each)\n"
+            "**`.home initstagger`** ─ Assign RC to alive players, houses staggered (random)\n"
             "**`.home setup`** ─ Move sponsors to their player's house\n"
             "**`.home set @player #house`** ─ Set a player's home\n"
             "**`.home mset`** ─ Auto-set all current locations as home\n"
