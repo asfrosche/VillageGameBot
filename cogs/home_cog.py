@@ -67,11 +67,16 @@ class Home(commands.Cog):
             elif type.lower() == 'initialize':
                 if user is None:
                     if new_channel is None:
-                        await self.home_initialize(ctx)
+                        await self.home_initialize(ctx, "structured")
                     else:
                         await ctx.send(f'{new_channel} is not a valid argument for home initialize command')
                 else:
                     await ctx.send(f'{user} is not a valid argument for home initialize command')
+            elif type.lower() == 'initstagger':
+                if user is None and new_channel is None:
+                    await self.home_initialize(ctx, "staggered")
+                else:
+                    await ctx.send('`.home initstagger` takes no extra arguments.')
             elif type.lower() == 'setup':
                 if user is None:
                     if new_channel is None:
@@ -355,7 +360,7 @@ class Home(commands.Cog):
         else:
             await ctx.send("You don't have enough perms to use this command")
 
-    async def home_initialize(self, ctx):
+    async def home_initialize(self, ctx, method: str = "structured"):
         if ctx.author.guild_permissions.administrator:
             guild_data = load_guild_data(ctx.guild.id)
             if guild_data:
@@ -371,18 +376,31 @@ class Home(commands.Cog):
                     return
                 alive_role = discord.utils.get(ctx.guild.roles, name=guild_data["alive_role_name"])
                 members = [member for member in guild.members if alive_role in member.roles]
+                prefix = guild_data["house_prefix"]
+                # Only use houses that already exist (run .setup first).
+                houses = sorted(
+                    (c for c in house_category.text_channels
+                     if c.name.startswith(prefix) and c.name[len(prefix):].isdigit()),
+                    key=lambda c: int(c.name[len(prefix):]),
+                )
+                if not houses:
+                    await ctx.send(f"No houses found in the Houses category (expected `{prefix}1`, `{prefix}2`…). Run `.setup <houses> <rcs>` first.")
+                    return
+                if method == "staggered":
+                    # Random: players and houses both shuffled, then dealt round-robin.
+                    random.shuffle(members)
+                    random.shuffle(houses)
+                # Structured keeps the order: player 1 -> first house, and so on.
                 numbers = list(range(1, len(members) + 1))
                 random.shuffle(numbers)
-                status = await ctx.send(f"🧹 Initializing **{len(members)}** homes + RoleChats…")
+                label = "staggered" if method == "staggered" else "structured"
+                status = await ctx.send(f"🧹 Initializing **{len(members)}** players ({label}) across **{len(houses)}** houses + RoleChats…")
                 errors = []
                 for i, member in enumerate(members):
                     role_chat_channel_name = str(numbers[i])
-                    house_channel_name = f'{guild_data["house_prefix"]}{numbers[i]}'
+                    house_channel = houses[i % len(houses)]
                     try:
                         role_chat_channel = await self._rc_channel_for(role_channel_category, alt_category, role_chat_channel_name)
-                        house_channel = discord.utils.get(house_category.channels, name=house_channel_name)
-                        if not house_channel:
-                            house_channel = await house_category.create_text_channel(house_channel_name)
                         await role_chat_channel.set_permissions(member, read_messages=True, send_messages=True)
                         await house_channel.set_permissions(member, read_messages=True, send_messages=True)
                         await self.home_set(ctx, member, house_channel)
