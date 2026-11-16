@@ -164,7 +164,7 @@ python main.py
 ```
 
 1. Add the bot to your server with **Administrator** permission.
-2. The host runs `.setup <num_houses>` to bind roles, channels and categories.
+2. The host runs `.setup <houses> <rcs>` to bind roles, channels and categories (houses and RoleChats can be different numbers).
 3. Use `.help` and `.help {category}` to explore, or `.sh <keyword>` to search commands.
 
 ### Environment variables (`.env`)

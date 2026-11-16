@@ -128,13 +128,95 @@ def _resolve_channel(guild, value):
     return None, suggestions[:10]
 
 
+SETUP_GUIDE_PAGES = [
+    {
+        "title": "🛠️ Setup Guide 1/2 — Server & Roles",
+        "steps": [
+            ("1. Create houses and RoleChats",
+             "`.setup 12 10`\nCreates 12 houses and 10 RCs (admin, asks you to confirm). First number = houses, second = RCs."),
+            ("2. Map your roles (skip if `.setup` made them)",
+             "`.roleset alive @Alive`\n`.roleset sponsor @Sponsor`\nKeys: overseer, alive, sponsor, spectator, dead, alt."),
+            ("3. Give out the roles",
+             "Give **Alive** to every player and **Sponsor** to every sponsor in Discord's member list."),
+            ("4. Assign RCs and houses to players",
+             "Every Alive player gets one RoleChat. Pick a house method:\n"
+             "`.home initialize` **structured**: each player gets their own house (extra players share once houses run out).\n"
+             "`.home initstagger` **staggered**: players are dealt randomly across the houses."),
+        ],
+    },
+    {
+        "title": "🛠️ Setup Guide 2/2 — Sponsors & Settings",
+        "steps": [
+            ("5. Add sponsors to RoleChats",
+             "`.addspons @Sam #rc-3`\nAdds a sponsor straight into a RoleChat."),
+            ("6. Set sponsor homes",
+             "`.home setup`\nMoves every sponsor into their player's house.\nOne sponsor only: `.home set @Sam #house-3`"),
+            ("7. Knock timeout",
+             "`.knockduration 600`\nHow long a knock waits for an answer, in seconds."),
+            ("8. Auto-join when a house is empty",
+             "`.ajifempty true`\nPlayers join an empty house automatically."),
+            ("9. Auto-join when a knock expires",
+             "`.ajknockexpire true`\nIf nobody answers a knock, the knocker joins automatically."),
+        ],
+    },
+]
+
+
+class SetupGuideView(View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=180)
+        self.author_id = author_id
+        self.index = 0
+        self.message = None
+
+    def _embed(self) -> discord.Embed:
+        page = SETUP_GUIDE_PAGES[self.index]
+        embed = discord.Embed(title=page["title"], color=0xff3fb9)
+        for name, value in page["steps"]:
+            embed.add_field(name=name, value=value, inline=False)
+        embed.set_footer(text="Check your current settings anytime with .settings")
+        return embed
+
+    def _sync_buttons(self):
+        self.prev_button.disabled = self.index == 0
+        self.next_button.disabled = self.index == len(SETUP_GUIDE_PAGES) - 1
+
+    @discord.ui.button(label="◀ Back", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: Button):
+        self.index = max(0, self.index - 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: Button):
+        self.index = min(len(SETUP_GUIDE_PAGES) - 1, self.index + 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+
 class Setup(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @commands.command(name="setupguide", aliases=["setuphelp"])
+    async def setupguide(self, ctx):
+        """Show a two-page guide to setting up a game, with example commands."""
+        view = SetupGuideView(ctx.author.id)
+        view._sync_buttons()
+        view.message = await ctx.send(embed=view._embed(), view=view)
+
     # Auto setup
     @commands.command()
-    async def setup(self, ctx, num_channels: int):
+    async def setup(self, ctx, num_houses: int, num_rcs: int):
         """Set up roles, channels and categories for the server (admin only)."""
         if ctx.author.guild_permissions.administrator:
             confirm_view = View(timeout=30)
@@ -152,7 +234,7 @@ class Setup(commands.Cog):
             cancel_button.callback = cancel_cb
             confirm_view.add_item(confirm_button)
             confirm_view.add_item(cancel_button)
-            embed = discord.Embed(title="⚠️ Confirm Server Setup", description="Are you sure you want to create the FULL server setup? This will create 6 roles, 14 categories, and many channels.", color=0xff3fb9)
+            embed = discord.Embed(title="⚠️ Confirm Server Setup", description=f"Are you sure you want to create the FULL server setup? This will create 6 roles, 14 categories, {num_houses} houses and {num_rcs} RoleChats.", color=0xff3fb9)
             msg = await ctx.send(embed=embed, view=confirm_view)
             await confirm_view.wait()
             if not confirmed["value"]:
@@ -303,12 +385,12 @@ class Setup(commands.Cog):
                 await daychat_category.create_text_channel(name=vote_count_name)
                 await publc_category.create_text_channel(name='duplicate-this')
                 await privc_category.create_text_channel(name='duplicate-this')
-                for i in range(1, num_channels + 1):
+                for i in range(1, num_houses + 1):
                     await houses_category.create_text_channel(name=f"{house_prefix}{i}")
-                for i in range(1, num_channels + 1):
+                for i in range(1, num_rcs + 1):
                     await roles_category.create_text_channel(str(i))
                 guild_data["houselist"] = []
-                for i in range(1, num_channels+1):
+                for i in range(1, num_houses + 1):
                     house_name = f'{house_prefix}{i}'
                     guild_data["houselist"].append(house_name)
                 save_guild_data(ctx.guild.id, guild_data)
