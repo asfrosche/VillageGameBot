@@ -1,5 +1,6 @@
+import asyncio
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import sqlite3
 import re
 import random
@@ -234,53 +235,67 @@ class ItemDropView(discord.ui.View):
 class ItemDrop(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._expiry_tasks: dict[int, asyncio.Task] = {}
         init_db()
 
     @commands.Cog.listener()
     async def on_ready(self):
-        active_drops = get_active_drops()
-        for drop in active_drops:
+        # Re-arm one expiry timer per live drop (covers restarts). Runs once per drop.
+        for drop in get_active_drops():
             self.bot.add_view(ItemDropView(drop['message_id']))
-            
-        if not self.check_expirations.is_running():
-            self.check_expirations.start()
+            if drop['expire_at'] and drop['message_id'] not in self._expiry_tasks:
+                self._schedule_expiry(drop['message_id'], datetime.fromisoformat(drop['expire_at']))
 
     def cog_unload(self):
-        if self.check_expirations.is_running():
-            self.check_expirations.cancel()
+        for task in self._expiry_tasks.values():
+            task.cancel()
+        self._expiry_tasks.clear()
 
-    @tasks.loop(minutes=1)
-    async def check_expirations(self):
-        active_drops = get_active_drops()
-        for drop in active_drops:
-            if drop['expire_at']:
-                expire_dt = datetime.fromisoformat(drop['expire_at'])
-                if datetime.now(timezone.utc) > expire_dt:
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute("UPDATE drops SET depleted = 1 WHERE message_id = ?", (drop['message_id'],))
-                    conn.commit()
-                    conn.close()
-                    
-                    guild = self.bot.get_guild(drop['guild_id'])
-                    if guild:
-                        channel = guild.get_channel(drop['channel_id'])
-                        if channel:
-                            try:
-                                message = await channel.fetch_message(drop['message_id'])
-                                claims_data = get_claims(drop['message_id'])
-                                drop['depleted'] = 1  # update local dict for embed generation
-                                embed = generate_drop_embed(drop, claims_data)
-                                view = ItemDropView(drop['message_id'])
-                                view.pickup_button.disabled = True
-                                view.pickup_button.style = discord.ButtonStyle.secondary
-                                await message.edit(embed=embed, view=view)
-                            except discord.NotFound:
-                                pass
+    def _schedule_expiry(self, message_id, expire_dt):
+        old = self._expiry_tasks.pop(message_id, None)
+        if old is not None and not old.done():
+            old.cancel()
+        self._expiry_tasks[message_id] = asyncio.create_task(self._expire_when_due(message_id, expire_dt))
 
-    @check_expirations.before_loop
-    async def before_check_expirations(self):
-        await self.bot.wait_until_ready()
+    async def _expire_when_due(self, message_id, expire_dt):
+        try:
+            delay = (expire_dt - datetime.now(timezone.utc)).total_seconds()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            drop = get_drop(message_id)
+            if drop is None or drop['depleted'] or not drop['expire_at']:
+                return
+            await self._expire_drop(drop)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[item-drop] expiry failed for {message_id}: {e}")
+        finally:
+            if self._expiry_tasks.get(message_id) is asyncio.current_task():
+                del self._expiry_tasks[message_id]
+
+    async def _expire_drop(self, drop):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE drops SET depleted = 1 WHERE message_id = ?", (drop['message_id'],))
+        conn.commit()
+        conn.close()
+
+        guild = self.bot.get_guild(drop['guild_id'])
+        if guild:
+            channel = guild.get_channel(drop['channel_id'])
+            if channel:
+                try:
+                    message = await channel.fetch_message(drop['message_id'])
+                    claims_data = get_claims(drop['message_id'])
+                    drop['depleted'] = 1  # update local dict for embed generation
+                    embed = generate_drop_embed(drop, claims_data)
+                    view = ItemDropView(drop['message_id'])
+                    view.pickup_button.disabled = True
+                    view.pickup_button.style = discord.ButtonStyle.secondary
+                    await message.edit(embed=embed, view=view)
+                except discord.NotFound:
+                    pass
 
     @commands.command(name='dropitem')
     async def dropitem(self, ctx, channel: discord.TextChannel, log_channel: discord.TextChannel, name: str, description: str, count: int, showpickups: bool, duration_str: str = None):
@@ -333,7 +348,10 @@ class ItemDrop(commands.Cog):
         ))
         conn.commit()
         conn.close()
-        
+
+        if expire_at_iso:
+            self._schedule_expiry(msg.id, datetime.fromisoformat(expire_at_iso))
+
         # Attach view now that we have message_id
         view = ItemDropView(msg.id)
         await msg.edit(view=view)

@@ -1,8 +1,9 @@
+import asyncio
 import re
 import time
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 from cogs.data_utils import load_guild_data, save_guild_data
 from utils.embeds import error_embed, info_embed, success_embed
@@ -21,10 +22,24 @@ class StickyCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._cooldown_lock = {}
-        self.bump_reminder_loop.start()
+        self._bump_timers = {}  # (guild_id, channel_id) -> task that sends that bump's reminder
 
     async def cog_unload(self):
-        self.bump_reminder_loop.cancel()
+        for task in self._bump_timers.values():
+            task.cancel()
+        self._bump_timers.clear()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # Re-arm reminders for bumps still waiting after a restart (runs once per pending bump).
+        for guild in self.bot.guilds:
+            guild_data = load_guild_data(guild.id)
+            config = guild_data.get("bump_reminder") if guild_data else None
+            if not config:
+                continue
+            for channel_key, entry in config.get("bumps", {}).items():
+                if entry and not entry.get("reminded") and entry.get("last_bump_time"):
+                    self._schedule_bump(guild.id, int(channel_key), entry["last_bump_time"])
 
     def _get_bump_config(self, guild_data):
         config = guild_data.get("bump_reminder")
@@ -338,6 +353,7 @@ class StickyCog(commands.Cog):
         config = self._get_bump_config(guild_data)
         config["hours"] = hours
         save_guild_data(ctx.guild.id, guild_data)
+        self._reschedule_guild_bumps(ctx.guild.id, config)
         embed = success_embed(
             title="Bump reminder delay updated",
             description=f"Reminder will be sent {hours}h after each bump.",
@@ -461,49 +477,72 @@ class StickyCog(commands.Cog):
         content = message.content or ""
         if "Bump done" not in description and "Bump done" not in content:
             return
+        now = time.time()
         config["bumps"][str(message.channel.id)] = {
-            "last_bump_time": time.time(),
+            "last_bump_time": now,
             "reminded": False,
         }
         save_guild_data(message.guild.id, guild_data)
+        self._schedule_bump(message.guild.id, message.channel.id, now)
 
-    @tasks.loop(minutes=1)
-    async def bump_reminder_loop(self):
-        for guild in self.bot.guilds:
-            guild_data = load_guild_data(guild.id)
-            if not guild_data:
-                continue
-            config = guild_data.get("bump_reminder")
-            if not config or not config.get("channel_ids"):
-                continue
-            hours = config.get("hours", DEFAULT_BUMP_HOURS)
-            bumps = config.get("bumps", {})
-            dirty = False
-            for channel_id in list(config["channel_ids"]):
-                entry = bumps.get(str(channel_id))
-                if not entry or entry.get("reminded"):
-                    continue
-                last_bump = entry.get("last_bump_time")
-                if not last_bump or time.time() - last_bump < hours * 3600:
+    # ------------------------------------------------------------------
+    # Bump reminders: one timer per bump, sleeping until its reminder is due.
+    # No periodic polling. A timer re-checks its bump when it wakes, so
+    # removed/off/already-reminded bumps stop quietly, and a changed delay
+    # just makes it sleep the rest of the way.
+    # ------------------------------------------------------------------
+
+    def _schedule_bump(self, guild_id, channel_id, last_bump):
+        key = (guild_id, channel_id)
+        old = self._bump_timers.pop(key, None)
+        if old is not None and not old.done():
+            old.cancel()
+        self._bump_timers[key] = asyncio.create_task(self._bump_timer(guild_id, channel_id, last_bump))
+
+    def _reschedule_guild_bumps(self, guild_id, config):
+        for channel_key, entry in config.get("bumps", {}).items():
+            if entry and not entry.get("reminded") and entry.get("last_bump_time"):
+                self._schedule_bump(guild_id, int(channel_key), entry["last_bump_time"])
+
+    async def _bump_timer(self, guild_id, channel_id, last_bump):
+        key = (guild_id, channel_id)
+        try:
+            while True:
+                guild_data = load_guild_data(guild_id)
+                config = guild_data.get("bump_reminder") if guild_data else None
+                entry = config.get("bumps", {}).get(str(channel_id)) if config else None
+                if (
+                    not entry
+                    or entry.get("reminded")
+                    or entry.get("last_bump_time") != last_bump
+                    or channel_id not in config.get("channel_ids", [])
+                ):
+                    return
+                hours = config.get("hours", DEFAULT_BUMP_HOURS)
+                remaining = last_bump + hours * 3600 - time.time()
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
                     continue
                 channel = self.bot.get_channel(channel_id)
                 if channel is None:
-                    continue
+                    return
                 try:
                     await channel.send(
                         f"🔔 Time to bump! Run `/bump` to keep the server on DISBOARD "
                         f"(last bump: <t:{int(last_bump)}:R>)."
                     )
                 except discord.HTTPException:
-                    continue
+                    return
                 entry["reminded"] = True
-                dirty = True
-            if dirty:
-                save_guild_data(guild.id, guild_data)
-
-    @bump_reminder_loop.before_loop
-    async def before_bump_reminder_loop(self):
-        await self.bot.wait_until_ready()
+                save_guild_data(guild_id, guild_data)
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[sticky-bump] reminder failed for channel {channel_id}: {e}")
+        finally:
+            if self._bump_timers.get(key) is asyncio.current_task():
+                del self._bump_timers[key]
 
 
 async def setup(bot):

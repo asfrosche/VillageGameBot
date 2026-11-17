@@ -3,8 +3,9 @@ import time
 import asyncio
 import discord
 import datetime
-from datetime import datetime
-from discord.ext import commands
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from discord.ext import commands, tasks
 from utils.discord_safe import EDIT_LIMIT_CODE, with_retries
 from cogs.data_utils import (
     LYNCH_SESSION_COUNT,
@@ -150,9 +151,189 @@ class ExecutionView(discord.ui.View):
                 pass
 
 
+# Lynch End: closes lynch + leader vote channels at the time set with
+# `.settime lynchend`. Reliability design:
+#   - the scheduler sleeps until the due time (no polling) and re-reads guild data
+#     only on start, on .settime, and when a due time arrives;
+#   - a supervisor restarts the scheduler if it ever crashes;
+#   - a watchdog (every 10 min, no database reads) restarts it if it is dead;
+#   - the "already closed today" date is stored in guild data, so restarts can't
+#     close twice;
+#   - a due time missed by less than LYNCH_END_GRACE is still applied on startup.
+LYNCH_CLOSED_MESSAGE = "🔒 **Lynch End** has passed. Voting is now closed in this channel."
+VOTER_ROLE_NAME_KEYS = ("alive_role_name", "dead_role_name", "overseer_role_name")
+LYNCH_END_GRACE = timedelta(minutes=10)
+# Sleep until this many seconds before the due time, then check closely (every FINE_POLL seconds).
+LYNCH_END_PRECISE_WINDOW = 5
+LYNCH_END_FINE_POLL = 0.02
+LYNCH_END_WATCHDOG_MINUTES = 60
+LYNCH_END_CHANNEL_ATTEMPTS = 3
+LYNCH_CLOSED_DATE_KEY = "lynch_closed_date"
+
+
+def _parse_lynch_time(raw: str):
+    """Parse a stored value like '23:30|Europe/Rome' -> (hour, minute, tz_name_or_None)."""
+    time_part, _, tz_name = raw.partition("|")
+    h, m = (int(x) for x in time_part.split(":"))
+    return h, m, tz_name or None
+
+
+def _next_lynch_fire(raw: str, now_utc: datetime) -> datetime:
+    """Next occurrence of the stored lynch end time (today if still ahead or within grace, else tomorrow)."""
+    h, m, tz_name = _parse_lynch_time(raw)
+    tz = ZoneInfo(tz_name) if tz_name else timezone.utc
+    local_now = now_utc.astimezone(tz)
+    target = local_now.replace(hour=h, minute=m, second=0, microsecond=0)
+    if target < local_now - LYNCH_END_GRACE:
+        target += timedelta(days=1)
+    return target
+
+
 class Voting(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._lynch_wake = asyncio.Event()
+        self._lynch_task = None
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        self._ensure_lynch_task()
+        if not self._lynch_watchdog.is_running():
+            self._lynch_watchdog.start()
+
+    def cog_unload(self):
+        self._lynch_watchdog.cancel()
+        if self._lynch_task is not None:
+            self._lynch_task.cancel()
+
+    def refresh_lynch_schedule(self):
+        """Called by .settime after saving a time, so the scheduler re-reads it now."""
+        self._lynch_wake.set()
+
+    def _ensure_lynch_task(self):
+        if self._lynch_task is None or self._lynch_task.done():
+            self._lynch_task = asyncio.create_task(self._lynch_supervisor())
+
+    @tasks.loop(minutes=LYNCH_END_WATCHDOG_MINUTES)
+    async def _lynch_watchdog(self):
+        if self._lynch_task is None or self._lynch_task.done():
+            print("[lynch-end] watchdog: scheduler was not running, restarting it")
+            self._ensure_lynch_task()
+
+    async def _lynch_supervisor(self):
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            try:
+                await self._lynch_end_run()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                import traceback
+                print("[lynch-end] scheduler crashed, restarting in 5s:")
+                traceback.print_exc()
+                await asyncio.sleep(5)
+
+    async def _lynch_end_run(self):
+        while not self.bot.is_closed():
+            self._lynch_wake.clear()
+            now = datetime.now(timezone.utc)
+            # guild_id -> (fire_at_utc, local_day, guild) for every guild with a lynch end time
+            schedule = {}
+            for guild in self.bot.guilds:
+                try:
+                    guild_data = load_guild_data(guild.id)
+                    raw = guild_data.get("lynch_end_time") if guild_data else None
+                    if not raw:
+                        continue
+                    target = _next_lynch_fire(raw, now)
+                    day = target.date().isoformat()
+                    if guild_data.get(LYNCH_CLOSED_DATE_KEY) == day:
+                        target += timedelta(days=1)
+                    schedule[guild.id] = (target.astimezone(timezone.utc), day, guild)
+                except Exception:
+                    import traceback
+                    print(f"[lynch-end] schedule failed for guild {guild.id}:")
+                    traceback.print_exc()
+            if not schedule:
+                await self._lynch_wake.wait()  # nothing scheduled: wait for a .settime
+                continue
+
+            next_fire = min(entry[0] for entry in schedule.values())
+            # Sleep until 5s before the due time (no polling the rest of the time)...
+            remaining = (next_fire - datetime.now(timezone.utc)).total_seconds()
+            if remaining > LYNCH_END_PRECISE_WINDOW:
+                try:
+                    await asyncio.wait_for(self._lynch_wake.wait(), timeout=remaining - LYNCH_END_PRECISE_WINDOW)
+                    continue  # .settime changed a time: rescan
+                except asyncio.TimeoutError:
+                    pass
+            # ...then check closely through the final seconds, so it fires at :00.
+            while datetime.now(timezone.utc) < next_fire and not self._lynch_wake.is_set():
+                await asyncio.sleep(LYNCH_END_FINE_POLL)
+            if self._lynch_wake.is_set():
+                continue
+
+            now = datetime.now(timezone.utc)
+            # Close all due guilds at once so one server's API calls don't delay another's.
+            due = [
+                self._fire_lynch_end(guild_id, day, guild)
+                for guild_id, (fire_at, day, guild) in schedule.items()
+                if fire_at <= now
+            ]
+            if due:
+                await asyncio.gather(*due)
+
+    async def _fire_lynch_end(self, guild_id, day, guild):
+        try:
+            # Reload right before firing, so a concurrent .settime is never overwritten.
+            guild_data = load_guild_data(guild_id)
+            if not guild_data or not guild_data.get("lynch_end_time"):
+                return
+            if guild_data.get(LYNCH_CLOSED_DATE_KEY) == day:
+                return
+            guild_data[LYNCH_CLOSED_DATE_KEY] = day
+            save_guild_data(guild_id, guild_data)  # saved first: a restart can't close twice
+            await self._close_lynch_voting(guild, guild_data)
+        except Exception:
+            import traceback
+            print(f"[lynch-end] close failed for guild {guild_id}:")
+            traceback.print_exc()
+
+    async def _close_lynch_voting(self, guild, guild_data):
+        """Deny sending for the voting roles in every lynch and leader channel, and post a notice."""
+        channels = [
+            *resolve_lynch_channels(guild, guild_data),
+            get_lynch_channel(guild, guild_data, "leader_channel_name"),
+            get_lynch_channel(guild, guild_data, "leader_channel_name2"),
+        ]
+        voter_roles = [
+            role
+            for role in (
+                discord.utils.get(guild.roles, name=guild_data.get(key))
+                for key in VOTER_ROLE_NAME_KEYS
+            )
+            if role is not None
+        ]
+        unique = {c.id: c for c in channels if c is not None}.values()
+        await asyncio.gather(*(self._close_one_channel(guild, c, voter_roles) for c in unique))
+
+    async def _close_one_channel(self, guild, channel, voter_roles):
+        """Retries on Discord errors. Re-applying the permissions is harmless, so a retry is safe."""
+        last_error = None
+        for attempt in range(LYNCH_END_CHANNEL_ATTEMPTS):
+            try:
+                await asyncio.gather(*(
+                    channel.set_permissions(role, send_messages=False, reason="Lynch End reached")
+                    for role in voter_roles
+                ))
+                await channel.send(LYNCH_CLOSED_MESSAGE)
+                return
+            except discord.HTTPException as e:
+                last_error = e
+                await asyncio.sleep(2 * (attempt + 1))
+        print(f"[lynch-end] could not close #{channel.name} in {guild.name} after "
+              f"{LYNCH_END_CHANNEL_ATTEMPTS} attempts: {last_error}")
 
     @commands.command()
     async def vote(self, ctx, user: discord.Member, channel: discord.TextChannel = None):

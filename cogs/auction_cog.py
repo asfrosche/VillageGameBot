@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import ui
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 from cogs.data_utils import load_guild_data, save_guild_data
 from cogs.economy_cog import _find_player_rolechat
@@ -246,11 +247,13 @@ class AuctionCog(commands.Cog):
         self.bot = bot
         self.auctions: dict[int, Auction] = {}
         self.board_views: dict[int, AuctionBoardView] = {}
+        self._end_timers: dict[int, asyncio.Task] = {}
         init_auction_db()
 
     def cog_unload(self) -> None:
-        if self.check_expirations.is_running():
-            self.check_expirations.cancel()
+        for task in self._end_timers.values():
+            task.cancel()
+        self._end_timers.clear()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -501,6 +504,7 @@ class AuctionCog(commands.Cog):
 
         self.auctions[ctx.guild.id] = auction
         self._persist(auction)
+        self._schedule_auction_end(ctx.guild.id)
         await self._refresh_board(auction)
 
         shop_note = f" (matches shop item **{shop_item['name']}** — winner auto-receives it)" if shop_item else " (named item — an Overseer hands it over)"
@@ -791,26 +795,44 @@ class AuctionCog(commands.Cog):
                 if guild:
                     await self._resolve_auction(auction, guild)
 
-        if not self.check_expirations.is_running():
-            self.check_expirations.start()
+        for guild_id in list(self.auctions):
+            self._schedule_auction_end(guild_id)
 
-    @tasks.loop(seconds=15)
-    async def check_expirations(self):
-        now = datetime.now(timezone.utc)
-        for guild_id, auction in list(self.auctions.items()):
-            if auction.status != "open":
-                continue
-            if auction.ends_at <= now:
+    # ------------------------------------------------------------------
+    # Expiry: one timer per open auction, sleeping until its end time.
+    # No periodic polling. An extension just makes the timer wake, see the
+    # new end time, and sleep the rest of the way.
+    # ------------------------------------------------------------------
+
+    def _schedule_auction_end(self, guild_id: int) -> None:
+        old = self._end_timers.pop(guild_id, None)
+        if old is not None and not old.done():
+            old.cancel()
+        auction = self.auctions.get(guild_id)
+        if auction is None or auction.status != "open":
+            return
+        self._end_timers[guild_id] = asyncio.create_task(self._auction_end_timer(guild_id))
+
+    async def _auction_end_timer(self, guild_id: int) -> None:
+        try:
+            while True:
+                auction = self.auctions.get(guild_id)
+                if auction is None or auction.status != "open":
+                    return
+                delay = (auction.ends_at - datetime.now(timezone.utc)).total_seconds()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                    continue
                 guild = self.bot.get_guild(guild_id)
                 if guild:
                     try:
                         await self._resolve_auction(auction, guild)
                     except Exception:
                         pass
-
-    @check_expirations.before_loop
-    async def before_check_expirations(self):
-        await self.bot.wait_until_ready()
+                return
+        finally:
+            if self._end_timers.get(guild_id) is asyncio.current_task():
+                del self._end_timers[guild_id]
 
 
 async def setup(bot):

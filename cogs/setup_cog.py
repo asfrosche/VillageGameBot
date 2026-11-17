@@ -24,6 +24,13 @@ def _utc_offset_str(tz_name: str) -> str:
     except Exception:
         return ""
 
+def _refresh_voting_schedule(bot):
+    """Tell the voting cog's lynch-end loop that a time changed, so it re-reads it now."""
+    voting = bot.get_cog("Voting")
+    if voting is not None:
+        voting.refresh_lynch_schedule()
+
+
 def _parse_time_value(val: str):
     """Parse a stored time value like '14:30' or '14:30|America/New_York'.
     Returns (hour, minute, tz_name_or_None)."""
@@ -871,6 +878,7 @@ class Setup(commands.Cog):
                 return
             guild_data[key] = f"{h:02d}:{m:02d}|{tz_name}"
             save_guild_data(ctx.guild.id, guild_data)
+            _refresh_voting_schedule(ctx.bot)
             tz_obj = ZoneInfo(tz_name)
             now_local = datetime.now(tz_obj)
             target = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -1179,6 +1187,7 @@ class TimesButtonView(View):
             h += 24
         self.guild_data[key] = f"{h:02d}:{m:02d}|{tz_name}"
         save_guild_data(interaction.guild.id, self.guild_data)
+        _refresh_voting_schedule(interaction.client)
 
         tz_obj = ZoneInfo(tz_name) if tz_name else timezone.utc
         now_local = datetime.now(tz_obj)
